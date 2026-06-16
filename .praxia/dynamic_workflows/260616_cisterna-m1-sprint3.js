@@ -362,7 +362,7 @@ ${EMITTER_CTX}
 
 ## File to create: tests/test_perf.py
 
-```python
+\`\`\`python
 """Performance benchmarks: AC-PERF-1a, AC-PERF-1b, AC-PERF-1c (spec §8)."""
 import asyncio
 import statistics
@@ -475,7 +475,7 @@ class TestAcPerf1c:
         )
 
         pipeline.shutdown()
-```
+\`\`\`
 
 ## Success criteria
 uv run pytest tests/test_perf.py green. Full uv run pytest green. uv run ruff check . clean.`,
