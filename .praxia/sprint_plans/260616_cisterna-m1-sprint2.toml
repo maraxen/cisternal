@@ -1,0 +1,349 @@
+[sprint]
+sprint_id = "260616_cisterna-m1-sprint2"
+sprint_num = 2
+name = "Cisterna M1 — Sprint 2: MCP / CLI / SELF"
+description = "Three independent tracks unlocked by Sprint 1 foundation. M1-MCP: adapter layer (AdapterBase + BathosAdapter + ContemplexAdapter + CisternaMiddleware + traced_tool + capability probe). M1-CLI: CliAdapter + Typer timing decorator. M1-SELF: EC-3 warn-on-dead-pipeline policy. Strictly sequential (A -> B -> C) to keep merges clean."
+context = '''
+Project: cisterna (Python 3.13 lib, uv/pytest/ruff). Spec is authoritative:
+.praxia/docs/specs/260616_cisterna-m1-telemetry-spec.md (v2, post-adversarial-review).
+
+Foundation complete (Sprint 1): context.py, record.py, pipeline.py, exporter.py, span.py,
+self_obs.py, __init__.py. 21 tests green. Adapter skeletons (empty __init__.py) exist in
+src/cisterna/adapters/ and src/cisterna/probe/. Do NOT touch src/cisterna/telemetry/*.
+
+Stack rules: uv run python (never bare python); pytest; ruff. Edit only existing files or
+create new modules in the adapters/ and probe/ dirs. Never touch telemetry/ files.
+'''
+max_fix_retries = 1
+
+# ============================================================
+# TRACK A — M1-MCP
+# ============================================================
+[[tracks]]
+id = "a"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "M1-MCP"
+phase_name = "M1-MCP — adapter layer + MCP surfaces + name-freeze"
+fixer_prompt = '''
+task_id: 260616_cisterna-m1-sprint2
+
+## Objective
+Implement the adapter layer per spec §3.6-3.8, §4, §5. Foundation (telemetry/) is already
+built — do NOT touch it. Create only new files in src/cisterna/adapters/ and
+src/cisterna/probe/; write tests in tests/test_mcp.py and tests/test_namefreeze.py.
+
+## Files to create
+
+### src/cisterna/adapters/base.py
+AdapterBase ABC + BathosAdapter + ContemplexAdapter. Implement exactly as specced (§3.6, §5.4):
+
+- AdapterBase: ALLOWED_NAMES frozenset (subclass must define); emit_start/emit_end/emit_error
+  check ALLOWED_NAMES before calling emit_event; _swallow_name_error prints to stderr returns True.
+- BathosAdapter.shape_ok: if isinstance(result, dict) -> merge ok/error_code/error/resolution_hint;
+  else return minimal dict with those keys. shape_error -> {"ok": False, "error_code": "INTERNAL",
+  "error": str(exc), "resolution_hint": ""}.
+- ContemplexAdapter.shape_ok: return result unchanged. shape_error: try-import
+  contemplex.errors ErrorCode + err_envelope; on ImportError fall back to
+  {"ok": False, "error_code": "INTERNAL", "error": str(exc)}.
+
+### src/cisterna/adapters/v3_middleware.py
+CisternaMiddleware(Middleware) for FastMCP v3 (§3.7). Verified import path:
+  from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
+MiddlewareContext.message has .name: str and .arguments: dict | None.
+Pattern: set mcp_request_id_var token; emit_start; await call_next; emit_end;
+shape_ok result. On exception: emit_error; shape_error (never re-raise). Reset token in
+finally with `except ValueError: pass` (AC-MCP-4 — different Context may make reset() raise).
+
+### src/cisterna/adapters/v2_decorator.py
+traced_tool(adapter) double-decorator for FastMCP v2 / sync (§3.8). Same token/emit/reset
+pattern; wrap the inner fn; on exception emit_error + return shape_error (never re-raise).
+
+### src/cisterna/probe/capability_probe.py
+_has_v3_middleware() try-import; CONSUMER_SURFACE dict; surface_for(consumer) -> str.
+(§5.2 verbatim).
+
+### tests/test_mcp.py
+Cover AC-MCP-1..4:
+
+AC-MCP-1: Init pipeline. Mock MiddlewareContext with message.name="test_tool" and
+  message.arguments={"a": 1} (use a SimpleNamespace or dataclass). Mock async call_next
+  returning a dict result. await CisternaMiddleware().on_call_tool(ctx, call_next).
+  Check ShadowExporter records contain mcp.call_start (tool="test_tool", arg_keys=["a"])
+  and mcp.call_end.
+
+AC-MCP-2: traced_tool(ContemplexAdapter()) wrapping a sync fn returning "ok"; call with
+  foo=1; assert mcp.call_start (arg_keys=["foo"]) and mcp.call_end in shadow records.
+
+AC-MCP-3: v3 tool raises RuntimeError; assert mcp.tool_error in records AND return value
+  has ok=False (BathosAdapter shaped error); no exception escapes from on_call_tool.
+
+AC-MCP-3b: traced_tool(ContemplexAdapter()) wrapping fn that raises ValueError; assert
+  mcp.tool_error in records AND no exception propagates from wrapper call.
+
+AC-MCP-4: Monkeypatch mcp_request_id_var.reset to raise ValueError. Run on_call_tool (or
+  traced_tool wrapper). Verify the call completes without raising (the except ValueError: pass
+  in finally swallows it).
+
+Use ShadowExporter; init pipeline per test via temp_log_dir + cleanup fixtures (same
+pattern as test_selfcheck.py). Pass heartbeat_interval=0.05 to init().
+
+### tests/test_namefreeze.py
+Cover AC-NAMEFREEZE-1..4:
+
+Write a helper:
+  def _emit_event_names_in_file(path: Path) -> list[str]:
+      """Walk AST; collect first positional string arg to emit_event() calls."""
+      import ast
+      tree = ast.parse(path.read_text())
+      names = []
+      for node in ast.walk(tree):
+          if (isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name)
+                  and node.func.id == "emit_event"
+                  and node.args
+                  and isinstance(node.args[0], ast.Constant)):
+              names.append(node.args[0].value)
+      return names
+
+AC-NAMEFREEZE-1: call helper on src/cisterna/adapters/v3_middleware.py; assert all names
+  in BathosAdapter.ALLOWED_NAMES.
+
+AC-NAMEFREEZE-2: write a validator function that given a list of names and an allowed set,
+  returns the violations; test that ["mcp.call_begin"] produces a violation.
+
+AC-NAMEFREEZE-3: assert all adapter files are under Path("src/cisterna/adapters/");
+  the lint covers cisterna-owned files only.
+
+AC-NAMEFREEZE-4: monkeypatch BathosAdapter._swallow_name_error to raise AssertionError;
+  call emit_start("mcp.call_start", [], "r") on a subclass with empty ALLOWED_NAMES;
+  assert AssertionError propagates.
+
+## Success criteria
+`uv run pytest tests/test_mcp.py tests/test_namefreeze.py` green.
+`uv run pytest` (all tests) green — 21 existing + new tests, no regressions.
+`uv run ruff check .` clean.
+'''
+reviewer_prompt = '''
+task_id: 260616_cisterna-m1-sprint2
+
+## Checks (spec §3.6-3.8, §4, §5, AC-MCP-1..4, AC-NAMEFREEZE-1..4)
+
+1. base.py: ALLOWED_NAMES check before emit_event; _swallow_name_error present.
+2. BathosAdapter.shape_ok merges ok/error_code/error/resolution_hint into dict results.
+3. ContemplexAdapter.shape_error has try-import fallback on ImportError.
+4. v3_middleware.py: mcp_request_id_var token reset in finally with except ValueError: pass.
+5. v2_decorator.py: same token/finally pattern; never re-raises.
+6. probe: _has_v3_middleware() and CONSUMER_SURFACE dict present.
+7. AC-MCP-1..4 tested with real assertions (not just smoke calls).
+8. AC-NAMEFREEZE-1..4 covered in tests/test_namefreeze.py.
+9. `uv run pytest` green; `uv run ruff check .` clean.
+
+## Pass criterion
+AC-MCP-1..4 and AC-NAMEFREEZE-1..4 pass; full suite green; ruff clean.
+'''
+return_key = "M1-MCP"
+
+# ============================================================
+# TRACK B — M1-CLI
+# ============================================================
+[[tracks]]
+id = "b"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "M1-CLI"
+phase_name = "M1-CLI — Typer/Cyclopts CLI timing adapter"
+fixer_prompt = '''
+task_id: 260616_cisterna-m1-sprint2
+
+## Objective
+Implement the CLI timing adapter per spec §4.2, gate AC-CLI-1. Foundation and adapter
+base are already built. Only create new files.
+
+## Files to create
+
+### src/cisterna/adapters/cli.py
+CliAdapter + timed_command decorator:
+
+```python
+import functools, time
+from cisterna.adapters.base import AdapterBase
+from cisterna import emit_event
+
+class CliAdapter(AdapterBase):
+    ALLOWED_NAMES = frozenset({"cli.cmd_start", "cli.cmd_end"})
+    def shape_ok(self, tool_name, result): return None
+    def shape_error(self, tool_name, exc, **fields): return None
+
+def timed_command(cmd_name: str | None = None):
+    def decorator(fn):
+        name = cmd_name or fn.__name__
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            emit_event("cli.cmd_start", cmd=name)
+            t0 = time.monotonic_ns()
+            try:
+                result = fn(*args, **kwargs)
+                emit_event("cli.cmd_end", cmd=name,
+                           duration_ms=(time.monotonic_ns() - t0) / 1e6, ok=True)
+                return result
+            except Exception as exc:
+                emit_event("cli.cmd_end", cmd=name,
+                           duration_ms=(time.monotonic_ns() - t0) / 1e6,
+                           ok=False, exc_type=type(exc).__name__)
+                raise
+        return wrapper
+    return decorator
+```
+
+Note: timed_command RE-RAISES on exception (CLI commands own their exit code; unlike MCP
+adapters, no shielding). CliAdapter.shape_ok/shape_error are no-ops (the decorator is the
+actual entry point).
+
+### tests/test_cli.py
+Cover AC-CLI-1 and edge cases:
+
+AC-CLI-1: Init pipeline with ShadowExporter + heartbeat_interval=0.05. Define a function
+  decorated with @timed_command(). Call it. Assert cli.cmd_start and cli.cmd_end are in
+  shadow.records; verify cmd field matches function name.
+
+Also test:
+- timed_command("custom_name"): cli.cmd_start has cmd="custom_name".
+- Exception case: fn raises RuntimeError; cli.cmd_end with ok=False still emitted;
+  RuntimeError re-raised from wrapper.
+
+Use temp_log_dir and cleanup fixtures from test_selfcheck.py pattern.
+
+## Success criteria
+`uv run pytest tests/test_cli.py` green. Full `uv run pytest` green. `uv run ruff check .` clean.
+'''
+reviewer_prompt = '''
+task_id: 260616_cisterna-m1-sprint2
+
+## Checks (§4.2, AC-CLI-1)
+
+1. CliAdapter.ALLOWED_NAMES = frozenset({"cli.cmd_start", "cli.cmd_end"}).
+2. timed_command emits cli.cmd_start before fn() and cli.cmd_end after with duration_ms.
+3. On exception: cli.cmd_end ok=False emitted, then re-raise.
+4. Tests cover: clean run, explicit cmd_name, exception case.
+5. `uv run pytest tests/test_cli.py` green; `uv run ruff check .` clean.
+6. Full `uv run pytest` green.
+
+## Pass criterion
+AC-CLI-1 passes; ruff clean; no regressions.
+'''
+return_key = "M1-CLI"
+
+# ============================================================
+# TRACK C — M1-SELF (EC-3 warn policy)
+# ============================================================
+[[tracks]]
+id = "c"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "M1-SELF"
+phase_name = "M1-SELF — EC-3 warn-on-dead-pipeline policy"
+fixer_prompt = '''
+task_id: 260616_cisterna-m1-sprint2
+
+## Objective
+Implement the EC-3 dead-pipeline warn policy per spec §7.3 (warn-and-continue; no
+auto-restart in M1). The liveness probe already exists and passes AC-SELFCHECK-1/2.
+Edit ONLY src/cisterna/telemetry/self_obs.py; add one test to tests/test_selfcheck.py.
+
+## Change — src/cisterna/telemetry/self_obs.py
+
+Add two module-level items:
+  _last_ec3_warn: float = 0.0   # timestamp of last EC-3 warning
+
+Add two functions:
+
+def _check_ec3_warn() -> None:
+    """Emit a stderr warning if pipeline consumer is dead and liveness is stale."""
+    import sys, time
+    from cisterna.telemetry import pipeline as _pipeline_mod
+    p = _pipeline_mod.get_pipeline()
+    if p is None or p.is_alive():
+        return
+    with _heartbeat_lock:
+        last_growth = _last_stat.get("last_growth_ts")
+        interval = _heartbeat_interval
+    if last_growth is None:
+        return
+    if time.time() - last_growth > 2 * interval:
+        print(
+            "[cisterna] WARNING: pipeline consumer dead "
+            f"(staleness={(time.time() - last_growth):.1f}s); "
+            "EC-3: warn-and-continue policy active",
+            file=sys.stderr,
+        )
+
+def _maybe_warn_ec3() -> None:
+    """Throttle EC-3 warning to at most once per 60s."""
+    global _last_ec3_warn
+    import time
+    now = time.time()
+    if now - _last_ec3_warn < 60.0:
+        return
+    _last_ec3_warn = now
+    _check_ec3_warn()
+
+Call `_maybe_warn_ec3()` at the end of the `_probe_liveness` function (the function that
+runs the mtime/size check inside the heartbeat thread). Find the probe function in the
+existing code and append the call there.
+
+Also: expose `_last_ec3_warn` reset in the cleanup block (add
+`self_obs_module._last_ec3_warn = 0.0` to the test cleanup fixture in test_selfcheck.py).
+
+## Test — tests/test_selfcheck.py
+Add one test to the existing file:
+
+def test_ec3_warn_emits_stderr(temp_log_dir, capsys):
+    """EC-3: when pipeline listener is dead and liveness is stale, a warning appears on stderr."""
+    from cisterna.telemetry import self_obs as self_obs_module, pipeline as pipeline_module
+
+    init(log_dir=temp_log_dir, heartbeat_interval=0.05)
+    emit_event("initial.event")
+    time.sleep(0.15)  # let file grow so last_growth_ts is set
+
+    # Kill the listener thread
+    pipeline = pipeline_module._global_pipeline
+    if pipeline and pipeline._listener:
+        pipeline._listener.stop()
+        pipeline._listener.join(timeout=1.0)
+
+    time.sleep(0.15)  # let liveness go stale (> 2x interval)
+
+    # Reset throttle and force check
+    self_obs_module._last_ec3_warn = 0.0
+    self_obs_module._check_ec3_warn()
+
+    captured = capsys.readouterr()
+    assert "EC-3" in captured.err or "pipeline consumer dead" in captured.err
+
+## Success criteria
+`uv run pytest` all green. `uv run ruff check .` clean.
+'''
+reviewer_prompt = '''
+task_id: 260616_cisterna-m1-sprint2
+
+## Checks (spec §7.3, EC-3)
+
+1. _check_ec3_warn() present; checks p.is_alive() == False AND liveness stale > 2x interval.
+2. _maybe_warn_ec3() throttles to once per 60s via _last_ec3_warn.
+3. Warning message contains "EC-3" or "pipeline consumer dead".
+4. _probe_liveness (or equivalent heartbeat callback) calls _maybe_warn_ec3() at its end.
+5. test_ec3_warn_emits_stderr passes and asserts stderr content.
+6. Full `uv run pytest` green; `uv run ruff check .` clean.
+
+## Pass criterion
+EC-3 warn policy present and tested; all tests green; ruff clean.
+'''
+return_key = "M1-SELF"
+
+[orchestration]
+sequential = ["a", "b", "c"]
+concurrent = []
