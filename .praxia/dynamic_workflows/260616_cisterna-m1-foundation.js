@@ -47,62 +47,67 @@ const VERDICT_SCHEMA = {
 // Shared context for the writing tracks (from recon, task 260616_cisterna-m1-foundation).
 const EMITTER_CTX = `Project: cisterna (greenfield Python 3.13 lib, uv/pytest/ruff). Spec is authoritative:\n.praxia/docs/specs/260616_cisterna-m1-telemetry-spec.md (v2, post-adversarial-review).\nDecision record: .praxia/docs/specs/260616_design-the-implementation-spec-for-ciste.md.\n\nArchitecture: dual-emit fan-out core (G) as keystone of the layered design. span()/event()\nbuild ONE OTel-superset Record once (record-BUILD wrapped never-raise), fan out to N\nper-exporter-isolated sinks. Default exporter = non-blocking queue->JSONL (put_nowait/\ndrop-on-full, counted drops). OTel-API-only core (trace/span IDs LOCAL-SCOPE in M1; SDK in\nan [otlp] extra). Never crash the caller; <1ms/call; off the hot path.\n\nStack rules: uv run python (never bare python); pytest; ruff. Edit only on existing files.\n`;
 
-// ---- per-track stage helpers ---------------------------------------------
-const fixer = (prompt, label, phaseName, isolation = null, context = null) => {
-  const opts = { agentType: "fixer", label, phase: phaseName };
-  if (isolation) opts.isolation = isolation;
-  if (context) Object.assign(opts, context);
-  return agent(`${prompt}\n\nWhen done, end your message with 'verdict: done' on its own line.`, opts);
-};
-
-const reviewer = (itemId, prompt, label, phaseName, isolation = null, context = null) => {
-  const opts = { agentType: "reviewer", label, phase: phaseName, schema: VERDICT_SCHEMA };
-  if (isolation) opts.isolation = isolation;
-  if (context) Object.assign(opts, context);
-  return agent(prompt, opts);
-};
-
-// Sequential implement->review with bounded NEEDS_WORK repair cycles.
-async function track(itemId, phaseName, fixerPrompt, reviewerPrompt, isolation = null, context = null, reconExecutorKey = 'recon') {
-  log(`[${itemId}] implement`);
-  const _recon = await agent(
-    `task_id: ${TASK_ID}. Run recon for: ${phaseName}. Task: ${fixerPrompt.slice(0, 500)}`,
-    { label: 'recon:' + itemId, phase: phaseName, agentType: reconExecutorKey }
+// ---- per-track stage helpers (worktree + merge-specialist edition) --------
+// Get current main HEAD SHA via a tiny agent.
+async function _mainHead(label, phaseName) {
+  const out = await agent(
+    "Run: git rev-parse HEAD. Return ONLY the 40-character SHA, nothing else.",
+    { label, phase: phaseName }
   );
-  const _fixerPromptWithRecon = 'RECON FINDINGS:\n' + (_recon || '(no findings)') + '\n\n---\n\n' + fixerPrompt;
-  const _preFixerHead = (await agent(
-    'Run: git rev-parse HEAD. Return only the 40-character SHA, nothing else.',
-    { label: 'head:' + itemId, phase: phaseName }
-  )).trim().match(/[0-9a-f]{40}/)?.[0] || 'unknown';
-  await fixer(_fixerPromptWithRecon, `fix:${itemId}`, phaseName, isolation, context);
-  let _effRp = reviewerPrompt;
-  if (isolation === 'worktree') {
-    const _branch = (await agent(
-      'Run: git branch --show-current. Return only the branch name, nothing else.',
-      { label: 'branch:' + itemId, phase: phaseName }
-    )).trim().match(/[a-zA-Z0-9_./-]+/)?.[0] || '';
-    _effRp = reviewerPrompt + '\n\nIMPORTANT -- WORKTREE BRANCH: The fixer committed to branch ' + _branch + '. Before evaluating, run: git log main...' + _branch + ' --oneline && git diff main...' + _branch + '. Do NOT evaluate main HEAD. Review ONLY the commits on branch ' + _branch + '.';
-  }
-  _effRp = _effRp + '\n\nIMPORTANT — NO-COMMIT DETECTION: Before evaluating anything, run: ' +
-    'git log ' + _preFixerHead + '..HEAD --oneline' +
-    '\n' +
-    'If the output is EMPTY (no commits since ' + _preFixerHead + '), return FAIL immediately with issue: ' +
-    '"fixer made no commit — git log shows no new commits since pre-fixer HEAD ' + _preFixerHead + '". ' +
-    'Do NOT evaluate file content if no commit was made.';
-  let verdict = await reviewer(itemId, _effRp, `review:${itemId}`, phaseName, isolation, context);
+  return (out || "").trim().match(/[0-9a-f]{40}/)?.[0] || "unknown";
+}
+
+// Merge-specialist: integrate the fixer's worktree branch into main.
+async function _mergeIntoMain(itemId, phaseName, mergeLabel) {
+  return agent(
+    "task_id: " + TASK_ID + ". A fixer just implemented \"" + itemId + "\" inside an ISOLATED git worktree " +
+    "and committed to an auto-named branch (pattern 'worktree-agent-*'). Integrate it into main:\n" +
+    "1. Find the unmerged branch with commits ahead of main:\n" +
+    "   for b in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep '^worktree-agent-'); do " +
+    "if [ -n \"$(git log main..$b --oneline 2>/dev/null)\" ]; then echo \"$b\"; fi; done\n" +
+    "2. If exactly one branch is listed, merge it into main:\n" +
+    "   git checkout main && git merge --no-ff \"<branch>\" -m \"merge " + itemId + " into main\"\n" +
+    "   Expect disjoint files / no conflicts. If a conflict occurs, resolve preserving BOTH sides, then commit.\n" +
+    "3. Do NOT delete the branch or its worktree (the workflow runtime owns cleanup).\n" +
+    "4. Report the new main HEAD SHA. If NO branch has commits ahead of main, report exactly 'NO_COMMITS'.",
+    { agentType: "merge-specialist", label: mergeLabel, phase: phaseName }
+  );
+}
+
+// Sequential implement(worktree) -> merge -> review(main) with bounded repair cycles.
+async function track(itemId, phaseName, fixerPrompt, reviewerPrompt, _iso, _ctx, _rk) {
+  log("[" + itemId + "] implement (worktree) -> merge -> review");
+  const _pre = await _mainHead("head:" + itemId, phaseName);
+
+  await agent(
+    fixerPrompt + "\n\n## WORKTREE PROTOCOL\nYou are in an ISOLATED git worktree branched from main. " +
+    "Implement the changes and run the stated checks. Then you MUST commit everything to your worktree " +
+    "branch: git add -A && git commit -m \"" + itemId + ": <one-line summary>\". If you do not commit, your " +
+    "work is lost and the item fails. End your message with 'verdict: done'.",
+    { agentType: "fixer", isolation: "worktree", label: "fix:" + itemId, phase: phaseName }
+  );
+
+  await _mergeIntoMain(itemId, phaseName, "merge:" + itemId);
+
+  let _rp = reviewerPrompt + "\n\n## REVIEW TARGET\nThe " + itemId + " changes are now MERGED into main. " +
+    "Review them on main: run git log " + _pre + "..HEAD --oneline then git diff " + _pre + "..HEAD. " +
+    "If git log " + _pre + "..HEAD is EMPTY, the merge failed — return FAIL with issue " +
+    "\"no commits merged since " + _pre + "\".";
+  let verdict = await agent(_rp, { agentType: "reviewer", schema: VERDICT_SCHEMA, label: "review:" + itemId, phase: phaseName });
+
   for (let retry = 0; retry < MAX_FIX_RETRIES && verdict && verdict.verdict === "NEEDS_WORK"; retry++) {
-    log(`[${itemId}] NEEDS_WORK — repair cycle ${retry + 1}/${MAX_FIX_RETRIES}`);
-    const issues = (verdict.issues || [])
-      .map((i) => `- ${i.where}: ${i.problem} -> ${i.fix}`)
-      .join("\n");
-    await fixer(
-      `${fixerPrompt}\n\nA reviewer found issues — fix exactly these, nothing else:\n${issues}`,
-      `fix:${itemId}:repair:${retry}`,
-      phaseName,
-      isolation,
-      context
+    log("[" + itemId + "] NEEDS_WORK — repair " + (retry + 1) + "/" + MAX_FIX_RETRIES);
+    const issues = (verdict.issues || []).map((i) => "- " + i.where + ": " + i.problem + " -> " + i.fix).join("\n");
+    const _pre2 = await _mainHead("head:" + itemId + ":re" + retry, phaseName);
+    await agent(
+      fixerPrompt + "\n\n## REPAIR (worktree)\nThe " + itemId + " work is already merged into main; your worktree " +
+      "is branched from current main and contains it. A reviewer found issues — fix EXACTLY these, nothing else:\n" + issues + "\n\n" +
+      "Then commit: git add -A && git commit -m \"" + itemId + ": address review\". End with 'verdict: done'.",
+      { agentType: "fixer", isolation: "worktree", label: "fix:" + itemId + ":repair" + retry, phase: phaseName }
     );
-    verdict = await reviewer(itemId, _effRp, `review:${itemId}:re:${retry}`, phaseName, isolation, context);
+    await _mergeIntoMain(itemId, phaseName, "merge:" + itemId + ":re" + retry);
+    _rp = reviewerPrompt + "\n\n## RE-REVIEW\nReview the repaired " + itemId + " on main: git diff " + _pre2 + "..HEAD.";
+    verdict = await agent(_rp, { agentType: "reviewer", schema: VERDICT_SCHEMA, label: "review:" + itemId + ":re" + retry, phase: phaseName });
   }
   return verdict;
 }
