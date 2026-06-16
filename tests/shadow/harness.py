@@ -1,0 +1,91 @@
+"""Shadow harness utilities for testing parity between legacy and cisterna telemetry.
+
+Shadow harness (spec §6.1-6.3) provides:
+- capture_legacy: Spy on consumer's stdlib logger without side effects
+- assert_parity: Verify legacy and cisterna streams share >= 1 matching tool name
+"""
+
+import logging
+from contextlib import contextmanager
+from typing import Iterator
+
+from cisterna.telemetry.record import Record
+
+
+@contextmanager
+def capture_legacy(consumer: str) -> Iterator[list[logging.LogRecord]]:
+    """Attach spy logging.Handler to consumer's logger; yield records; detach after.
+
+    Non-invasive: Adds a handler, yields collected records, and removes handler.
+    Logger names verified from source:
+    - bathos -> "bathos"
+    - contemplex -> "contemplex"
+
+    Args:
+        consumer: Logger name (e.g., "bathos", "contemplex")
+
+    Yields:
+        list[logging.LogRecord]: Records captured during the context.
+    """
+    logger = logging.getLogger(consumer)
+    original_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    records: list[logging.LogRecord] = []
+
+    class _Handler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Handler()
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(original_level)
+
+
+def assert_parity(
+    legacy: list[logging.LogRecord],
+    cisterna_records: list[Record],
+    *,
+    duration_tolerance_ms: float = 5.0,
+) -> None:
+    """Assert both streams non-empty and share >= 1 matching tool name (spec §6.3).
+
+    Parity = field-subset equality modulo:
+    - ε-timestamp (5ms tolerance by default)
+    - additive trace columns
+    - ordering by (event, request_id)
+
+    For M1 shadow tests: assert both non-empty and extract tool names to verify overlap.
+
+    Args:
+        legacy: list[logging.LogRecord] from capture_legacy
+        cisterna_records: list[Record] from ShadowExporter
+        duration_tolerance_ms: Tolerance for duration comparison in milliseconds
+    """
+    assert len(legacy) >= 1, "Legacy stream must have >= 1 record"
+    assert len(cisterna_records) >= 1, "Cisterna stream must have >= 1 record"
+
+    # Extract tool names from legacy records
+    # logging.info(msg, extra={...}) puts extra dict keys as ATTRIBUTES on LogRecord
+    legacy_tools: set[str] = set()
+    for lr in legacy:
+        # extra={...} becomes attributes directly on LogRecord
+        tool = getattr(lr, "tool", None)
+        if tool:
+            legacy_tools.add(str(tool))
+
+    # Extract tool names from cisterna records
+    cisterna_tools: set[str] = {
+        r.fields.get("tool", "")
+        for r in cisterna_records
+        if r.fields.get("tool")
+    }
+
+    # Verify overlap
+    overlap = legacy_tools & cisterna_tools
+    assert overlap, (
+        f"No matching tool names: legacy={legacy_tools} vs cisterna={cisterna_tools}"
+    )
