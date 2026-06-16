@@ -1,4 +1,5 @@
 """Record: frozen dataclass for normalized telemetry events."""
+
 from dataclasses import dataclass
 from typing import Any
 

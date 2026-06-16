@@ -7,6 +7,7 @@ consumer (QueueListener) thread.
 This ensures contextvars are captured at the source, before enqueue,
 eliminating races where the consumer thread's context might be different.
 """
+
 from contextvars import ContextVar
 import time
 import sys
@@ -15,24 +16,14 @@ from .record import Record
 
 
 # ContextVar definitions per spec §3.1
-run_uuid_var: ContextVar[str | None] = ContextVar(
-    "cisterna.run_uuid", default=None
-)
+run_uuid_var: ContextVar[str | None] = ContextVar("cisterna.run_uuid", default=None)
 mcp_request_id_var: ContextVar[str | None] = ContextVar(
     "cisterna.mcp_request_id", default=None
 )
-task_id_var: ContextVar[str | None] = ContextVar(
-    "cisterna.task_id", default=None
-)
-request_id_var: ContextVar[str | None] = ContextVar(
-    "cisterna.request_id", default=None
-)
-session_id_var: ContextVar[str | None] = ContextVar(
-    "cisterna.session_id", default=None
-)
-phase_var: ContextVar[str | None] = ContextVar(
-    "cisterna.phase", default=None
-)
+task_id_var: ContextVar[str | None] = ContextVar("cisterna.task_id", default=None)
+request_id_var: ContextVar[str | None] = ContextVar("cisterna.request_id", default=None)
+session_id_var: ContextVar[str | None] = ContextVar("cisterna.session_id", default=None)
+phase_var: ContextVar[str | None] = ContextVar("cisterna.phase", default=None)
 
 
 def _build_record(name: str, ts: float | None = None, **fields) -> Record | None:

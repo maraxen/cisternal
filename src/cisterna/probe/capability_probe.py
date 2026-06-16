@@ -22,6 +22,7 @@ def _has_v3_middleware() -> bool:
     """
     try:
         from fastmcp.server.middleware.middleware import Middleware  # noqa: F401
+
         return True
     except ImportError:
         return False

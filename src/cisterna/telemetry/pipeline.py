@@ -10,6 +10,7 @@ Fork prohibition (C9):
     Use spawn or forkserver; fork is unsupported.
     Per-pid JSONL naming (events.<host>.<pid>.jsonl) requires spawn.
 """
+
 import queue
 import sys
 import threading
@@ -234,6 +235,7 @@ def init_pipeline(
         # Resolve log_dir: explicit > env vars > default
         if log_dir is None:
             import os
+
             log_dir = (
                 os.getenv("CISTERNA_LOG_DIR")
                 or os.getenv("BTH_LOG_DIR")
@@ -262,6 +264,7 @@ def init_pipeline(
         except OSError:
             # Directory unwritable; fall back to tempfile
             import sys
+
             print(
                 f"[cisterna] Warning: cannot write to {log_dir}; falling back to tempdir",
                 file=sys.stderr,
@@ -280,6 +283,7 @@ def init_pipeline(
 
         # Start heartbeat daemon thread (CH-12) for liveness detection
         from .self_obs import _start_heartbeat
+
         _start_heartbeat(interval=heartbeat_interval, jsonl_path=jsonl_path)
 
         return _global_pipeline

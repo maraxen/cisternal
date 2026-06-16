@@ -1,4 +1,5 @@
 """Exporter: ABC and concrete implementations (JsonlExporter, ShadowExporter)."""
+
 from abc import ABC, abstractmethod
 import json
 import logging

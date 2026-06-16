@@ -4,6 +4,7 @@ Generic timing primitives that emit <name>.start and <name>.end events.
 On caller exception: record status=ERROR, exc_type, exc_msg, then RE-RAISE.
 Mirrors bathos.telemetry.span behavior (CH-5).
 """
+
 from contextlib import asynccontextmanager, contextmanager
 import time
 import uuid

@@ -6,6 +6,7 @@ AC-NAMEFREEZE-2: Adding a forbidden name like "mcp.call_begin" makes lint fail.
 AC-NAMEFREEZE-3: Lint covers cisterna's own adapters only (not consumer code).
 AC-NAMEFREEZE-4: Runtime guard via _swallow_name_error raises when monkeypatched.
 """
+
 import ast
 from pathlib import Path
 
@@ -71,9 +72,9 @@ class TestAcNamefreeze1:
         allowed = BathosAdapter.ALLOWED_NAMES
 
         violations = _validate_names(names, allowed)
-        assert (
-            not violations
-        ), f"Event names in v3_middleware.py not in BathosAdapter.ALLOWED_NAMES: {violations}"
+        assert not violations, (
+            f"Event names in v3_middleware.py not in BathosAdapter.ALLOWED_NAMES: {violations}"
+        )
 
     def test_v2_decorator_names_are_allowed(self):
         """All emit_event names in v2_decorator.py must be in ALLOWED_NAMES."""
@@ -84,9 +85,9 @@ class TestAcNamefreeze1:
         allowed = BathosAdapter.ALLOWED_NAMES
 
         violations = _validate_names(names, allowed)
-        assert (
-            not violations
-        ), f"Event names in v2_decorator.py not in BathosAdapter.ALLOWED_NAMES: {violations}"
+        assert not violations, (
+            f"Event names in v2_decorator.py not in BathosAdapter.ALLOWED_NAMES: {violations}"
+        )
 
 
 class TestAcNamefreeze2:

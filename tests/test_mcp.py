@@ -6,6 +6,7 @@ AC-MCP-3: v3 tool raises RuntimeError → mcp.tool_error emitted, error envelope
 AC-MCP-3b: v2 sync tool raises ValueError → mcp.tool_error emitted, no exception escapes.
 AC-MCP-4: Token reset in different Context raises ValueError, wrapper swallows it.
 """
+
 import tempfile
 import time
 from pathlib import Path
@@ -90,7 +91,9 @@ class TestAcMcp1CisternaMiddleware:
         start_records = [r for r in shadow.records if r.name == "mcp.call_start"]
         end_records = [r for r in shadow.records if r.name == "mcp.call_end"]
 
-        assert len(start_records) == 1, f"Expected 1 start record, got {len(start_records)}"
+        assert len(start_records) == 1, (
+            f"Expected 1 start record, got {len(start_records)}"
+        )
         assert len(end_records) == 1, f"Expected 1 end record, got {len(end_records)}"
 
         # Verify start event fields

@@ -9,6 +9,7 @@ and never re-raise exceptions (CH-5).
 in self.ALLOWED_NAMES, printing to stderr and returning True on mismatch.
 Tests monkeypatch _swallow_name_error to raise AssertionError instead.
 """
+
 from abc import ABC, abstractmethod
 import sys
 from typing import Any
@@ -27,9 +28,7 @@ class AdapterBase(ABC):
 
     ALLOWED_NAMES: frozenset[str]
 
-    def emit_start(
-        self, tool_name: str, arg_keys: list[str], request_id: str
-    ) -> None:
+    def emit_start(self, tool_name: str, arg_keys: list[str], request_id: str) -> None:
         """Emit mcp.call_start event.
 
         Args:
@@ -41,9 +40,7 @@ class AdapterBase(ABC):
         assert name in self.ALLOWED_NAMES or self._swallow_name_error(name)
         emit_event(name, tool=tool_name, arg_keys=arg_keys, request_id=request_id)
 
-    def emit_end(
-        self, tool_name: str, request_id: str, duration_ms: float
-    ) -> None:
+    def emit_end(self, tool_name: str, request_id: str, duration_ms: float) -> None:
         """Emit mcp.call_end event.
 
         Args:
@@ -55,9 +52,7 @@ class AdapterBase(ABC):
         assert name in self.ALLOWED_NAMES or self._swallow_name_error(name)
         emit_event(name, tool=tool_name, request_id=request_id, duration_ms=duration_ms)
 
-    def emit_error(
-        self, tool_name: str, request_id: str, exc: BaseException
-    ) -> None:
+    def emit_error(self, tool_name: str, request_id: str, exc: BaseException) -> None:
         """Emit mcp.tool_error event.
 
         Args:

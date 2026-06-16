@@ -1,4 +1,5 @@
 """Tests for cisterna core: AC-CORE acceptance criteria."""
+
 import asyncio
 import json
 import tempfile
@@ -34,7 +35,12 @@ def cleanup_pipeline():
     # Reset heartbeat state
     with self_obs_module._heartbeat_lock:
         self_obs_module._heartbeat_thread = None
-        self_obs_module._last_stat = {"mtime": None, "size": None, "ts": None, "last_growth_ts": None}
+        self_obs_module._last_stat = {
+            "mtime": None,
+            "size": None,
+            "ts": None,
+            "last_growth_ts": None,
+        }
         self_obs_module._jsonl_path = None
 
 
@@ -71,7 +77,9 @@ class TestACCore1:
                 mcp_record = record
                 break
 
-        assert mcp_record is not None, f"mcp.call_start record not found in {[json.loads(line)['name'] for line in lines]}"
+        assert mcp_record is not None, (
+            f"mcp.call_start record not found in {[json.loads(line)['name'] for line in lines]}"
+        )
         assert mcp_record["fields"]["tool"] == "test_tool"
         assert mcp_record["fields"]["request_id"] == "req-1"
 
@@ -89,7 +97,9 @@ class TestACCore2:
 
         # Check ShadowExporter (filter out heartbeats)
         mcp_records = [r for r in shadow.records if r.name == "mcp.call_start"]
-        assert len(mcp_records) >= 1, f"Expected mcp.call_start in {[r.name for r in shadow.records]}"
+        assert len(mcp_records) >= 1, (
+            f"Expected mcp.call_start in {[r.name for r in shadow.records]}"
+        )
         record = mcp_records[0]
         assert record.name == "mcp.call_start"
         assert record.fields["tool"] == "multi_tool"
@@ -126,7 +136,9 @@ class TestACCore3:
 
             # Find the test.event record (filter out heartbeats)
             test_records = [r for r in shadow.records if r.name == "test.event"]
-            assert len(test_records) >= 1, f"Expected test.event in {[r.name for r in shadow.records]}"
+            assert len(test_records) >= 1, (
+                f"Expected test.event in {[r.name for r in shadow.records]}"
+            )
             record = test_records[0]
             assert record.run_uuid == "uuid-x"
         finally:
@@ -163,7 +175,9 @@ class TestACCore4:
 
         # Filter out heartbeat events
         task_records = [r for r in shadow.records if r.name.startswith("task.")]
-        assert len(task_records) == 2, f"Expected 2 task records, got {[r.name for r in shadow.records]}"
+        assert len(task_records) == 2, (
+            f"Expected 2 task records, got {[r.name for r in shadow.records]}"
+        )
         by_name = {r.name: r for r in task_records}
         assert by_name["task.x"].run_uuid == "uuid-x"
         assert by_name["task.y"].run_uuid == "uuid-y"

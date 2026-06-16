@@ -6,6 +6,7 @@ are True when the file grows.
 AC-SELFCHECK-2: With the QueueListener killed, status().pipeline_alive and
 heartbeat_alive go False within 2x the interval.
 """
+
 import tempfile
 import time
 from pathlib import Path
@@ -39,7 +40,12 @@ def cleanup():
     # we want to reset state immediately
     with self_obs_module._heartbeat_lock:
         self_obs_module._heartbeat_thread = None
-        self_obs_module._last_stat = {"mtime": None, "size": None, "ts": None, "last_growth_ts": None}
+        self_obs_module._last_stat = {
+            "mtime": None,
+            "size": None,
+            "ts": None,
+            "last_growth_ts": None,
+        }
         self_obs_module._jsonl_path = None
 
 
@@ -64,8 +70,12 @@ class TestACSelfcheck1:
 
         # Both flags should be True because heartbeat has fired
         # and the file has grown
-        assert st.heartbeat_alive is True, f"heartbeat_alive={st.heartbeat_alive}, expected True"
-        assert st.write_probe_ok is True, f"write_probe_ok={st.write_probe_ok}, expected True"
+        assert st.heartbeat_alive is True, (
+            f"heartbeat_alive={st.heartbeat_alive}, expected True"
+        )
+        assert st.write_probe_ok is True, (
+            f"write_probe_ok={st.write_probe_ok}, expected True"
+        )
 
     def test_write_probe_detects_file_growth(self, temp_log_dir):
         """Verify that write_probe_ok only becomes True when file actually grows."""
@@ -104,7 +114,7 @@ class TestACSelfcheck2:
         # Emit initial event and let it process
         emit_event("initial.event")
         time.sleep(0.2)  # Increased to ensure first probe establishes baseline
-                         # and second probe detects growth before killing listener
+        # and second probe detects growth before killing listener
 
         # Verify pipeline is alive
         st = status()
@@ -126,8 +136,12 @@ class TestACSelfcheck2:
         st = status()
 
         # Both flags should be False now
-        assert st.pipeline_alive is False, f"pipeline_alive={st.pipeline_alive}, expected False after listener killed"
-        assert st.heartbeat_alive is False, f"heartbeat_alive={st.heartbeat_alive}, expected False after listener killed"
+        assert st.pipeline_alive is False, (
+            f"pipeline_alive={st.pipeline_alive}, expected False after listener killed"
+        )
+        assert st.heartbeat_alive is False, (
+            f"heartbeat_alive={st.heartbeat_alive}, expected False after listener killed"
+        )
 
     def test_heartbeat_detection_window(self, temp_log_dir):
         """Verify that heartbeat_alive stays True within 2x interval,
@@ -163,7 +177,9 @@ class TestACSelfcheck2:
         st = status()
 
         # heartbeat_alive should go False since no new file growth
-        assert st.heartbeat_alive is False, f"heartbeat_alive={st.heartbeat_alive}, expected False after 2x interval"
+        assert st.heartbeat_alive is False, (
+            f"heartbeat_alive={st.heartbeat_alive}, expected False after 2x interval"
+        )
 
 
 class TestInitIdempotency:
@@ -205,7 +221,9 @@ class TestHeartbeatThread:
 
         # Check that heartbeat events were emitted
         heartbeat_events = [r for r in shadow.records if r.name == "heartbeat"]
-        assert len(heartbeat_events) > 0, f"Expected heartbeat events, got {len(heartbeat_events)}"
+        assert len(heartbeat_events) > 0, (
+            f"Expected heartbeat events, got {len(heartbeat_events)}"
+        )
 
     def test_heartbeat_survives_exporter_failure(self, temp_log_dir):
         """Verify that a failing exporter doesn't crash the heartbeat thread."""
@@ -223,7 +241,11 @@ class TestHeartbeatThread:
         from cisterna.telemetry.exporter import ShadowExporter
 
         shadow = ShadowExporter()
-        init(log_dir=temp_log_dir, exporters=[FailingExporter(), shadow], heartbeat_interval=0.05)
+        init(
+            log_dir=temp_log_dir,
+            exporters=[FailingExporter(), shadow],
+            heartbeat_interval=0.05,
+        )
 
         # Emit an event
         emit_event("test.event")
@@ -234,4 +256,6 @@ class TestHeartbeatThread:
 
         # Shadow exporter should still have received heartbeats
         heartbeat_events = [r for r in shadow.records if r.name == "heartbeat"]
-        assert len(heartbeat_events) > 0, "Heartbeat thread should survive exporter failure"
+        assert len(heartbeat_events) > 0, (
+            "Heartbeat thread should survive exporter failure"
+        )
