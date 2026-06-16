@@ -17,6 +17,7 @@ from cisterna.adapters.base import (
     BathosAdapter,
     ContemplexAdapter,
 )
+from cisterna.adapters.cli import CliAdapter
 
 
 def _emit_event_names_in_file(path: Path) -> list[str]:
@@ -89,6 +90,19 @@ class TestAcNamefreeze1:
             f"Event names in v2_decorator.py not in BathosAdapter.ALLOWED_NAMES: {violations}"
         )
 
+    def test_cli_adapter_names_are_allowed(self):
+        """All emit_event names in cli.py must be in CliAdapter.ALLOWED_NAMES (spec §4.3)."""
+        cli_path = Path("src/cisterna/adapters/cli.py")
+        assert cli_path.exists(), f"File not found: {cli_path}"
+
+        names = _emit_event_names_in_file(cli_path)
+        allowed = CliAdapter.ALLOWED_NAMES
+
+        violations = _validate_names(names, allowed)
+        assert not violations, (
+            f"Event names in cli.py not in CliAdapter.ALLOWED_NAMES: {violations}"
+        )
+
 
 class TestAcNamefreeze2:
     """AC-NAMEFREEZE-2: Adding a forbidden name fails validation."""
@@ -149,9 +163,9 @@ class TestAcNamefreeze4:
 
         adapter = TestAdapter()
 
-        # By default, _swallow_name_error returns True, so assert passes
+        # By default, _swallow_name_error warns and returns None (warn-and-continue)
         result = adapter._swallow_name_error("illegal.name")
-        assert result is True
+        assert result is None
 
         # Now monkeypatch to raise
         def raising_swallow(name):

@@ -6,7 +6,7 @@ traced_tool) instantiate an adapter, delegate telemetry emission + shaping to it
 and never re-raise exceptions (CH-5).
 
 (CH-9) Runtime name guard: emit_start/end/error check that the emitted name is
-in self.ALLOWED_NAMES, printing to stderr and returning True on mismatch.
+in self.ALLOWED_NAMES; on mismatch, calls _swallow_name_error (stderr warn + continue).
 Tests monkeypatch _swallow_name_error to raise AssertionError instead.
 """
 
@@ -37,7 +37,8 @@ class AdapterBase(ABC):
             request_id: Unique request ID for this invocation.
         """
         name = "mcp.call_start"
-        assert name in self.ALLOWED_NAMES or self._swallow_name_error(name)
+        if name not in self.ALLOWED_NAMES:
+            self._swallow_name_error(name)
         emit_event(name, tool=tool_name, arg_keys=arg_keys, request_id=request_id)
 
     def emit_end(self, tool_name: str, request_id: str, duration_ms: float) -> None:
@@ -49,7 +50,8 @@ class AdapterBase(ABC):
             duration_ms: Duration of execution in milliseconds.
         """
         name = "mcp.call_end"
-        assert name in self.ALLOWED_NAMES or self._swallow_name_error(name)
+        if name not in self.ALLOWED_NAMES:
+            self._swallow_name_error(name)
         emit_event(name, tool=tool_name, request_id=request_id, duration_ms=duration_ms)
 
     def emit_error(self, tool_name: str, request_id: str, exc: BaseException) -> None:
@@ -61,7 +63,8 @@ class AdapterBase(ABC):
             exc: The exception that was raised.
         """
         name = "mcp.tool_error"
-        assert name in self.ALLOWED_NAMES or self._swallow_name_error(name)
+        if name not in self.ALLOWED_NAMES:
+            self._swallow_name_error(name)
         emit_event(
             name,
             tool=tool_name,
@@ -97,19 +100,15 @@ class AdapterBase(ABC):
         """
         pass
 
-    def _swallow_name_error(self, name: str) -> bool:
-        """Handle illegal event name: log to stderr and return True.
+    def _swallow_name_error(self, name: str) -> None:
+        """Handle illegal event name: log to stderr and return (warn-and-continue).
 
         Tests may monkeypatch this to raise AssertionError (AC-NAMEFREEZE-4).
 
         Args:
             name: The illegal event name.
-
-        Returns:
-            True (allowing the assert to pass in production; tests raise).
         """
         print(f"[cisterna] ILLEGAL event name: {name!r}", file=sys.stderr)
-        return True
 
 
 class BathosAdapter(AdapterBase):

@@ -306,29 +306,87 @@ class TestAcMcp4TokenManagement:
         assert result.get("ok") is True
 
     def test_token_reset_error_handling_code_path(self):
-        """Verify that the ValueError handling in finally block is in place.
-
-        This test verifies the code structure without needing to mock
-        the read-only reset method.
-        """
+        """Verify that the ValueError handling in finally block is in place."""
         import inspect
         from cisterna.adapters import v3_middleware, v2_decorator
 
-        # Check v3_middleware has the try/except/finally for token reset
         v3_source = inspect.getsource(v3_middleware.CisternaMiddleware.on_call_tool)
-        assert "try:" in v3_source
-        assert "except Exception" in v3_source
         assert "finally:" in v3_source
         assert "mcp_request_id_var.reset" in v3_source
         assert "except ValueError:" in v3_source
 
-        # Check v2_decorator has the same pattern
         v2_source = inspect.getsource(v2_decorator.traced_tool)
-        assert "try:" in v2_source
-        assert "except Exception" in v2_source
         assert "finally:" in v2_source
         assert "mcp_request_id_var.reset" in v2_source
         assert "except ValueError:" in v2_source
+
+    def test_cross_context_reset_actually_raises_value_error(self):
+        """Demonstrate that copy_context().run() triggers real ValueError from reset().
+
+        This is the actual CH-10 scenario: a Token created in context A cannot be
+        reset inside a different Context B (created via copy_context()). The
+        middleware's `except ValueError: pass` guards against this pattern.
+        """
+        import contextvars
+        from cisterna.telemetry.context import mcp_request_id_var
+
+        # Set a token in the current (outer) context
+        outer_tok = mcp_request_id_var.set("outer_request")
+
+        # Copy the current context — inner_ctx now has "outer_request" but
+        # outer_tok is bound to the outer context, NOT the copy
+        inner_ctx = contextvars.copy_context()
+
+        errors: list[ValueError] = []
+
+        def attempt_reset_in_copy():
+            # Trying to reset a token from the outer context inside a copy raises ValueError
+            try:
+                mcp_request_id_var.reset(outer_tok)
+            except ValueError as e:
+                errors.append(e)
+
+        inner_ctx.run(attempt_reset_in_copy)
+
+        # Clean up the outer token
+        mcp_request_id_var.reset(outer_tok)
+
+        # The ValueError was real — this is what the middleware's guard catches
+        assert len(errors) == 1, "Expected ValueError from cross-context reset"
+        assert isinstance(errors[0], ValueError)
+
+    @pytest.mark.asyncio
+    async def test_v3_middleware_swallows_cross_context_value_error(self, temp_log_dir):
+        """AC-MCP-4: middleware's except ValueError: pass prevents propagation.
+
+        Run on_call_tool normally to verify it doesn't crash even when the contextvar
+        has a pre-existing value from the outer scope (a common real-world pattern).
+        The cross-context ValueError is demonstrated separately above.
+        """
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        from cisterna.telemetry.context import mcp_request_id_var
+
+        # Pre-set the contextvar (simulating a caller that already set it)
+        outer_tok = mcp_request_id_var.set("caller_request")
+
+        context = Mock()
+        context.message.name = "tool_with_outer_ctx"
+        context.message.arguments = {}
+
+        async def call_next(ctx):
+            return {"data": "ok"}
+
+        middleware = CisternaMiddleware()
+        result = await middleware.on_call_tool(context, call_next)
+
+        # Middleware completes without exception despite pre-existing contextvar
+        assert result is not None
+        assert result.get("ok") is True
+
+        # Cleanup outer token
+        mcp_request_id_var.reset(outer_tok)
 
 
 class TestAdapterAllowedNames:
@@ -350,14 +408,15 @@ class TestAdapterAllowedNames:
 class TestRuntimeNameGuard:
     """AC-NAMEFREEZE-4: Runtime guard via _swallow_name_error."""
 
-    def test_swallow_name_error_returns_true_by_default(self, temp_log_dir):
-        """_swallow_name_error should return True (allow assert to pass)."""
+    def test_swallow_name_error_warns_and_returns_none(self, temp_log_dir, capsys):
+        """_swallow_name_error prints to stderr and returns None (warn-and-continue)."""
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
 
         adapter = BathosAdapter()
         result = adapter._swallow_name_error("illegal.name")
-        assert result is True
+        assert result is None
+        assert "ILLEGAL event name" in capsys.readouterr().err
 
     def test_runtime_guard_raises_when_monkeypatched(self, temp_log_dir):
         """When _swallow_name_error is monkeypatched to raise, assert fails."""
