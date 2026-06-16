@@ -7,6 +7,7 @@ shaped envelope. Never re-raises exceptions to the transport (CH-5).
 (CH-10, AC-MCP-4) Token management: set/reset with ValueError guard for
 cross-context token resets (possible in asyncio context copy scenarios).
 """
+
 import time
 import uuid
 from typing import Any

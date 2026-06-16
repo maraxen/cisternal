@@ -1,4 +1,5 @@
 """Tests for JsonlExporter: AC-PKG and file rotation."""
+
 import json
 import tempfile
 import time
@@ -64,7 +65,9 @@ class TestJsonlExporter:
                 )
                 exporter.export(record)
 
-            threads = [threading.Thread(target=write_record, args=(i,)) for i in range(10)]
+            threads = [
+                threading.Thread(target=write_record, args=(i,)) for i in range(10)
+            ]
             for t in threads:
                 t.start()
             for t in threads:

@@ -7,6 +7,7 @@ Public API (spec §3.2):
   - aspan(name, **fields): Async timing context manager
   - status(): Get pipeline health status
 """
+
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,7 @@ def emit_event(name: str, **fields: Any) -> None:
         **fields: Event fields (e.g. tool='foo', request_id='xyz').
     """
     import time
+
     pipeline = get_pipeline()
     if pipeline is None:
         return

@@ -6,6 +6,7 @@ and returns a shaped response. Never re-raises exceptions (CH-5).
 
 (CH-10, AC-MCP-4) Token management: set/reset with ValueError guard.
 """
+
 import functools
 import time
 import uuid
@@ -17,7 +18,9 @@ from cisterna.adapters.base import AdapterBase
 T = TypeVar("T")
 
 
-def traced_tool(adapter: AdapterBase) -> Callable[[Callable[..., T]], Callable[..., Any]]:
+def traced_tool(
+    adapter: AdapterBase,
+) -> Callable[[Callable[..., T]], Callable[..., Any]]:
     """Decorator to wrap a FastMCP v2 tool with telemetry.
 
     Usage:
@@ -43,7 +46,9 @@ def traced_tool(adapter: AdapterBase) -> Callable[[Callable[..., T]], Callable[.
 
             try:
                 result = fn(*args, **kwargs)
-                adapter.emit_end(fn.__name__, request_id, (time.monotonic_ns() - t0) / 1e6)
+                adapter.emit_end(
+                    fn.__name__, request_id, (time.monotonic_ns() - t0) / 1e6
+                )
                 return adapter.shape_ok(fn.__name__, result)
             except Exception as exc:
                 adapter.emit_error(fn.__name__, request_id, exc)

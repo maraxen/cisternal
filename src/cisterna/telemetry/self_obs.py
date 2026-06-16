@@ -6,6 +6,7 @@ CH-12: heartbeat_alive/write_probe_ok determined by consumer-side evidence:
   - On next heartbeat, re-stat. If both advanced, both flags True.
   - If neither advances within 2x interval, dead QueueListener detected (EC-3).
 """
+
 import os
 import threading
 import time
