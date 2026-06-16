@@ -150,65 +150,13 @@ const _gitBase = (await agent(
 )).trim();
 log("Cisterna M1 — Telemetry Foundation: writing chain (A -> B -> C, sequential)");
 const a = await trackA();
-// Log track completion via transduction_log
-await agent(
-  `task_id: ${TASK_ID}. ` +
-  `Call mcp__praxia__transduction_log(action='append_audit', payload={` +
-  `audit_id: '${TASK_ID}-track-a', ` +
-  `task_id: '${TASK_ID}', ` +
-  `verdict: '${a?.verdict ?? 'unknown'}', ` +
-  `issues: []` +
-  `}). ` +
-  `This is a telemetry call — execute it and return 'logged'.`,
-  { label: 'transduction-log:track-a', phase: 'Telemetry' }
-);
-
 const b = await trackB();
-// Log track completion via transduction_log
-await agent(
-  `task_id: ${TASK_ID}. ` +
-  `Call mcp__praxia__transduction_log(action='append_audit', payload={` +
-  `audit_id: '${TASK_ID}-track-b', ` +
-  `task_id: '${TASK_ID}', ` +
-  `verdict: '${b?.verdict ?? 'unknown'}', ` +
-  `issues: []` +
-  `}). ` +
-  `This is a telemetry call — execute it and return 'logged'.`,
-  { label: 'transduction-log:track-b', phase: 'Telemetry' }
-);
-
 const c = await trackC();
-// Log track completion via transduction_log
-await agent(
-  `task_id: ${TASK_ID}. ` +
-  `Call mcp__praxia__transduction_log(action='append_audit', payload={` +
-  `audit_id: '${TASK_ID}-track-c', ` +
-  `task_id: '${TASK_ID}', ` +
-  `verdict: '${c?.verdict ?? 'unknown'}', ` +
-  `issues: []` +
-  `}). ` +
-  `This is a telemetry call — execute it and return 'logged'.`,
-  { label: 'transduction-log:track-c', phase: 'Telemetry' }
-);
-
 
 phase("Audit");
 const _auditVerdict = await agent(
   'task_id: ' + TASK_ID + '. Audit sprint ' + TASK_ID + ' changes committed since ' + _gitBase + '. Run: git log ' + _gitBase + '..HEAD --oneline to list commits. Review all changed files against the sprint requirements and return PASS or FAIL with findings.',
   { label: 'auditor', phase: 'Audit', agentType: 'auditor' }
-);
-
-// Log sprint completion via transduction_log
-await agent(
-  `task_id: ${TASK_ID}. ` +
-  `Call mcp__praxia__transduction_log(action='append_audit', payload={` +
-  `audit_id: '${TASK_ID}-final', ` +
-  `task_id: '${TASK_ID}', ` +
-  `verdict: '${_auditVerdict?.verdict ?? 'unknown'}', ` +
-  `issues: []` +
-  `}). ` +
-  `This is a telemetry call — execute it and return 'logged'.`,
-  { label: 'transduction-log:final', phase: 'Telemetry' }
 );
 
 return {
