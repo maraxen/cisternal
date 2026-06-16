@@ -26,16 +26,24 @@ def init(
     max_bytes: int = 10_485_760,
     backup_count: int = 5,
     exporters: list[ExporterBase] | None = None,
+    heartbeat_interval: float = 30.0,
 ) -> None:
     """Initialize the telemetry pipeline (idempotent).
 
     Args:
-        log_dir: Directory for JSONL logs. If None, uses /tmp.
+        log_dir: Directory for JSONL logs. If None, resolves via env vars or defaults to ~/.cisterna/logs.
         max_bytes: Max file size before rotation (default 10 MB).
         backup_count: Number of backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
+        heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
     """
-    init_pipeline(log_dir=log_dir, max_bytes=max_bytes, backup_count=backup_count, exporters=exporters)
+    init_pipeline(
+        log_dir=log_dir,
+        max_bytes=max_bytes,
+        backup_count=backup_count,
+        exporters=exporters,
+        heartbeat_interval=heartbeat_interval,
+    )
 
 
 def emit_event(name: str, **fields: Any) -> None:

@@ -41,6 +41,7 @@ class _QueueListenerThread(threading.Thread):
         self._queue = q
         self._exporters = exporters
         self._stop_event = threading.Event()
+        self._export_count = 0
 
     def run(self) -> None:
         """Main loop: dequeue Records and fan-out to exporters."""
@@ -65,6 +66,7 @@ class _QueueListenerThread(threading.Thread):
                         f"[cisterna] Exporter {type(exporter).__name__} raised: {e}",
                         file=sys.stderr,
                     )
+            self._export_count += 1
 
     def stop(self) -> None:
         """Signal the thread to stop."""
@@ -97,7 +99,6 @@ class EventPipeline:
         self._exporters = exporters or []
         self._drop_count = 0
         self._events_emitted = 0
-        self._events_exported = 0
 
         # Start custom consumer thread
         self._listener = _QueueListenerThread(self._queue, self._exporters)
@@ -193,7 +194,7 @@ class EventPipeline:
     @property
     def events_exported(self) -> int:
         """Total events exported by exporters."""
-        return self._events_exported
+        return self._listener._export_count
 
 
 def init_pipeline(
@@ -201,6 +202,7 @@ def init_pipeline(
     max_bytes: int = 10_485_760,
     backup_count: int = 5,
     exporters: list[ExporterBase] | None = None,
+    heartbeat_interval: float = 30.0,
 ) -> EventPipeline:
     """Initialize or return the global EventPipeline (idempotent init, AC-CORE-5).
 
@@ -214,6 +216,7 @@ def init_pipeline(
         max_bytes: Max file size before rotation.
         backup_count: Backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
+        heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
 
     Returns:
         The global EventPipeline instance.
@@ -277,7 +280,7 @@ def init_pipeline(
 
         # Start heartbeat daemon thread (CH-12) for liveness detection
         from .self_obs import _start_heartbeat
-        _start_heartbeat(interval=0.05, jsonl_path=jsonl_path)
+        _start_heartbeat(interval=heartbeat_interval, jsonl_path=jsonl_path)
 
         return _global_pipeline
 

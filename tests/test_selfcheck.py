@@ -51,7 +51,7 @@ class TestACSelfcheck1:
         When status() after 150ms;
         Then heartbeat_alive AND write_probe_ok are True (file mtime+size advanced)."""
 
-        init(log_dir=temp_log_dir)
+        init(log_dir=temp_log_dir, heartbeat_interval=0.05)
 
         # Emit an initial event to ensure file exists
         emit_event("initial.event")
@@ -70,7 +70,7 @@ class TestACSelfcheck1:
     def test_write_probe_detects_file_growth(self, temp_log_dir):
         """Verify that write_probe_ok only becomes True when file actually grows."""
 
-        init(log_dir=temp_log_dir)
+        init(log_dir=temp_log_dir, heartbeat_interval=0.05)
 
         # Initially, status should show pipeline alive but no file growth yet
         st = status()
@@ -99,7 +99,7 @@ class TestACSelfcheck2:
         When status() after 2x interval (100ms);
         Then pipeline_alive False AND heartbeat_alive False."""
 
-        init(log_dir=temp_log_dir)
+        init(log_dir=temp_log_dir, heartbeat_interval=0.05)
 
         # Emit initial event and let it process
         emit_event("initial.event")
@@ -133,7 +133,7 @@ class TestACSelfcheck2:
         """Verify that heartbeat_alive stays True within 2x interval,
         but goes False after 2x interval with no updates."""
 
-        init(log_dir=temp_log_dir)
+        init(log_dir=temp_log_dir, heartbeat_interval=0.05)
 
         # Emit initial event
         emit_event("test.event")
@@ -198,7 +198,7 @@ class TestHeartbeatThread:
         from cisterna.telemetry.exporter import ShadowExporter
 
         shadow = ShadowExporter()
-        init(log_dir=temp_log_dir, exporters=[shadow])
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
 
         # Sleep long enough for multiple heartbeats (interval is 50ms)
         time.sleep(0.2)
@@ -223,7 +223,7 @@ class TestHeartbeatThread:
         from cisterna.telemetry.exporter import ShadowExporter
 
         shadow = ShadowExporter()
-        init(log_dir=temp_log_dir, exporters=[FailingExporter(), shadow])
+        init(log_dir=temp_log_dir, exporters=[FailingExporter(), shadow], heartbeat_interval=0.05)
 
         # Emit an event
         emit_event("test.event")
