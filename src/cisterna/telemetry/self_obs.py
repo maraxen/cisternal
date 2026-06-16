@@ -21,6 +21,7 @@ _heartbeat_lock = threading.Lock()
 _heartbeat_interval = 0.05  # 50ms default, same as tests
 _last_stat = {"mtime": None, "size": None, "ts": None, "last_growth_ts": None}
 _jsonl_path = None
+_last_ec3_warn: float = 0.0
 
 
 @dataclass
@@ -84,6 +85,49 @@ def _heartbeat_daemon(interval: float) -> None:
             pass
 
 
+def _check_ec3_warn() -> None:
+    """Check if pipeline is dead and emit a warn-and-continue message.
+
+    EC-3 mitigation: if the pipeline is not alive and we have staleness
+    data showing file hasn't grown within 2x the heartbeat interval,
+    warn to stderr but don't restart.
+    """
+    import sys
+
+    from .pipeline import get_pipeline as _get_pipeline
+
+    p = _get_pipeline()
+    if p is None or p.is_alive():
+        return
+
+    with _heartbeat_lock:
+        last_growth = _last_stat.get("last_growth_ts")
+        interval = _heartbeat_interval
+
+    if last_growth is None:
+        return
+
+    staleness = time.time() - last_growth
+    if staleness > 2 * interval:
+        print(
+            f"[cisterna] WARNING: pipeline consumer dead "
+            f"(staleness={staleness:.1f}s); "
+            "EC-3: warn-and-continue policy active",
+            file=sys.stderr,
+        )
+
+
+def _maybe_warn_ec3() -> None:
+    """Rate-limited EC-3 warn check (once per 60 seconds)."""
+    global _last_ec3_warn
+
+    now = time.time()
+    if now - _last_ec3_warn < 60.0:
+        return
+    _last_ec3_warn = now
+    _check_ec3_warn()
+
+
 def _probe_jsonl_file() -> None:
     """Probe the JSONL output file mtime+size to detect consumer-side liveness.
 
@@ -125,6 +169,9 @@ def _probe_jsonl_file() -> None:
 
     except Exception:
         pass
+
+    # Check and emit EC-3 warn if pipeline is dead (at end of probe)
+    _maybe_warn_ec3()
 
 
 def _start_heartbeat(interval: float, jsonl_path: Path | None) -> None:

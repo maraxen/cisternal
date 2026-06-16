@@ -48,6 +48,8 @@ def cleanup():
         }
         self_obs_module._jsonl_path = None
 
+    self_obs_module._last_ec3_warn = 0.0
+
 
 class TestACSelfcheck1:
     """AC-SELFCHECK-1: Heartbeat fires; status flags are True when file grows."""
@@ -259,3 +261,32 @@ class TestHeartbeatThread:
         assert len(heartbeat_events) > 0, (
             "Heartbeat thread should survive exporter failure"
         )
+
+
+class TestEC3Warn:
+    """EC-3 warn-and-continue policy: detect dead pipeline and warn."""
+
+    def test_ec3_warn_emits_stderr(self, temp_log_dir, capsys):
+        """When pipeline consumer (QueueListener) is dead and staleness > 2x interval,
+        _check_ec3_warn() emits a warning to stderr mentioning 'EC-3' or 'pipeline consumer dead'."""
+
+        init(log_dir=temp_log_dir, heartbeat_interval=0.05)
+        emit_event("initial.event")
+        time.sleep(0.15)  # let file grow so last_growth_ts is set
+
+        from cisterna.telemetry import pipeline as pipeline_module
+
+        pipeline = pipeline_module._global_pipeline
+        if pipeline and pipeline._listener:
+            pipeline._listener.stop()
+            pipeline._listener.join(timeout=1.0)
+
+        time.sleep(0.15)  # let liveness go stale (> 2x interval)
+
+        import cisterna.telemetry.self_obs as so
+
+        so._last_ec3_warn = 0.0
+        so._check_ec3_warn()
+
+        captured = capsys.readouterr()
+        assert "EC-3" in captured.err or "pipeline consumer dead" in captured.err
