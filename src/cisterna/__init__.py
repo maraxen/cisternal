@@ -1,1 +1,67 @@
-"""Cisterna: Shared telemetry substrate for praxia tool family."""
+"""Cisterna: Shared telemetry substrate for praxia tool family.
+
+Public API (spec §3.2):
+  - init(log_dir, max_bytes, backup_count, exporters): Initialize pipeline
+  - emit_event(name, **fields): Emit a telemetry event
+  - span(name, **fields): Sync timing context manager
+  - aspan(name, **fields): Async timing context manager
+  - status(): Get pipeline health status
+"""
+from pathlib import Path
+from typing import Any
+
+from cisterna.telemetry import (
+    init_pipeline,
+    get_pipeline,
+    span,
+    aspan,
+    status,
+    ExporterBase,
+    _build_record,
+)
+
+
+def init(
+    log_dir: str | Path | None = None,
+    max_bytes: int = 10_485_760,
+    backup_count: int = 5,
+    exporters: list[ExporterBase] | None = None,
+) -> None:
+    """Initialize the telemetry pipeline (idempotent).
+
+    Args:
+        log_dir: Directory for JSONL logs. If None, uses /tmp.
+        max_bytes: Max file size before rotation (default 10 MB).
+        backup_count: Number of backup files to keep.
+        exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
+    """
+    init_pipeline(log_dir=log_dir, max_bytes=max_bytes, backup_count=backup_count, exporters=exporters)
+
+
+def emit_event(name: str, **fields: Any) -> None:
+    """Emit a telemetry event.
+
+    Snapshots contextvars on this thread, builds a Record, and enqueues
+    it for non-blocking export. Never raises.
+
+    Args:
+        name: Event name (e.g. 'mcp.call_start').
+        **fields: Event fields (e.g. tool='foo', request_id='xyz').
+    """
+    import time
+    pipeline = get_pipeline()
+    if pipeline is None:
+        return
+
+    record = _build_record(name, ts=time.time(), **fields)
+    if record is not None:
+        pipeline.emit(record)
+
+
+__all__ = [
+    "init",
+    "emit_event",
+    "span",
+    "aspan",
+    "status",
+]
