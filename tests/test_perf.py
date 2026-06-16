@@ -47,6 +47,7 @@ def cleanup():
             "last_growth_ts": None,
         }
         so_mod._jsonl_path = None
+    so_mod._last_ec3_warn = 0.0
 
 
 class TestAcPerf1a:

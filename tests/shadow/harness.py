@@ -48,22 +48,14 @@ def capture_legacy(consumer: str) -> Iterator[list[logging.LogRecord]]:
 def assert_parity(
     legacy: list[logging.LogRecord],
     cisterna_records: list[Record],
-    *,
-    duration_tolerance_ms: float = 5.0,
 ) -> None:
     """Assert both streams non-empty and share >= 1 matching tool name (spec §6.3).
 
-    Parity = field-subset equality modulo:
-    - ε-timestamp (5ms tolerance by default)
-    - additive trace columns
-    - ordering by (event, request_id)
-
-    For M1 shadow tests: assert both non-empty and extract tool names to verify overlap.
+    Checks: both streams non-empty; tool names from legacy and cisterna overlap.
 
     Args:
         legacy: list[logging.LogRecord] from capture_legacy
         cisterna_records: list[Record] from ShadowExporter
-        duration_tolerance_ms: Tolerance for duration comparison in milliseconds
     """
     assert len(legacy) >= 1, "Legacy stream must have >= 1 record"
     assert len(cisterna_records) >= 1, "Cisterna stream must have >= 1 record"
