@@ -208,8 +208,10 @@ def init_pipeline(
     If the pipeline is already initialized, return the existing instance.
     Otherwise, create a new one with the given parameters.
 
+    Spec §3.2: log_dir env resolution: CISTERNA_LOG_DIR > BTH_LOG_DIR > CTXP_LOG_DIR > ~/.cisterna/logs
+
     Args:
-        log_dir: Directory for JSONL logs. If None and no exporters, uses /tmp.
+        log_dir: Directory for JSONL logs. If None, resolves via env vars or defaults to ~/.cisterna/logs.
         max_bytes: Max file size before rotation.
         backup_count: Backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
@@ -221,15 +223,26 @@ def init_pipeline(
 
     with _pipeline_lock:
         if _global_pipeline is not None:
-            # Already initialized; return existing
+            # Already initialized; return existing (AC-CORE-5: idempotent)
             return _global_pipeline
 
         # Initialize exporter list (copy to avoid mutating caller's list)
         exporters = list(exporters) if exporters is not None else []
 
-        # If log_dir is provided (or default), add JsonlExporter
+        # Resolve log_dir: explicit > env vars > default
         if log_dir is None:
-            log_dir = Path("/tmp")
+            import os
+            log_dir = (
+                os.getenv("CISTERNA_LOG_DIR")
+                or os.getenv("BTH_LOG_DIR")
+                or os.getenv("CTXP_LOG_DIR")
+                or None
+            )
+            if log_dir is None:
+                # Default to ~/.cisterna/logs
+                log_dir = Path.home() / ".cisterna" / "logs"
+            else:
+                log_dir = Path(log_dir)
         else:
             log_dir = Path(log_dir)
 
@@ -244,6 +257,11 @@ def init_pipeline(
         )
 
         _global_pipeline = EventPipeline(exporters=exporters)
+
+        # Start heartbeat daemon thread (CH-12) for liveness detection
+        from .self_obs import _start_heartbeat
+        _start_heartbeat(interval=0.05, jsonl_path=jsonl_path)
+
         return _global_pipeline
 
 
