@@ -1,0 +1,154 @@
+[sprint]
+sprint_id = "260616_cisterna-m1-foundation"
+sprint_num = 1
+name = "Cisterna M1 — Telemetry Foundation"
+description = "Foundation chain of the M1 telemetry milestone: packaging/dependency contract, the dual-emit fan-out core, and init/self-observability. Strictly sequential (PKG -> CORE -> INIT); unblocks the parallel MCP/CLI/shadow/perf tracks in Sprint 2+."
+context = '''
+Project: cisterna (greenfield Python 3.13 lib, uv/pytest/ruff). Spec is authoritative:
+.praxia/docs/specs/260616_cisterna-m1-telemetry-spec.md (v2, post-adversarial-review).
+Decision record: .praxia/docs/specs/260616_design-the-implementation-spec-for-ciste.md.
+
+Architecture: dual-emit fan-out core (G) as keystone of the layered design. span()/event()
+build ONE OTel-superset Record once (record-BUILD wrapped never-raise), fan out to N
+per-exporter-isolated sinks. Default exporter = non-blocking queue->JSONL (put_nowait/
+drop-on-full, counted drops). OTel-API-only core (trace/span IDs LOCAL-SCOPE in M1; SDK in
+an [otlp] extra). Never crash the caller; <1ms/call; off the hot path.
+
+Stack rules: uv run python (never bare python); pytest; ruff. Edit only on existing files.
+'''
+max_fix_retries = 1
+
+[[tracks]]
+id = "a"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "M1-PKG"
+phase_name = "M1-PKG — dependency contract + pyproject (DAG root)"
+fixer_prompt = '''
+task_id: 260616_cisterna-m1-foundation
+
+## Objective
+Resolve the dependency contract per spec §9/§13-C1 and §3 (CH-3): cisterna's core uses
+ONLY opentelemetry-api; the SDK + semantic-conventions move to an optional [otlp] extra.
+
+## Changes (pyproject.toml)
+Set [project].dependencies to exactly:
+  cyclopts>=4.18.0, fastmcp>=3.4.2, opentelemetry-api>=1.42.1
+Add [project.optional-dependencies] otlp = [
+  opentelemetry-sdk>=1.42.1, opentelemetry-semantic-conventions>=0.63b1,
+  opentelemetry-exporter-otlp-proto-grpc>=1.42.1 ]
+Keep the existing [dependency-groups] dev block.
+Create the package skeleton dirs under src/cisterna/ per spec §2 (empty __init__.py +
+py.typed) so the package imports.
+
+## Success criteria (AC-PKG-1)
+`uv sync` succeeds. With no extras, `uv run python -c "import opentelemetry.sdk"` FAILS
+and `uv run python -c "import opentelemetry"` (api) succeeds. `uv run ruff check .` clean.
+'''
+reviewer_prompt = '''
+task_id: 260616_cisterna-m1-foundation
+
+## Checks
+1. pyproject [project].dependencies contains opentelemetry-api but NOT opentelemetry-sdk.
+2. [project.optional-dependencies].otlp contains sdk + semantic-conventions + otlp exporter.
+3. `uv run python -c "import opentelemetry.sdk"` exits non-zero (sdk not in default env).
+4. `uv run python -c "import opentelemetry"` exits 0.
+5. src/cisterna/ skeleton imports (`uv run python -c "import cisterna"`).
+## Pass criterion: AC-PKG-1 holds; ruff clean.
+'''
+return_key = "M1-PKG"
+
+[[tracks]]
+id = "b"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "M1-CORE"
+phase_name = "M1-CORE — fan-out core: context, Record, pipeline, exporter, public API"
+fixer_prompt = '''
+task_id: 260616_cisterna-m1-foundation
+
+## Objective
+Build the keystone per spec §3 (3.1-3.5), §2 module layout. Files:
+- cisterna/telemetry/context.py: ContextVar objects (run_uuid_var, mcp_request_id_var,
+  task_id_var, request_id_var, session_id_var, phase_var) + _build_record(name, ts, **fields)
+  that SNAPSHOTS contextvars on the producer thread (CH-4). Never-raise: returns a degraded
+  record (or None) on any exception in record-build (CH-5/EC-2 — wrap the BUILD step).
+- cisterna/telemetry/record.py: frozen slots Record dataclass (spec §3.3).
+- cisterna/telemetry/exporter.py: ExporterBase ABC (export/flush/close, all never-raise);
+  JsonlExporter (bounded queue, put_nowait -> drop -> counted _drop_count, QueueListener ->
+  RotatingFileHandler, file events.<host>.<pid>.jsonl; NEVER reads ContextVars — CH-4);
+  ShadowExporter spy.
+- cisterna/telemetry/pipeline.py: EventPipeline (fan-out: _fanout delivers to each exporter
+  in its own try/except so one raising exporter can't crash the caller or starve others).
+  Module docstring documents the fork prohibition (C9: spawn required, fork unsupported).
+- cisterna/telemetry/span.py: span()/aspan() context managers that emit <name>.start/.end
+  and RE-RAISE caller exceptions after recording status=ERROR (CH-5, intentional).
+- cisterna/__init__.py: export emit_event, span, aspan, init, status.
+Edit only on existing files; create the new modules.
+
+## Success criteria (AC-CORE-1..5, AC-JSONL drop/omit-if-None)
+All AC-CORE tests pass: emit_event writes JSONL within 100ms; two exporters both receive
+one record; contextvar snapshot round-trips (incl. async-task isolation); idempotent init;
+a raising exporter is swallowed; non-serializable field never propagates. `uv run pytest`
+green for tests/test_core.py + tests/test_jsonl_exporter.py. ruff clean.
+'''
+reviewer_prompt = '''
+task_id: 260616_cisterna-m1-foundation
+
+## Checks (against spec §3 + §8 ACs)
+1. _build_record snapshots contextvars on the CALLING thread; JsonlExporter never reads any
+   ContextVar (grep for *_var.get inside exporter.py -> must be absent). (CH-4)
+2. record-BUILD is wrapped never-raise (feed a non-serializable field; no exception escapes). (EC-2)
+3. JsonlExporter uses put_nowait + counted drop; file is events.<host>.<pid>.jsonl. (CH-9/AC-JSONL)
+4. span()/aspan() RE-RAISE caller exceptions after emitting .end with status=ERROR. (CH-5)
+5. _fanout isolates each exporter in try/except (a raising exporter doesn't starve peers). (AC-CORE-1)
+6. `uv run pytest tests/test_core.py tests/test_jsonl_exporter.py` green; ruff clean.
+## Pass criterion: AC-CORE-1..5 pass; CH-4/CH-5/EC-2 invariants verified in code.
+'''
+return_key = "M1-CORE"
+
+[[tracks]]
+id = "c"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "M1-INIT"
+phase_name = "M1-INIT — init_telemetry + self-observability (heartbeat, liveness, status)"
+fixer_prompt = '''
+task_id: 260616_cisterna-m1-foundation
+
+## Objective
+Build init + self-observability per spec §3.2, §7, §3.4 init resolution.
+- cisterna init()/init_telemetry: idempotent (exactly one QueueListener — AC-CORE-5);
+  log_dir env resolution CISTERNA_LOG_DIR > BTH_LOG_DIR > CTXP_LOG_DIR > ~/.cisterna/logs;
+  install-time write-probe (fall back to tempdir on failure).
+- cisterna/telemetry/self_obs.py: status() -> StatusReport (pipeline_alive, queue_depth,
+  events_emitted, events_exported, drop_count, heartbeat_alive, write_probe_ok); heartbeat
+  daemon thread emitting "heartbeat" events; LIVENESS via CONSUMER-SIDE evidence — record the
+  JSONL output file mtime+size at each heartbeat and confirm they advance; a dead QueueListener
+  must be detectable (heartbeat_alive=False) within 2x the interval (CH-12, EC-3 home).
+
+## Success criteria (AC-SELFCHECK-1, AC-SELFCHECK-2, AC-CORE-5)
+Heartbeat fires; status().heartbeat_alive AND write_probe_ok True when the file grows; with
+the QueueListener killed, status().pipeline_alive AND heartbeat_alive go False within 2x the
+interval. Double init() leaves exactly one listener. `uv run pytest tests/test_selfcheck.py`
+green; ruff clean.
+'''
+reviewer_prompt = '''
+task_id: 260616_cisterna-m1-foundation
+
+## Checks (spec §7 + §8)
+1. heartbeat_alive/write_probe_ok derive from output-file mtime+size advancing, NOT merely
+   that a heartbeat was enqueued (CH-12). Kill the listener -> both go False.
+2. log_dir env resolution order matches spec §3.4; write-probe falls back to tempdir.
+3. init() idempotent: exactly one QueueListener after two calls (AC-CORE-5).
+4. `uv run pytest tests/test_selfcheck.py` green; ruff clean.
+## Pass criterion: AC-SELFCHECK-1/2 + AC-CORE-5 pass; dead-listener detectable.
+'''
+return_key = "M1-INIT"
+
+[orchestration]
+sequential = ["a", "b", "c"]
+concurrent = []

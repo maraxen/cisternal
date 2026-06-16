@@ -11,10 +11,12 @@
     ]
   },
   "owner": {
-    "value": null,
-    "confidence": 0.0,
-    "deferred": true,
-    "sources": []
+    "value": "Marielle Russo <67157875+maraxen@users.noreply.github.com>",
+    "confidence": 0.75,
+    "deferred": false,
+    "sources": [
+      "git_history"
+    ]
   },
   "eidos": {
     "value": "its own directly used tool, its abseline tool",
