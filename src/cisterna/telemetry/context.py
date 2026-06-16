@@ -46,7 +46,7 @@ def _build_record(name: str, ts: float | None = None, **fields) -> Record | None
 
     Returns:
         Record with all contextvars snapshotted, or None if build failed.
-        Never raises (CH-5, EC-2): wrapped in try/except to handle non-serializable
+        Never raises (C4, C5): wrapped in try/except to handle non-serializable
         nested fields gracefully.
 
     Contract (CH-4):

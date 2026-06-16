@@ -224,9 +224,8 @@ def init_pipeline(
             # Already initialized; return existing
             return _global_pipeline
 
-        # Initialize exporter list
-        if exporters is None:
-            exporters = []
+        # Initialize exporter list (copy to avoid mutating caller's list)
+        exporters = list(exporters) if exporters is not None else []
 
         # If log_dir is provided (or default), add JsonlExporter
         if log_dir is None:
