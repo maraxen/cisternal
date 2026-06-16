@@ -6,14 +6,13 @@ CH-12: heartbeat_alive/write_probe_ok determined by consumer-side evidence:
   - On next heartbeat, re-stat. If both advanced, both flags True.
   - If neither advances within 2x interval, dead QueueListener detected (EC-3).
 """
-from dataclasses import dataclass
 import os
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .pipeline import get_pipeline
-
 
 # Global state for heartbeat thread and liveness tracking
 _heartbeat_thread = None
@@ -103,12 +102,12 @@ def _probe_jsonl_file() -> None:
         now = time.time()
 
         with _heartbeat_lock:
-            # First stat case: initialize baseline
+            # First stat case: initialize baseline (do not set last_growth_ts yet)
             if _last_stat["mtime"] is None:
                 _last_stat["mtime"] = mtime
                 _last_stat["size"] = size
                 _last_stat["ts"] = now
-                _last_stat["last_growth_ts"] = now
+                # last_growth_ts remains None until second probe confirms growth
                 return
 
             # Check if both mtime and size advanced since last stat
@@ -117,6 +116,7 @@ def _probe_jsonl_file() -> None:
                 _last_stat["mtime"] = mtime
                 _last_stat["size"] = size
                 _last_stat["ts"] = now
+                # Only set last_growth_ts after confirming growth in second probe
                 _last_stat["last_growth_ts"] = now
             else:
                 # No growth in this probe; just update the probe timestamp

@@ -18,7 +18,6 @@ from pathlib import Path
 from .exporter import ExporterBase, JsonlExporter
 from .record import Record
 
-
 # Global pipeline instance for init()/emit_event()
 _global_pipeline = None
 _pipeline_lock = threading.Lock()
@@ -246,9 +245,27 @@ def init_pipeline(
         else:
             log_dir = Path(log_dir)
 
-        # Always add JSONL exporter with per-pid naming (requires spawn, per C9)
+        # Write-probe (fall back to tempdir on failure) — spec §3.2
         import os
         import socket
+        import tempfile
+
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            # Attempt to write a probe file to verify directory is writable
+            probe_file = log_dir / ".write_probe"
+            probe_file.touch()
+            probe_file.unlink()
+        except OSError:
+            # Directory unwritable; fall back to tempfile
+            import sys
+            print(
+                f"[cisterna] Warning: cannot write to {log_dir}; falling back to tempdir",
+                file=sys.stderr,
+            )
+            log_dir = Path(tempfile.mkdtemp())
+
+        # Always add JSONL exporter with per-pid naming (requires spawn, per C9)
         hostname = socket.gethostname()
         pid = os.getpid()
         jsonl_path = log_dir / f"events.{hostname}.{pid}.jsonl"

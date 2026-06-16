@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import init, status, emit_event
+from cisterna import emit_event, init, status
 from cisterna.telemetry import self_obs as self_obs_module
 
 
@@ -103,7 +103,8 @@ class TestACSelfcheck2:
 
         # Emit initial event and let it process
         emit_event("initial.event")
-        time.sleep(0.1)
+        time.sleep(0.2)  # Increased to ensure first probe establishes baseline
+                         # and second probe detects growth before killing listener
 
         # Verify pipeline is alive
         st = status()
@@ -118,14 +119,15 @@ class TestACSelfcheck2:
             # Force the thread to die by waiting
             pipeline._listener.join(timeout=1.0)
 
-        # Sleep long enough for heartbeat interval + 2x detection window (50ms * 2 = 100ms)
-        # to pass with no file growth
-        time.sleep(0.12)
+        # Sleep long enough for multiple heartbeat intervals with no growth
+        # (minimum 2x interval = 100ms, plus margin for probe timing)
+        time.sleep(0.25)
 
         st = status()
 
         # Both flags should be False now
         assert st.pipeline_alive is False, f"pipeline_alive={st.pipeline_alive}, expected False after listener killed"
+        assert st.heartbeat_alive is False, f"heartbeat_alive={st.heartbeat_alive}, expected False after listener killed"
 
     def test_heartbeat_detection_window(self, temp_log_dir):
         """Verify that heartbeat_alive stays True within 2x interval,
