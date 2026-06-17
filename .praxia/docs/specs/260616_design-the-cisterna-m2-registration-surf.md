@@ -110,7 +110,7 @@ Negotiable:
 | ID | Question | Options | Blocking |
 |----|----------|---------|---------|
 | TBD-M2-1 | Does `wire()` support dual-transport in one call (`wire(server, app, adapter=...)`) or must it be called separately for MCP and CLI? | Single call (ergonomic) vs. separate calls (explicit) | M2-WIRE |
-| TBD-M2-2 | Is Cyclopts CLI registration in M2 scope or deferred to M3? Determines whether F1/H1 CLI path ships now. | M2 (unified surface) vs. M3 (CLI deferred) | M2-WIRE |
+| TBD-M2-2 | ~~Is Cyclopts CLI registration in M2 scope or deferred to M3?~~ **RESOLVED (260616): CLI ships in M2.** The unified `@cisterna.tool` → MCP + CLI surface is the milestone's point; F1 (dual error contract) and H1 (signature injection) both land in M2. | — | — (resolved) |
 | TBD-M2-3 | Async tool called via CLI inside a running event loop: error strategy? | `CisternaWireError` at wire time vs. runtime `RuntimeError` propagation vs. `asyncio.run_coroutine_threadsafe()` | M2-COMPOSE |
 | TBD-M2-4 | Is `validate=False` prohibited in production (hard block) or is a loud WARNING log sufficient? | Hard block vs. WARNING (pre-mortem scenario 1) | M2-WIRE |
 | TBD-M2-5 | Does `wire()` return a `WiredRegistry` introspection object or `None`? | Object (testable, observable) vs. `None` (simpler) | M2-WIRE |
