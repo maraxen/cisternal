@@ -1,0 +1,6 @@
+# Cisterna autonomous dev-loop state
+# Created 2026-06-18.
+
+[run]
+  mode = "hitl_semi_autonomous"     # human-in-the-loop, semi-autonomous
+  human_available = true            # PI is around for decision points this run
