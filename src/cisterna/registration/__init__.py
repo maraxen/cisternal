@@ -13,12 +13,14 @@ Import safety:
 
 from __future__ import annotations
 
+from cisterna.registration.compose import compose_mcp_callable
 from cisterna.registration.decorator import tool
 from cisterna.registration.errors import CisternaWireError
 from cisterna.registration.registry import clear_registry
 
 __all__ = [
     "CisternaWireError",
+    "compose_mcp_callable",
     "tool",
     "clear_registry",
     "wire",
