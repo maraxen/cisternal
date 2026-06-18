@@ -1,13 +1,42 @@
 """Cisterna: Shared telemetry substrate for praxia tool family.
 
-Public API (spec §3.2):
-  - init(log_dir, max_bytes, backup_count, exporters): Initialize pipeline
-  - emit_event(name, **fields): Emit a telemetry event
-  - span(name, **fields): Sync timing context manager
-  - aspan(name, **fields): Async timing context manager
-  - status(): Get pipeline health status
-  - tool: Pure-metadata decorator for registering MCP tools
-  - clear_registry: Test teardown helper; clears a named registry
+Public API (spec §3.2 — M1 telemetry + M2 registration surface):
+
+  M1 — Telemetry:
+    init(log_dir, max_bytes, backup_count, exporters): Initialize pipeline
+    emit_event(name, **fields): Emit a telemetry event
+    span(name, **fields): Sync timing context manager
+    aspan(name, **fields): Async timing context manager
+    status(): Get pipeline health status
+
+  M2 — Registration surface (B+G2 hybrid design, challenger-hardened):
+    tool: Pure-metadata decorator for registering MCP tools (A1, A2).
+          @cisterna.tool returns the original fn unchanged (decorated_fn is fn).
+    wire(server, app, *, adapter, registry, expected, validate):
+          Snapshot a registry at call time and register each tool on a FastMCP
+          server (and optionally a Cyclopts App). Returns a WiredRegistry.
+    WiredRegistry: Introspection object returned by wire().
+    CisternaWireError: Raised by wire() when expected tools are missing.
+    clear_registry(name): Test teardown helper; clears a named registry (A7).
+
+Design assumptions (spec §assumptions):
+  A1 — FastMCP v3 uses asyncio.iscoroutinefunction() to decide whether to await
+        the tool callable. The generated MCP callable is always async def.
+  A2 — FastMCP v3 reads inspect.signature(fn) for JSON schema generation.
+        Explicit __signature__ injection (H1) controls what FastMCP sees.
+  A3 — M1 CisternaMiddleware is installed on the FastMCP server before wire()
+        is called. Telemetry and shape adaptation are M1's exclusive responsibility.
+  A4 — Cyclopts 4.18.0+ calls asyncio.run() for async def command functions when
+        no event loop is running; inside a running loop, use app.run_async().
+  A5 — Global registry state is process-scoped; no cross-process sharing.
+  A6 — Python >= 3.11 (asyncio.get_running_loop() is the stable API).
+  A7 — Test environments call cisterna.clear_registry() in teardown to prevent
+        cross-test registry contamination.
+
+HARD INVARIANT (C5/AC-M2-6):
+  The M2 wire-time MCP callable is a PURE PASSTHROUGH — it MUST NOT call any
+  adapter.emit_* or adapter.shape_* methods, or emit ANY telemetry. All
+  telemetry and shaping is exclusively owned by M1 CisternaMiddleware.
 """
 
 from pathlib import Path
@@ -23,6 +52,7 @@ from cisterna.telemetry import (
     _build_record,
 )
 from cisterna.registration.decorator import tool
+from cisterna.registration.errors import CisternaWireError
 from cisterna.registration.registry import clear_registry
 
 
@@ -72,12 +102,32 @@ def emit_event(name: str, **fields: Any) -> None:
         pipeline.emit(record)
 
 
+def _lazy_import(name: str) -> object:
+    """Lazy re-export for wire and WiredRegistry to defer fastmcp import."""
+    if name == "wire":
+        from cisterna.registration.wired import wire as _wire
+        return _wire
+    if name == "WiredRegistry":
+        from cisterna.registration.wired import WiredRegistry as _WiredRegistry
+        return _WiredRegistry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __getattr__(name: str) -> object:
+    return _lazy_import(name)
+
+
 __all__ = [
+    # M1 — Telemetry
     "init",
     "emit_event",
     "span",
     "aspan",
     "status",
+    # M2 — Registration surface
     "tool",
+    "wire",
+    "WiredRegistry",
+    "CisternaWireError",
     "clear_registry",
 ]
