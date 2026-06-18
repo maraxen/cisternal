@@ -367,8 +367,6 @@ class TestCLICallableExceptionToExitCode:
                 app(["message-tool", "--name", "test"], exit_on_error=False)
             except SystemExit:
                 pass
-            except Exception:
-                pass  # Some exception handling — we check stderr output below
 
         stderr_output = stderr_capture.getvalue()
         assert "RuntimeError" in stderr_output, (

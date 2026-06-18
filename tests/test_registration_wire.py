@@ -17,6 +17,7 @@ Acceptance criteria covered:
 
 from __future__ import annotations
 
+import inspect
 import logging
 
 import fastmcp
@@ -454,3 +455,71 @@ class TestAdapterNotCalled:
             f"wire() must not call any adapter methods (C5/AC-M2-6); "
             f"got calls: {spy_adapter.calls}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers for TestCLISignatureInjection
+# (defined at module scope so __globals__ includes Annotated/Field for pydantic)
+# ---------------------------------------------------------------------------
+
+
+def _greet_cli_original(name: str, times: int = 3) -> str:
+    """Module-level original function for CLI signature injection test.
+
+    Defined at module scope so Cyclopts' get_type_hints() can resolve
+    annotations from this module's globals.  The 'times' param has a default
+    value, satisfying the 'defaulted param' requirement.
+    """
+    return (name + " ") * times
+
+
+# ---------------------------------------------------------------------------
+# F1: CLI callable signature injection (mirrors AC-M2-4 for MCP)
+# ---------------------------------------------------------------------------
+
+
+class TestCLISignatureInjection:
+    """F1: CLI callable registered by wire() must carry inspect.signature ==
+    the original function's signature (mirrors H1/AC-M2-4 for the MCP callable).
+
+    Cyclopts uses inspect.signature() to build arg parsers; explicit injection
+    prevents reliance on __wrapped__ traversal which is not guaranteed across
+    Cyclopts versions.
+    """
+
+    def test_cli_callable_signature_matches_original(self):
+        """F1: CLI callable has inspect.signature() equal to the original fn's signature,
+        including a defaulted param.
+
+        Mirrors AC-M2-4: the explicit __signature__ injection on the CLI callable
+        mirrors H1 on the MCP callable so Cyclopts can build arg parsers without
+        relying on __wrapped__ traversal.
+
+        _greet_cli_original is defined at module scope so Cyclopts' get_type_hints()
+        can resolve its annotations from this module's globals.
+        """
+        # Register the module-level original function as a tool.
+        tool(_greet_cli_original)
+
+        server = fastmcp.FastMCP("test-cli-sig")
+        app = App()
+        wire(server, app)
+
+        # Cyclopts stores the registered callable on the sub-App's default_command.
+        # wire() registers with name=entry.name (the Python function name, underscored).
+        registered_fn = app["_greet_cli_original"].default_command  # type: ignore[attr-defined]
+
+        original_sig = inspect.signature(_greet_cli_original)
+        cli_sig = inspect.signature(registered_fn)
+
+        assert cli_sig == original_sig, (
+            f"CLI callable signature mismatch.\n"
+            f"  original:  {original_sig}\n"
+            f"  cli:       {cli_sig}"
+        )
+        # Verify params are preserved: 'name' (required) and 'times' (defaulted).
+        params = cli_sig.parameters
+        assert "name" in params
+        assert "times" in params
+        # 'times' has a default of 3 — verify it round-trips through the injection.
+        assert params["times"].default == 3
