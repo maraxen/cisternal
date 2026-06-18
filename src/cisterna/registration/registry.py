@@ -12,97 +12,117 @@ Snapshot semantics (C6):
     decorated *after* wire() is called is NOT visible to the wired server.
     This is by design: once a server is wired its tool set is frozen.  Callers
     that need to add tools must call wire() again to obtain a new server.
-
-Implementation note:
-    The authoritative implementation lives in the M2-REGISTRY track (item 2141).
-    This module provides a documented stub so that the package skeleton imports
-    cleanly and downstream code can reference the intended API surface without
-    pulling in unfinished implementation.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable
 
-# Module-level registry store.  Keys are registry names; values are dicts
-# mapping tool name -> callable.  Populated by @cisterna.tool at decoration
-# time and snapshotted by cisterna.wire() at wire time.
-_REGISTRIES: dict[str, dict[str, object]] = {}
+# ---------------------------------------------------------------------------
+# ToolEntry
+# ---------------------------------------------------------------------------
 
 
-def tool(
-    fn: Callable[..., Any] | None = None,
+@dataclass
+class ToolEntry:
+    """Metadata record for a registered tool.
+
+    Attributes:
+        name:     The tool name as stored in the registry (defaults to fn.__name__).
+        fn:       The original callable (unchanged by the decorator).
+        registry: The partition name the tool was registered in.
+    """
+
+    name: str
+    fn: Callable[..., Any]
+    registry: str
+
+
+# ---------------------------------------------------------------------------
+# Module-level storage
+# ---------------------------------------------------------------------------
+
+# _REGISTRIES[partition_name][tool_name] = ToolEntry
+_REGISTRIES: dict[str, dict[str, ToolEntry]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _registry(name: str = "default") -> dict[str, ToolEntry]:
+    """Return the live partition dict, creating it if absent.
+
+    This returns a LIVE view (not a copy).  Mutations to the returned dict
+    are reflected in _REGISTRIES.
+
+    Args:
+        name: Registry partition name.  Defaults to ``"default"``.
+
+    Returns:
+        The dict mapping tool name -> ToolEntry for the named partition.
+    """
+    if name not in _REGISTRIES:
+        _REGISTRIES[name] = {}
+    return _REGISTRIES[name]
+
+
+def _snapshot(name: str = "default") -> dict[str, ToolEntry]:
+    """Return a SHALLOW COPY of the named partition at call time.
+
+    Snapshot semantics (C6): entries added after this call are NOT reflected
+    in the returned dict.  cisterna.wire() uses this so the wired tool set is
+    frozen at wire time.
+
+    Args:
+        name: Registry partition name.  Defaults to ``"default"``.
+
+    Returns:
+        A new dict that is a copy of the partition at this moment.
+    """
+    return dict(_registry(name))
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
+
+
+def register(
+    fn: Callable[..., Any],
     *,
     registry: str = "default",
     name: str | None = None,
-) -> Callable[..., Any]:
-    """Pure metadata marker: register *fn* in the named registry.
+) -> None:
+    """Insert *fn* into the named registry partition.
 
-    Calling this decorator must NOT alter *fn* in any way.  The returned
-    object must satisfy ``decorated_fn is fn``.
-
-    Args:
-        fn: The function to register.  When the decorator is used without
-            arguments (``@cisterna.tool``) this is supplied positionally.
-        registry: Which named registry to store the tool in.  Defaults to
-            ``"default"``.
-        name: Override for the tool name stored in the registry.  If None,
-            ``fn.__name__`` is used.
-
-    Returns:
-        *fn* unchanged.
-
-    Raises:
-        NotImplementedError: Until M2-REGISTRY (2141) ships.
-    """
-    raise NotImplementedError("implemented in M2-REGISTRY (2141)")
-
-
-def clear_registry(registry: str = "default") -> None:
-    """Remove all entries from the named registry.
-
-    Primarily for test teardown.  Calling this on a registry that does not
-    exist is a no-op.
+    This is an internal helper called by the ``@tool`` decorator.  Direct
+    callers should use the decorator instead.
 
     Args:
-        registry: The registry name to clear.  Defaults to ``"default"``.
-
-    Raises:
-        NotImplementedError: Until M2-REGISTRY (2141) ships.
+        fn:       The callable to register.
+        registry: Partition name.  Defaults to ``"default"``.
+        name:     Override for the stored tool name.  Defaults to ``fn.__name__``.
     """
-    raise NotImplementedError("implemented in M2-REGISTRY (2141)")
+    tool_name = name if name is not None else fn.__name__
+    entry = ToolEntry(name=tool_name, fn=fn, registry=registry)
+    _registry(registry)[tool_name] = entry
 
 
-def _registry(name: str = "default") -> dict[str, object]:
-    """Return a live view of the named registry (not a copy).
+def clear_registry(name: str | None = None) -> None:
+    """Remove all entries from a single registry partition.
 
-    Internal API used by cisterna.wire() and tests.
+    - ``name=None``  clears ONLY the ``"default"`` partition.
+    - ``name="foo"`` clears ONLY the ``"foo"`` partition.
+    - All other partitions are left untouched in both cases.
+
+    Calling this on a partition that does not yet exist is a no-op.
 
     Args:
-        name: Registry name.  Defaults to ``"default"``.
-
-    Returns:
-        The dict mapping tool name -> callable for the named registry.
-
-    Raises:
-        NotImplementedError: Until M2-REGISTRY (2141) ships.
+        name: The partition to clear.  ``None`` means ``"default"``.
     """
-    raise NotImplementedError("implemented in M2-REGISTRY (2141)")
-
-
-def _snapshot(name: str = "default") -> dict[str, object]:
-    """Return a shallow copy (snapshot) of the named registry at call time.
-
-    Used by cisterna.wire() to implement C6 snapshot semantics: tools added
-    after the snapshot is taken are not reflected in the returned dict.
-
-    Args:
-        name: Registry name.  Defaults to ``"default"``.
-
-    Returns:
-        A new dict that is a copy of the registry at this moment.
-
-    Raises:
-        NotImplementedError: Until M2-REGISTRY (2141) ships.
-    """
-    raise NotImplementedError("implemented in M2-REGISTRY (2141)")
+    target = name if name is not None else "default"
+    if target in _REGISTRIES:
+        _REGISTRIES[target].clear()

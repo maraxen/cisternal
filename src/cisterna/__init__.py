@@ -6,6 +6,8 @@ Public API (spec §3.2):
   - span(name, **fields): Sync timing context manager
   - aspan(name, **fields): Async timing context manager
   - status(): Get pipeline health status
+  - tool: Pure-metadata decorator for registering MCP tools
+  - clear_registry: Test teardown helper; clears a named registry
 """
 
 from pathlib import Path
@@ -20,6 +22,8 @@ from cisterna.telemetry import (
     ExporterBase,
     _build_record,
 )
+from cisterna.registration.decorator import tool
+from cisterna.registration.registry import clear_registry
 
 
 def init(
@@ -74,4 +78,6 @@ __all__ = [
     "span",
     "aspan",
     "status",
+    "tool",
+    "clear_registry",
 ]
