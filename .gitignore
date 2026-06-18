@@ -11,3 +11,6 @@ wheels/
 
 # Telemetry test output
 logs/
+
+# Claude Code harness worktrees
+.claude/

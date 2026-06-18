@@ -1,0 +1,68 @@
+---
+workspace: cisterna
+session_id: be5255e4-56f7-4675-b99c-d6ec8b443056
+status: complete
+immediately_relevant:
+- file: .praxia/docs/specs/260616_design-the-cisterna-m2-registration-surf.md
+  lines:
+  - 1
+  - 200
+  reason: 'The merged M2 spec: 7 assumptions, 5 TBDs (TBD-M2-2 resolved), 14 ACs (AC-M2-1..14), adversarial resolutions C1/C3/C5/C6. Source of truth for the 8 backlog items.'
+- file: src/cisterna/adapters/v3_middleware.py
+  lines:
+  - 1
+  - 80
+  reason: M1 CisternaMiddleware — owns ALL telemetry/shaping; M2 wire-time callable must be a pure passthrough (AC-M2-6 hard invariant).
+- file: src/cisterna/adapters/base.py
+  lines:
+  - 1
+  - 60
+  reason: AdapterBase (owned by cisterna). Concrete adapters (Bathos/Contemplex) are reference impls; new ones (Xperiri/Myxcel) live in those repos, not cisterna.
+- file: crates/praxia-mcp/src/main.rs
+  lines:
+  - 102
+  - 112
+  reason: 'Root cause of the workspace-id block: RunContext.workspace_id frozen at boot from .praxia/workspace.id. (This file is in the praxia repo, not cisterna.)'
+active_dispatches: []
+task_id: 260616_cisterna-m2-spec-promote
+phase: M2 spec → backlog
+goal_statement: Finalize the M2 registration-surface spec (resolve TBD-M2-2) and promote it from spec to the praxia backlog as the M2 DAG.
+context_refs: []
+failed_attempts:
+- attempt_id: a1
+  description: Edited .praxia/workspace.id to the canonical id and re-handshaked to realign the MCP server
+  outcome: Handshake rewrote the file back; no effect on writes
+  reason_failed: MCP server derives/caches workspace_id at boot (RunContext), does not read the file per-request
+  do_not_retry: true
+  evidence_ref: null
+- attempt_id: a2
+  description: praxia init --force to re-register the workspace
+  outcome: Generated a NEW random id (6395b1fb) and wiped .praxia/ — restored from backup
+  reason_failed: Installed CLI used old random-uuid scheme then; --force is destructive and does not populate the MCP-side workspaces row
+  do_not_retry: true
+  evidence_ref: null
+- attempt_id: a3
+  description: /mcp reconnect after healing files
+  outcome: Still FK-failed with stale 0a31670b
+  reason_failed: reconnect re-attaches to the persistent praxia-mcp process; only a full process restart re-reads workspace.id
+  do_not_retry: true
+  evidence_ref: null
+open_questions:
+- Should the M2 spec still be routed through spec_driven_dev/spec_challenge, or is the prior adversarial review (C1/C3/C5/C6 resolved) sufficient to start implementation directly at M2-PKG?
+deferred:
+- description: Push main (c255773) to remote
+  rationale: User merges only; push not requested this session
+  recommended_phase: M2 impl kickoff
+- description: Commit reconciled .praxia/* + praxia.toml (workspace-id healed to ws_bfbf2e90)
+  rationale: Left per cisterna ask_first rule; user reviews/commits
+  recommended_phase: next cisterna session
+- description: M2.5-XPERIRI (2145) and M2.5-MYXCEL (2146) adapters
+  rationale: Concrete adapters belong in xperiri/myxcel repos, not cisterna; branch off M2-WIRE
+  recommended_phase: after M2-WIRE (2143)
+lessons_refs: []
+next_steps:
+- 'Optional: push main (commit c255773) to remote — not yet pushed'
+- 'Commit the reconciled .praxia/* workspace-id files in cisterna (left uncommitted per ask_first): identity.json, workspace.id, vsm_state.json, praxia.toml, etc.'
+- 'File praxia bug: RunContext.workspace_id is read once at crates/praxia-mcp/src/main.rs:102 and never reconciled; a running MCP server uses a stale id if .praxia/workspace.id changes under it'
+- Begin M2 implementation at backlog id 2140 (M2-PKG); route spec through spec_driven_dev / spec_challenge if desired (spec already challenger-hardened)
+---
