@@ -18,8 +18,6 @@ Acceptance criteria covered:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any
 
 import fastmcp
 import pytest
@@ -29,38 +27,6 @@ from cisterna.registration.decorator import tool
 from cisterna.registration.errors import CisternaWireError
 from cisterna.registration.registry import clear_registry
 from cisterna.registration.wired import WiredRegistry, wire
-
-
-# ---------------------------------------------------------------------------
-# Minimal concrete AdapterBase subclass (defined here — do NOT import Bathos
-# or Contemplex adapters which live in other repos).
-# ---------------------------------------------------------------------------
-
-@dataclass
-class _MinimalAdapter:
-    """Minimal concrete AdapterBase stand-in for test isolation.
-
-    We do NOT subclass cisterna.adapters.base.AdapterBase to avoid a hard
-    import dependency on it from this test module.  wire() accepts any object
-    for the 'adapter' parameter and intentionally never calls any method on it.
-    """
-
-    calls: list[str] = field(default_factory=list)
-
-    def emit_start(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("emit_start")
-
-    def emit_end(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("emit_end")
-
-    def emit_error(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("emit_error")
-
-    def shape_ok(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("shape_ok")
-
-    def shape_error(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("shape_error")
 
 
 # ---------------------------------------------------------------------------
@@ -474,7 +440,7 @@ class TestAdapterNotCalled:
     """Passing an adapter to wire() must not invoke any adapter methods (C5/AC-M2-6)."""
 
     @pytest.mark.asyncio
-    async def test_adapter_methods_never_called(self):
+    async def test_adapter_methods_never_called(self, spy_adapter):
         """AC-M2-6/C5: wire() with a spy adapter must call zero adapter methods."""
 
         @tool
@@ -482,10 +448,9 @@ class TestAdapterNotCalled:
             return x
 
         server = fastmcp.FastMCP("test-adapter-not-called")
-        adapter = _MinimalAdapter()
-        wire(server, adapter=adapter)
+        wire(server, adapter=spy_adapter)
 
-        assert adapter.calls == [], (
+        assert spy_adapter.calls == [], (
             f"wire() must not call any adapter methods (C5/AC-M2-6); "
-            f"got calls: {adapter.calls}"
+            f"got calls: {spy_adapter.calls}"
         )

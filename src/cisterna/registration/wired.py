@@ -178,7 +178,7 @@ def wire(
                     except SystemExit:
                         # Re-raise SystemExit unchanged (already a clean exit).
                         raise
-                    except BaseException as exc:
+                    except Exception as exc:
                         # F1: convert any other exception into a non-zero exit.
                         # Write a concise message to stderr (do NOT swallow).
                         print(

@@ -25,8 +25,7 @@ Acceptance criteria covered:
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass, field
-from typing import Any
+import time
 from unittest.mock import patch
 
 import fastmcp
@@ -37,37 +36,6 @@ from cisterna.registration.decorator import tool
 from cisterna.registration.registry import clear_registry
 from cisterna.registration.wired import wire
 from cisterna.telemetry import EventPipeline, ShadowExporter
-
-
-# ---------------------------------------------------------------------------
-# Minimal concrete AdapterBase subclass (defined here — do NOT import Bathos/Contemplex)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _SpyAdapter:
-    """Minimal spy adapter for asserting no adapter methods are called by the callable.
-
-    Tracks all calls to emit_start, emit_end, emit_error, shape_ok, shape_error.
-    We do NOT subclass AdapterBase to avoid importing real adapters from other repos.
-    """
-
-    calls: list[str] = field(default_factory=list)
-
-    def emit_start(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("emit_start")
-
-    def emit_end(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("emit_end")
-
-    def emit_error(self, *a: Any, **kw: Any) -> None:
-        self.calls.append("emit_error")
-
-    def shape_ok(self, *a: Any, **kw: Any) -> Any:
-        self.calls.append("shape_ok")
-
-    def shape_error(self, *a: Any, **kw: Any) -> Any:
-        self.calls.append("shape_error")
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +104,6 @@ class TestDirectCallZeroTelemetry:
 
         no_telem_sync(5)
 
-        import time
         time.sleep(0.05)
 
         assert len(spy.records) == 0, (
@@ -155,7 +122,6 @@ class TestDirectCallZeroTelemetry:
 
         await no_telem_async(10)
 
-        import time
         time.sleep(0.05)
 
         assert len(spy.records) == 0, (
@@ -206,7 +172,6 @@ class TestWiredMCPCallableNoTelemetry:
         await server.call_tool("add_numbers", {"a": 3, "b": 4})
         # We just need to verify no telemetry was emitted.
 
-        import time
         time.sleep(0.05)
 
         assert len(spy.records) == 0, (
@@ -215,7 +180,7 @@ class TestWiredMCPCallableNoTelemetry:
         )
 
     @pytest.mark.asyncio
-    async def test_wired_callable_spy_adapter_untouched(self, shadow_pipeline):
+    async def test_wired_callable_spy_adapter_untouched(self, shadow_pipeline, spy_adapter):
         """AC-M2-6(a): spy adapter passed to wire() must have zero calls (C5 invariant)."""
         spy, pipeline = shadow_pipeline
 
@@ -224,16 +189,15 @@ class TestWiredMCPCallableNoTelemetry:
             return x * y
 
         server = fastmcp.FastMCP("test-spy-adapter-untouched")
-        adapter = _SpyAdapter()
-        wire(server, adapter=adapter)
+        wire(server, adapter=spy_adapter)
 
         # Invoke via the server (no middleware — pure passthrough).
         await server.call_tool("multiply", {"x": 3, "y": 5})
 
         # The spy adapter must have received ZERO calls.
-        assert adapter.calls == [], (
+        assert spy_adapter.calls == [], (
             f"wire() and the wired callable must not invoke any adapter methods (C5); "
-            f"got: {adapter.calls}"
+            f"got: {spy_adapter.calls}"
         )
 
 
@@ -247,7 +211,7 @@ class TestWiredMCPCallableWithMiddlewareTelemetry:
     originates from MIDDLEWARE (not from the wired callable)."""
 
     @pytest.mark.asyncio
-    async def test_middleware_emits_telemetry_callable_does_not(self):
+    async def test_middleware_emits_telemetry_callable_does_not(self, spy_adapter):
         """AC-M2-6(b): with CisternaMiddleware, the adapter spy on the callable is untouched;
         telemetry emitted by middleware is attributable to middleware, not the callable."""
         from cisterna.adapters.v3_middleware import CisternaMiddleware
@@ -268,20 +232,18 @@ class TestWiredMCPCallableWithMiddlewareTelemetry:
 
             server = fastmcp.FastMCP("test-with-middleware")
             server.add_middleware(CisternaMiddleware())
-            # adapter=_SpyAdapter() — the callable must NOT call it.
-            adapter = _SpyAdapter()
-            wire(server, adapter=adapter)
+            # spy_adapter — the callable must NOT call any of its methods.
+            wire(server, adapter=spy_adapter)
 
             # Call the tool through the server (middleware is installed).
             await server.call_tool("greet", {"name": "World"})
 
-            import time
             time.sleep(0.1)
 
             # (1) Spy adapter must remain untouched by the callable (C5).
-            assert adapter.calls == [], (
+            assert spy_adapter.calls == [], (
                 f"The wired callable must not call adapter methods (C5/AC-M2-6); "
-                f"got: {adapter.calls}"
+                f"got: {spy_adapter.calls}"
             )
 
             # (2) The middleware DID emit telemetry (at least one record).
@@ -323,17 +285,13 @@ class TestMCPCallableExceptionPropagates:
         server = fastmcp.FastMCP("test-mcp-propagate")
         wire(server)
 
-        # Get the generated MCP callable directly from the internal tool map
-        # so we can call it without server-level error handling.
-        from cisterna.registration.compose import compose_mcp_callable
-
-        def also_explodes(x: int) -> int:
-            raise RuntimeError("boom!")
-
-        mcp_callable = compose_mcp_callable(also_explodes)
+        # Retrieve the wired MCP callable from the FastMCP server's tool registry
+        # and invoke it directly (bypassing server-level error handling).
+        wired_tool = await server.get_tool("exploding_tool")
+        mcp_callable = wired_tool.fn  # the compose_mcp_callable wrapper
 
         # Awaiting the callable must propagate the exception (not catch it).
-        with pytest.raises(RuntimeError, match="boom!"):
+        with pytest.raises(ValueError, match="kaboom"):
             await mcp_callable(x=1)
 
     @pytest.mark.asyncio
@@ -393,7 +351,8 @@ class TestCLICallableExceptionToExitCode:
         )
 
     def test_cli_callable_writes_message_to_stderr(self):
-        """F1 (CLI): CLI callable that raises writes a concise message to stderr."""
+        """F1 (CLI): CLI callable that raises writes a message to stderr containing
+        the exception type name and the original message (format: 'Error (RuntimeError): ...')."""
         @tool
         def message_tool(name: str) -> str:
             raise RuntimeError("something exploded")
@@ -412,8 +371,13 @@ class TestCLICallableExceptionToExitCode:
                 pass  # Some exception handling — we check stderr output below
 
         stderr_output = stderr_capture.getvalue()
-        assert stderr_output.strip(), (
-            "Expected a non-empty message on stderr when CLI callable raises"
+        assert "RuntimeError" in stderr_output, (
+            f"Expected 'RuntimeError' (the exception type name) in stderr output, "
+            f"got: {stderr_output!r}"
+        )
+        assert "something exploded" in stderr_output, (
+            f"Expected the original message 'something exploded' in stderr output, "
+            f"got: {stderr_output!r}"
         )
 
     def test_cli_callable_exception_does_not_emit_telemetry(self, shadow_pipeline):
@@ -437,7 +401,6 @@ class TestCLICallableExceptionToExitCode:
             except Exception:
                 pass
 
-        import time
         time.sleep(0.05)
 
         assert len(spy.records) == 0, (
