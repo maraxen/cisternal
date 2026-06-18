@@ -32,6 +32,7 @@ HARD INVARIANT (C5 / AC-M2-6):
 
 from __future__ import annotations
 
+import inspect
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -189,6 +190,8 @@ def wire(
 
                 _cli_cmd.__name__ = original_fn.__name__
                 _cli_cmd.__doc__ = original_fn.__doc__
+                _cli_cmd.__signature__ = inspect.signature(original_fn)  # type: ignore[attr-defined]
+                _cli_cmd.__annotations__ = dict(original_fn.__annotations__)
                 return _cli_cmd
 
             cli_cmd = _make_cli_cmd(_fn)

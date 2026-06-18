@@ -298,6 +298,11 @@ class TestSchemaFidelity:
         assert props["times"].get("description") == "How many times to greet", (
             f"Expected description='How many times to greet' in 'times' schema, got: {props['times']}"
         )
+        # F2: 'times' has a default value (= 1) and must NOT appear in 'required'.
+        assert "times" not in tool.parameters.get("required", []), (
+            f"'times' has a default and must not be in 'required', "
+            f"got required={tool.parameters.get('required', [])}"
+        )
 
 
 # ---------------------------------------------------------------------------
