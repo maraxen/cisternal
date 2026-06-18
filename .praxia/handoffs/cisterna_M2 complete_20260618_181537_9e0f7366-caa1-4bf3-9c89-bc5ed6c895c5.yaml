@@ -1,0 +1,47 @@
+---
+workspace: cisterna
+session_id: fce93ca0-d3a0-45b9-924f-383e657b24f3
+status: complete
+immediately_relevant:
+- file: src/cisterna/registration/
+  lines:
+  - 1
+  - 200
+  reason: 'Complete M2 surface: decorator.py (@tool pure marker, decorated is fn), registry.py (named registries + _snapshot + clear_registry), compose.py + shim.py (async-def MCP callable + E1 dispatch + H1 __signature__ injection), wired.py (wire() dual-transport + validation + WiredRegistry + F1 CLI handler, with CLI signature injection), errors.py (CisternaWireError).'
+- file: tests/test_registration_wire.py
+  lines:
+  - 1
+  - 525
+  reason: 'wire()/snapshot/validation/clear_registry + CLI signature-injection tests. Companions: test_registration_registry/compose/telem.py + conftest.py (shared spy adapter). 155 tests green.'
+- file: .praxia/docs/specs/260616_design-the-cisterna-m2-registration-surf.md
+  lines:
+  - 128
+  - 181
+  reason: 'Authoritative M2 spec: AC-M2-1..14 (all satisfied) + resolutions C1/C3/C5/C6. F4 (final audit): pre-mortem prose says clear_registry(registry=None) but impl correctly uses name= (doc-only stale).'
+- file: src/cisterna/adapters/v3_middleware.py
+  lines:
+  - 1
+  - 80
+  reason: M1 CisternaMiddleware owns ALL telemetry/shaping; M2 wired callable is a pure passthrough (C5/AC-M2-6 hard invariant, structurally verified).
+active_dispatches: []
+task_id: 260618_cisterna-m2
+phase: null
+goal_statement: Deliver the M2 registration surface (unified @cisterna.tool -> FastMCP MCP + Cyclopts CLI via cisterna.wire()) per the challenger-hardened spec, executed sprint-by-sprint through the worktree+merge composition runner, audited, and polished to airtight.
+context_refs: []
+failed_attempts: []
+open_questions:
+- cisterna in-repo backlog + staging + ideas are ALL drained; M2 complete + audited PASS + polished. M3 topic undefined and needs PI direction to seed BRAINSTORM (loop cannot self-seed an epic).
+deferred:
+- description: Push main to remote (15 commits this session, HEAD 4034e44)
+  rationale: PI merges/pushes only; not requested this session
+  recommended_phase: next session
+- description: M2.5-XPERIRI (2145) + M2.5-MYXCEL (2146) concrete adapters
+  rationale: Adapters live in xperiri/myxcel repos (consume cisterna.AdapterBase + wire()), not cisterna.
+  recommended_phase: separate session in those repos
+lessons_refs: []
+next_steps:
+- 'PI direction: seed M3 brainstorm (topic TBD) OR pause the loop'
+- 'Optional: push main (HEAD 4034e44) to remote'
+- 'Out-of-repo: M2.5 adapters in xperiri/myxcel'
+- 'Run mode: hitl_semi_autonomous'
+---
