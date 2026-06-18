@@ -7,10 +7,12 @@ Acceptance criteria covered:
                registered raises CisternaWireError; err.missing == ["tool_a"].
   AC-M2-10  — same setup with validate=False -> NO raise; WARNING is logged to
                "cisterna.registration" (verified via caplog).
-  AC-M2-11  — snapshot semantics: tool decorated AFTER wire() is NOT on the
-               wired server (tool list unchanged).
+  AC-M2-11  — post-wire decoration excluded from snapshot: tool decorated AFTER
+               wire() is NOT on the wired server (tool list unchanged).
   AC-M2-12  — after wire(), clear_registry() empties the metadata partition.
   AC-M2-13  — after clear_registry(), the already-wired server RETAINS its tools.
+  AC-M2-6/C5 — adapter methods never called: wire() with a spy adapter must not
+               invoke any adapter emit_*/shape_* methods.
 """
 
 from __future__ import annotations
@@ -445,7 +447,7 @@ class TestWiredRegistryStructure:
 
     @pytest.mark.asyncio
     async def test_cli_commands_populated_with_app(self):
-        """WiredRegistry.cli_commands is populated when an App is given."""
+        """WiredRegistry.cli_commands is populated when an App is given (TBD-M2-1: dual-transport)."""
 
         @tool
         def cli_registered_tool(x: int) -> int:
@@ -455,7 +457,13 @@ class TestWiredRegistryStructure:
         app = App()
         result = wire(server, app)
 
+        # TBD-M2-1: a single wire(server, app) call must populate BOTH transports.
         assert "cli_registered_tool" in result.cli_commands
+        assert "cli_registered_tool" in result.mcp_tools
+        names = await _tool_names(server)
+        assert "cli_registered_tool" in names, (
+            f"Expected cli_registered_tool on FastMCP server (dual-transport), got: {names}"
+        )
 
 
 # ---------------------------------------------------------------------------
