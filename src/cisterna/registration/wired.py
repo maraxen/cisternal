@@ -33,6 +33,7 @@ HARD INVARIANT (C5 / AC-M2-6):
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -154,8 +155,13 @@ def wire(
         mcp_tool_names.append(entry.name)
 
         # Register CLI command if app is supplied.
-        # The CLI callable is a pure passthrough to the original fn — no telemetry
-        # (C5 / AC-M2-6).  Full F1 CLI error handling lands in M2-TELEM.
+        # F1 dual error contract (CLI path):
+        #   - The CLI callable wraps exceptions into a clean CLI failure:
+        #     it writes a concise message to stderr and calls sys.exit(1).
+        #   - It does NOT emit telemetry (C5 / AC-M2-6).
+        #   - The MCP callable (above) is an unmodified passthrough — MCP
+        #     exceptions propagate to FastMCP/CisternaMiddleware, which is
+        #     M1's responsibility.
         if app is not None:
             # Capture entry.fn in the closure to avoid late-binding.
             _fn = entry.fn
@@ -163,10 +169,23 @@ def wire(
 
             def _make_cli_cmd(original_fn: Any) -> Any:
                 def _cli_cmd(*args: Any, **kwargs: Any) -> Any:
-                    # Pure passthrough — does NOT emit telemetry (C5 / AC-M2-6).
+                    # F1 CLI error contract: wrap exceptions into a clean exit.
+                    # No telemetry emitted here (C5 / AC-M2-6).
                     from cisterna.registration.shim import cli_dispatch
 
-                    return cli_dispatch(original_fn, *args, **kwargs)
+                    try:
+                        return cli_dispatch(original_fn, *args, **kwargs)
+                    except SystemExit:
+                        # Re-raise SystemExit unchanged (already a clean exit).
+                        raise
+                    except BaseException as exc:
+                        # F1: convert any other exception into a non-zero exit.
+                        # Write a concise message to stderr (do NOT swallow).
+                        print(
+                            f"Error ({type(exc).__name__}): {exc}",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
 
                 _cli_cmd.__name__ = original_fn.__name__
                 _cli_cmd.__doc__ = original_fn.__doc__
