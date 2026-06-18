@@ -19,6 +19,7 @@ import inspect
 from typing import Annotated, Any
 
 import pytest
+from pydantic import Field
 
 from cisterna.registration.compose import compose_mcp_callable
 from cisterna.registration.registry import clear_registry
@@ -262,12 +263,18 @@ class TestSchemaFidelity:
 
     @pytest.mark.asyncio
     async def test_annotated_types_schema(self):
-        """AC-M2-5b: Annotated[] params produce schema with description from metadata."""
+        """AC-M2-5b: Annotated[] params with pydantic.Field(description=...) produce
+        a stable 'description' field in the FastMCP JSON schema.
+
+        Uses pydantic.Field rather than bare Annotated[str, "..."] string metadata,
+        which is unreliable across FastMCP versions.  pydantic.Field is the canonical
+        way to attach field metadata recognised by both FastMCP and pydantic.
+        """
         import fastmcp
 
         def greet(
-            name: Annotated[str, "The name to greet"],
-            times: Annotated[int, "How many times to greet"] = 1,
+            name: Annotated[str, Field(description="The name to greet")],
+            times: Annotated[int, Field(description="How many times to greet")] = 1,
         ) -> str:
             return (name + " ") * times
 
@@ -282,12 +289,14 @@ class TestSchemaFidelity:
         props = tool.parameters.get("properties", {})
         assert "name" in props, f"'name' missing: {props}"
         assert "times" in props, f"'times' missing: {props}"
-        # Annotated[str, "..."] should produce description in schema
         assert props["name"].get("type") == "string", f"'name' type: {props['name']}"
         assert props["times"].get("type") == "integer", f"'times' type: {props['times']}"
-        # FastMCP picks up string metadata as description
-        assert "description" in props["name"], (
-            f"Expected 'description' in 'name' schema from Annotated metadata: {props['name']}"
+        # pydantic.Field(description=...) produces a stable 'description' in schema.
+        assert props["name"].get("description") == "The name to greet", (
+            f"Expected description='The name to greet' in 'name' schema, got: {props['name']}"
+        )
+        assert props["times"].get("description") == "How many times to greet", (
+            f"Expected description='How many times to greet' in 'times' schema, got: {props['times']}"
         )
 
 
