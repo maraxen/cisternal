@@ -44,7 +44,13 @@ def registry_assets(registry: str = "default") -> tuple[AssetSpec, ...]:
         A tuple of :class:`AssetSpec` instances, sorted by ``name``.
         Empty if the registry is unknown or empty.  Never raises.
     """
-    from cisterna.registration.registry import _snapshot
+    from cisterna.registration.registry import _REGISTRIES, _snapshot
+
+    # Pre-check: avoid silently creating an empty partition as a side effect of
+    # _snapshot() -> _registry() -> _REGISTRIES[name] = {}.  Unknown registry is
+    # treated as empty (never-raise / pure-read semantics, spec section 1 / M5).
+    if registry not in _REGISTRIES:
+        return ()
 
     try:
         snapshot = _snapshot(registry)

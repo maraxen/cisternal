@@ -157,3 +157,52 @@ def test_write_result_files_is_tuple(tmp_path: pytest.TempPathFactory) -> None:
     """WriteResult.files must be a tuple (not list)."""
     result = write_bundle({"a.txt": "content"}, tmp_path, dry_run=True)  # type: ignore[arg-type]
     assert isinstance(result.files, tuple)
+
+
+# ---------------------------------------------------------------------------
+# never-raise: write_bundle must not raise on I/O failure (audit finding)
+# ---------------------------------------------------------------------------
+
+
+def test_write_bundle_never_raises_on_io_failure(
+    tmp_path: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """write_bundle must not raise when write_text raises OSError.
+
+    Monkeypatches pathlib.Path.write_text to raise OSError on every call.
+    Asserts the function returns a WriteResult (no exception) and that a
+    WARNING was emitted via the cisterna.export logger naming the failed path.
+    content_sha256 is still included in the result (hash is content-based,
+    independent of write success).
+    """
+    import logging
+    import pathlib
+
+    from cisterna.export.write import WriteResult
+
+    def _raise_oserror(self: pathlib.Path, *args: object, **kwargs: object) -> None:  # noqa: ARG001
+        raise OSError("injected permission denied")
+
+    monkeypatch.setattr(pathlib.Path, "write_text", _raise_oserror)
+
+    with caplog.at_level(logging.WARNING, logger="cisterna.export"):
+        result = write_bundle({"a/b.txt": "x"}, tmp_path, dry_run=False)  # type: ignore[arg-type]
+
+    # Must return a WriteResult — no exception propagated.
+    assert isinstance(result, WriteResult)
+    assert result.dry_run is False
+
+    # content_sha256 is still computed regardless of write failure.
+    assert len(result.files) == 1
+    rel, sha = result.files[0]
+    assert rel == "a/b.txt"
+    assert sha == _sha256("x")
+
+    # A WARNING must have been logged naming the failed path.
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings, "expected at least one WARNING from cisterna.export"
+    assert any("a/b.txt" in r.message or "b.txt" in r.message for r in warnings), (
+        f"WARNING did not mention the failed path; got: {[r.message for r in warnings]}"
+    )

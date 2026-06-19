@@ -8,9 +8,13 @@ Design invariants:
     - ``dry_run=True``: computes content_sha256 for each file, writes NOTHING,
       returns a WriteResult capturing the hashes.
     - ``dry_run=False``: creates parent directories and writes each file as UTF-8,
-      then returns WriteResult.
+      then returns WriteResult.  I/O failures (OSError / PermissionError) are
+      caught per-file: a WARNING is logged naming the path and error, and the
+      loop continues to the next file.  The function NEVER raises on I/O failure.
+    - content_sha256 is the SHA-256 of the file contents and is always computed,
+      regardless of write success (the hash is content-based, not write-success-based).
     - Empty ``files`` → empty WriteResult, no error (PM-1/3).
-    - NEVER raises (never-raise contract).
+    - NEVER raises (never-raise contract), including on I/O failure.
 
 B2 resolution — distinct hashes:
     The ``content_sha256`` in WriteResult is the per-file content hash
@@ -24,8 +28,11 @@ B2 resolution — distinct hashes:
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+_log = logging.getLogger("cisterna.export")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +71,8 @@ def write_bundle(
     Returns:
         A :class:`WriteResult` with per-file ``content_sha256`` values and the
         ``dry_run`` flag.  Empty ``files`` yields an empty WriteResult (no
-        error).
+        error).  When ``dry_run=False``, I/O errors are logged as WARNINGs and
+        skipped — this function never raises on I/O failure.
     """
     result: list[tuple[str, str]] = []
 
@@ -75,7 +83,14 @@ def write_bundle(
 
         if not dry_run:
             target = out / rel_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(contents, encoding="utf-8")
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(contents, encoding="utf-8")
+            except OSError as exc:
+                _log.warning(
+                    "cisterna.export: write_bundle failed to write %s: %s",
+                    target,
+                    exc,
+                )
 
     return WriteResult(files=tuple(result), dry_run=dry_run)
