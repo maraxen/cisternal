@@ -1,0 +1,53 @@
+---
+workspace: cisterna
+session_id: fce93ca0-d3a0-45b9-924f-383e657b24f3
+status: complete
+immediately_relevant:
+- file: .praxia/docs/specs/260618_m3-buildable-spec.md
+  lines:
+  - 1
+  - 234
+  reason: 'Authoritative M3 rev2 buildable spec — locked decisions, 8 ACs, N0-N8b DAG, reconciliation log, and the explicit ''Deferred to M3.1'' list that seeds #2326.'
+- file: src/cisterna/assets/source.py
+  lines:
+  - 44
+  - 75
+  reason: 'registry_assets: ToolEntry->AssetSpec mapping with _REGISTRIES pre-check + never-raise signature degrade. The integration seam any M3.1 AssetSource must mirror.'
+- file: src/cisterna/export/claude.py
+  lines:
+  - 1
+  - 120
+  reason: 'ClaudeEmitter (names-only manifest, mirrors praxia bundle_claude.rs) — the pattern M3.1''s Cursor/Copilot/Antigravity emitters extend behind the Emitter ABC; also where tech-debt #2327 lives.'
+- file: src/cisterna/export/write.py
+  lines:
+  - 1
+  - 90
+  reason: write_bundle + WriteResult + the never-raise OSError guard (fixed this session).
+active_dispatches: []
+task_id: 260618_cisterna-m3-assets
+phase: M3 — agent-asset export (epic complete)
+goal_statement: 'Deliver M3: cisterna''s second mission pillar — export the live M2 @tool registry to a Claude Code plugin manifest (one canonical asset -> Claude surface), native Python, behind a pure-emit Emitter ABC seam for a future praxia-Rust backend.'
+context_refs:
+- phase: M2 — registration surface
+  task_id: 260616_cisterna-m2
+  summary: Shipped @cisterna.tool + wire(); M3's registry source consumes its ToolEntry/_snapshot. M2 absorbed the roadmap's original M3 (Cyclopts/CLI).
+failed_attempts:
+- attempt_id: merge-helper-branch-grep
+  description: Composition workflow merge-specialist greps refs for '^worktree-agent-' to find the single unmerged branch to land each wave.
+  outcome: Matched nothing — the Workflow tool's isolation:'worktree' branches are named 'worktree-wf_<runid>-N'. Waves W1/W4 stayed stranded; reviewers correctly returned FAIL ('no commits merged'), leaving zero M3 test coverage on main until manual recovery.
+  reason_failed: Branch prefix is run-id-based for workflow-run worktrees, not 'agent'-prefixed.
+  do_not_retry: true
+  evidence_ref: .claude/projects/-home-marielle-projects-cisterna/memory/worktree-merge-branch-naming.md
+open_questions: []
+deferred:
+- description: 'M3.1: file/manifest AssetSource + Cursor/Copilot/Antigravity emitters + Capability verb enum/map + model_hint table + validate subcommand + drift/golden + entry_point plugins + inspect subcommand + per-command .md files (validated Claude command schema).'
+  rationale: M3 deliberately scoped to a registry-sourced Claude-only vertical slice (only source with real data day one); richer abstractions are additive on the Emitter ABC + flat layout, no refactor needed.
+  recommended_phase: 'M3.1 (backlog #2326)'
+lessons_refs:
+- .claude/projects/-home-marielle-projects-cisterna/memory/worktree-merge-branch-naming.md
+next_steps:
+- 'No M3 work remains. When resuming: M3.1 (#2326) is the next milestone — file/manifest AssetSource + remaining surfaces (Cursor/Copilot/Antigravity) + Capability enum/map + model_hint table + validate subcommand + drift/golden; it is epic-shaped and needs its own brainstorm/design cycle (PI gated REGISTER last time).'
+- 'Quick win available: P3 tech-debt #2327 — drop the redundant command-name sort in ClaudeEmitter._build_manifest (src/cisterna/export/claude.py; AssetBundle.commands is already sorted at construction).'
+- 'M2.5 adapters #2145 (XpeririAdapter) / #2146 (MyxcelAdapter) belong in the xperiri/myxcel repos, not cisterna.'
+- 'Housekeeping: ~20 stale build worktrees under .claude/worktrees/ (git worktree prune + branch cleanup). main is unpushed — PI handles merges/pushes.'
+---
