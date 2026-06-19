@@ -44,8 +44,8 @@ _log = logging.getLogger("cisterna.cli")
 # App
 # ---------------------------------------------------------------------------
 
-app = cyclopts.App(name="cisterna", help="Cisterna CLI.")
-assets_app = cyclopts.App(name="assets", help="Agent-asset commands.")
+app = cyclopts.App(name="cisterna", help="Cisterna CLI.", version_flags=[])
+assets_app = cyclopts.App(name="assets", help="Agent-asset commands.", version_flags=[])
 app.command(assets_app)
 
 
