@@ -30,6 +30,9 @@ dev = [
     "ty>=0.0.49",
 ]
 
+[project.scripts]
+cisterna = "cisterna.cli:app"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 
