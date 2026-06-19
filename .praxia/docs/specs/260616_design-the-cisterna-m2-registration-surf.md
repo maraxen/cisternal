@@ -95,6 +95,9 @@ Negotiable:
 
 ## Assumptions
 
+### Original brainstorm assumptions (A1–A7)
+
+
 | # | Assumption |
 |---|-----------|
 | A1 | FastMCP v3 calls `asyncio.iscoroutinefunction(tool_callable)` to decide whether to `await` the tool callable — the generated MCP callable must be `async def` regardless of the original function's sync/async nature |
@@ -105,7 +108,23 @@ Negotiable:
 | A6 | Python ≥ 3.11 (`asyncio.get_running_loop()` is the stable API; `asyncio.get_event_loop()` is deprecated) |
 | A7 | Test environments call `cisterna.clear_registry()` in teardown to prevent cross-test registry contamination (pre-mortem scenario 3) |
 
+
+### Enriched assumptions with verification status (A-M2-1–A-M2-5)
+
+
+| ID | Assumption | Status |
+|---|---|---|
+| A-M2-1 | `@cisterna.tool` can be a pure metadata marker (stores fn reference, returns fn unchanged) without breaking any FastMCP or Cyclopts introspection that runs at import time | Unverified — verify against FastMCP source before implementation |
+| A-M2-2 | FastMCP's `inspect.signature()` call uses `follow_wrapped=True` (or equivalent) so `__signature__` injection on the generated callable is sufficient for correct schema generation | Partially verified — H1 is used by FastMCP itself for dynamic tool generation |
+| A-M2-3 | Cyclopts 4.18.0+ `asyncio.iscoroutinefunction()` check on the registered command determines async/sync dispatch path — a plain `async def` wired via `register_cli()` will be dispatched with `asyncio.run()` correctly | Verified — cyclopts `_run_maybe_async_command` uses `inspect.iscoroutinefunction` |
+| A-M2-4 | FastMCP v3 middleware (`CisternaMiddleware`) already handles MCP error shaping (F1 dual contract) — the generated MCP callable does NOT need to catch exceptions | Verified from M1 implementation |
+| A-M2-5 | A global module-level registry dict (keyed by registry name) is safe in CPython because the GIL protects dict insertions at import time; multiprocessing spawn is supported; fork is prohibited (C9 from M1) | Inherited from M1 C9 constraint |
+
+
 ## TBDs
+
+### Original TBDs (brainstorm session)
+
 
 | ID | Question | Options | Blocking |
 |----|----------|---------|---------|
@@ -114,6 +133,19 @@ Negotiable:
 | TBD-M2-3 | Async tool called via CLI inside a running event loop: error strategy? | `CisternaWireError` at wire time vs. runtime `RuntimeError` propagation vs. `asyncio.run_coroutine_threadsafe()` | M2-COMPOSE |
 | TBD-M2-4 | Is `validate=False` prohibited in production (hard block) or is a loud WARNING log sufficient? | Hard block vs. WARNING (pre-mortem scenario 1) | M2-WIRE |
 | TBD-M2-5 | Does `wire()` return a `WiredRegistry` introspection object or `None`? | Object (testable, observable) vs. `None` (simpler) | M2-WIRE |
+
+
+### Enriched TBDs (fixer enrichment pass)
+
+
+| ID | Item | Note |
+|---|---|---|
+| TBD-M2-1 | Whether `cisterna.wire()` supports explicit `mcp_version` override (v2/v3) or always auto-detects via `capability_probe.surface_for()` | Auto-detect is cleaner; override useful for testing against v2 while deployed on v3 |
+| TBD-M2-2 | Whether the Cyclopts App is always caller-supplied or optionally owned by cisterna (convenience for `cisterna.run_cli()`) | Caller-supplied is safer and more composable; ownership creates coupling |
+| TBD-M2-3 | Whether `validate=False` is permitted as a production escape hatch or prohibited entirely; pre-mortem recommends at minimum a loud `warnings.warn(stacklevel=2)` on disable | Pre-mortem failure #1: teams disable validation in staging and never re-enable |
+| TBD-M2-4 | M2 scope boundary: does M2 include Cyclopts CLI registration (`register_cli`) or only FastMCP MCP registration? Current ecosystem is Typer-only; Cyclopts is a declared dependency but unused | If M2 is MCP-only, CLI registration moves to M3; avoids premature Cyclopts adoption |
+| TBD-M2-5 | Whether `cisterna._registry(name)` is part of the public API (test/introspection use) or internal only | Tests need it; if internal, test fixtures use the same private API as production introspection |
+
 
 ## Pre-mortem Record
 **User:** Three failure scenarios, ranked by probability:
@@ -126,55 +158,250 @@ Negotiable:
 **AI:** _not recorded_
 
 ## Acceptance Criteria
-**Given** Fixed constraints:
-1. FastMCP v3 (bathos) uses server-level middleware — ALL tools on a server share one adapter; individual function decoration is additive, not the primary wiring point
-2. Shape divergence is transport-required: Bathos must get {ok, error_code, error, resolution_hint}; Contemplex gets passthrough; Xperiri gets JSON string — the decorator cannot unify these into one return type
-3. Cyclopts async caveat: inside FastMCP's running event loop, asyncio.run() fails — CLI invocation and MCP invocation have different execution contexts
-4. Consumer identity is not known at function decoration time — it's known at server/app initialization time (which server is the function registered on?)
-5. Python type annotations must be preserved for FastMCP schema generation and Cyclopts argument parsing
 
-Negotiable:
-- Whether registration is one decorator (@cisterna.tool) or a cisterna-owned server/app object that functions register into
-- Whether shape adaptation happens at decoration time (separate wrapper per consumer) or at dispatch time (runtime adapter selection)
-- Whether CLI and MCP registration happen via the same call or separate (but both part of cisterna's API)
-- Whether M2 scope includes Cyclopts or just fixes the MCP registration surface first
-**When** implementing B+G2-steelman hybrid: @cisterna.tool is a pure metadata marker (no wrapping at decoration time); named registries (B1); cisterna.wire(server, app, adapter, registry) generates transport-specific callables at wire time via an internal compose-then-register pipeline; E1 async/sync shim; F1 dual error contract (middleware for MCP, decorator for CLI); H1 __signature__ injection on generated callables; mandatory post-wire validation (fail-fast on import-order misses); wire() is a thin public API over internal compose()+register_mcp()+register_cli() steps
-**Then**
-  - [ ] AC-M2-1 (decoration purity): `@cisterna.tool`-decorated `fn` satisfies `decorated_fn is fn == True`; `asyncio.iscoroutinefunction(decorated_fn)` matches pre-decoration value
-  - [ ] AC-M2-2 (MCP callable: async def for async original): `cisterna.wire(server, adapter=BathosAdapter())` for an `async def` tool produces a wired callable where `asyncio.iscoroutinefunction(wired_callable) == True`
-  - [ ] AC-M2-3 (MCP callable: async def for sync original): `cisterna.wire(server, adapter=BathosAdapter())` for a `def` (sync) tool also produces a wired callable where `asyncio.iscoroutinefunction(wired_callable) == True` (sync fn is wrapped in an `async def` shim)
-  - [ ] AC-M2-4 (signature preservation): `inspect.signature(wired_mcp_callable) == inspect.signature(original_fn)` for both sync and async originals, including `Annotated[]` parameter types
-  - [ ] AC-M2-5 (schema fidelity): FastMCP JSON schema generated for a wired tool matches the original function's parameter type annotations for ≥ 2 representative cases (one with `Annotated[str, Doc(...)]`, one with plain types)
-  - [ ] AC-M2-6 (no double telemetry — C5): the M2 wire-time MCP callable does NOT call `adapter.emit_start`, `adapter.emit_end`, `adapter.emit_error`, `adapter.shape_ok`, or `adapter.shape_error`; telemetry is exclusively M1 CisternaMiddleware's responsibility
-  - [ ] AC-M2-7 (named registry isolation): `@cisterna.tool(registry="bathos")` → tool appears in `_registry("bathos")` only; absent from `_registry("default")`
-  - [ ] AC-M2-8 (registry-scoped wire): `cisterna.wire(server, registry="contemplex")` includes only tools from the "contemplex" partition
-  - [ ] AC-M2-9 (validation fail-fast): `cisterna.wire(server, expected=["tool_a", "tool_b"])` raises `CisternaWireError(missing=["tool_a"])` when "tool_a" was not decorated
-  - [ ] AC-M2-10 (validate=False warning): `validate=False` suppresses `CisternaWireError` and emits a WARNING to the `cisterna.registration` logger
-  - [ ] AC-M2-11 (snapshot semantics — C6): tools decorated AFTER `cisterna.wire()` are NOT registered on the already-wired server
-  - [ ] AC-M2-12 (clear_registry scope): `cisterna.clear_registry()` empties the default registry; already-wired servers retain their callables
-  - [ ] AC-M2-13 (clear_registry named): `cisterna.clear_registry(name="bathos")` empties only the "bathos" partition; others unaffected
-  - [ ] AC-M2-14 (direct call — C1): calling a `@cisterna.tool`-decorated function directly returns the original return value; zero telemetry events emitted
+### AC-TOOL: @cisterna.tool marker
 
-## Adversarial Review Resolutions
+**AC-TOOL-1 — Pure metadata, no wrapping**
+Given a function `fn` decorated with `@cisterna.tool`;
+When the original function object is inspected via `type(fn)`, `inspect.signature(fn)`, and `fn.__annotations__`;
+Then all three are identical to the undecorated function; `fn()` is callable and returns its result directly without telemetry or shape adaptation.
 
-Findings from spec-challenger / spec-defender cycle (2026-06-16). FATALs resolved before backlog promotion.
+**AC-TOOL-2 — Default registry population**
+Given `@cisterna.tool` applied to functions A, B, C in module scope;
+When `cisterna._registry("default")` is inspected before any `wire()` call;
+Then all three function names appear in the registry; no wrapping of the originals has occurred.
 
-### C3 (FATAL → Resolved): async-callable materialization
+**AC-TOOL-3 — Named registry isolation**
+Given `@cisterna.tool(registry="bathos")` on function A and `@cisterna.tool(registry="contemplex")` on function B;
+When `cisterna._registry("bathos")` and `cisterna._registry("contemplex")` are each inspected;
+Then A appears only in "bathos"; B appears only in "contemplex"; neither registry contains the other's tools.
 
-**Contradiction**: E1 shim (runtime async detection) was accepted; E2/H2 (two materialized callables) was rejected. But FastMCP's `iscoroutinefunction()` check means the MCP callable must be `async def`, which IS callable materialization at wire time.
+### AC-WIRE: cisterna.wire()
 
-**Resolution**: The generated MCP callable is always `async def` (wire-time materialization, E2 outer form). The E1 shim governs the internal dispatch logic inside that callable — for sync originals the wrapper body calls the function synchronously; for async originals it awaits it. The `iscoroutinefunction()` requirement is satisfied by the outer `async def` wrapper; the E1 "runtime detection" concern only applies if we had tried to generate a sync callable for MCP, which we do not. Decision log note "E1 shim" should be read as "E1 shim inside an `async def` MCP wrapper". ACs: AC-M2-2, AC-M2-3.
+**AC-WIRE-1 — Wire to FastMCP**
+Given a FastMCP server instance and `cisterna.wire(server, adapter=BathosAdapter())` called after all tool modules are imported;
+When the server's registered tool list is inspected;
+Then each function from the default registry appears as a FastMCP tool with its original name and type annotations visible via `inspect.signature`.
 
-### C5 (FATAL → Resolved): double telemetry/shaping
+**AC-WIRE-2 — Wire to Cyclopts**
+Given a `cyclopts.App` instance and `cisterna.wire(app=cli_app)` called;
+When the app's command list is inspected;
+Then each function from the default registry appears as a Cyclopts command with its original parameter names and types.
 
-**Contradiction**: M1 CisternaMiddleware already calls `adapter.emit_start/end/error` and `adapter.shape_ok/shape_error` for every `on_call_tool` on a v3 server. If the M2 wire-time callable also emits telemetry, every call is double-counted.
+**AC-WIRE-3 — Dual wire (MCP + CLI)**
+Given both `server` and `cli_app` supplied to `cisterna.wire(server, app=cli_app, adapter=BathosAdapter())`;
+When both server and app are inspected;
+Then the same tools appear in both; no tool appears in one but not the other.
 
-**Resolution**: Explicit division of labor — M1 owns all telemetry and shape adaptation; M2 wire-time MCP callable is a passthrough. The callable wraps `fn` in an `async def` with H1 signature injection and calls through; it does nothing else. This is stated as a hard invariant: any future implementation must not add `adapter.*` calls to the generated callable. AC: AC-M2-6.
+**AC-WIRE-4 — Named registry scoping**
+Given tools in "bathos" registry and tools in "contemplex" registry;
+When `cisterna.wire(bathos_server, adapter=BathosAdapter(), registry="bathos")` is called;
+Then only "bathos" tools are registered on `bathos_server`; "contemplex" tools are unaffected.
 
-### C1 (MAJOR → Resolved): decoration purity
+### AC-TELEM: Telemetry
 
-`@cisterna.tool` returns `fn` unchanged (`decorated_fn is fn`). Direct invocations before `wire()` call the original function with no telemetry and no shape adaptation. This is an explicitly documented test-environment tradeoff: tests get correct business logic without telemetry, which is acceptable because M1 middleware is not present in unit-test contexts. AC: AC-M2-1, AC-M2-14.
+**AC-TELEM-1 — MCP telemetry emission**
+Given a function wired via `wire(server, adapter=BathosAdapter())` with a `ShadowExporter` registered;
+When the tool is called via the FastMCP server;
+Then `mcp.call_start` and `mcp.call_end` records appear in `ShadowExporter.records` with correct `tool` field.
 
-### C6 (MAJOR → Resolved): snapshot vs. live-proxy semantics
+**AC-TELEM-2 — CLI telemetry emission**
+Given a function wired via `wire(app=cli_app)` with a `ShadowExporter` registered;
+When the CLI command executes;
+Then `cli.cmd_start` and `cli.cmd_end` records appear in `ShadowExporter.records`.
 
-`wire()` is a snapshot operation: it reads the registry at call time and does not re-read it later. Tools decorated after `wire()` are not included in the wired server (AC-M2-11). `clear_registry()` affects only the pre-wire metadata store; already-wired server callables are unaffected (AC-M2-12, AC-M2-13). The B2 live-proxy pattern is explicitly rejected per the Decision Log (DEFER, severity=MAJOR).
+### AC-ERROR: Error contracts (F1 dual contract)
+
+**AC-ERROR-1 — MCP error: envelope returned, no re-raise**
+Given a wired FastMCP tool that raises `RuntimeError("boom")`;
+When called via the FastMCP server;
+Then the exception is NOT re-raised to the transport; `adapter.shape_error()` result is returned (`ok=False`); `mcp.tool_error` is emitted.
+
+**AC-ERROR-2 — CLI error: exception re-raised**
+Given a wired Cyclopts command that raises `RuntimeError("boom")`;
+When called via `cli_app()`;
+Then the exception IS propagated (CLI owns exit code); `cli.cmd_end` with `ok=False` is emitted before re-raise.
+
+### AC-SIG: Annotation preservation (H1)
+
+**AC-SIG-1 — __signature__ preserved on generated MCP callable**
+Given a function with `(query: str, limit: int = 10) -> list[dict]` signature;
+When `cisterna.wire(server, ...)` registers it and the registered FastMCP callable is retrieved;
+Then `inspect.signature(registered_callable)` shows `query: str`, `limit: int = 10`, return `list[dict]` — identical to original.
+
+**AC-SIG-2 — Annotated[] types preserved**
+Given a function with `Annotated[str, "description"]` parameter;
+When registered via `wire()`;
+Then the `Annotated` wrapper survives and is visible to FastMCP schema generation.
+
+**AC-SIG-3 — FastMCP JSON schema correctness**
+Given a wired tool with `(query: str, limit: int = 10) -> list[dict]`;
+When FastMCP generates the JSON schema for that tool;
+Then schema has `query` as required string, `limit` as optional integer with default 10.
+
+### AC-ASYNC: Async/sync handling (E1 shim)
+
+**AC-ASYNC-1 — async def via MCP**
+Given an `async def` tool function wired to FastMCP;
+When called via FastMCP async dispatch (inside running event loop);
+Then the coroutine executes correctly; `asyncio.run()` is NOT called (would raise); result is returned.
+
+**AC-ASYNC-2 — async def via CLI (no running loop)**
+Given the same `async def` tool function wired to Cyclopts;
+When called via `cli_app()` from a context with no running event loop;
+Then Cyclopts calls `asyncio.run()` transparently; the result is returned; no `RuntimeError` raised.
+
+### AC-VALIDATE: Post-wire validation
+
+**AC-VALIDATE-1 — validate() passes when all tools wired**
+Given all tool modules imported before `wire()` and `wire()` called successfully;
+When `cisterna.validate()` is called;
+Then no exception is raised.
+
+**AC-VALIDATE-2 — validate() fails on import-order miss**
+Given a tool name "missing_tool" that is in the registry but was NOT wired (due to import order issue);
+When `cisterna.validate(registry="default", expected=["missing_tool"])` is called;
+Then `CisternaWireError` is raised listing "missing_tool".
+
+**AC-VALIDATE-3 — validation on-by-default**
+Given `cisterna.wire()` is called without explicit `validate=False`;
+When a tool module was never imported before wire();
+Then `CisternaWireError` is raised immediately after wire() completes (fail-fast, not warn).
+
+### AC-CLEAR: Registry management
+
+**AC-CLEAR-1 — clear_registry() empties default**
+Given tools in the default registry;
+When `cisterna.clear_registry()` is called;
+Then the default registry is empty; subsequent `wire()` registers zero tools.
+
+**AC-CLEAR-2 — clear_registry(name) is scoped**
+Given tools in "bathos" and "contemplex" registries;
+When `cisterna.clear_registry("bathos")` is called;
+Then only "bathos" is cleared; "contemplex" is unchanged.
+
+---
+
+## Implementation Spec
+
+### Module layout
+
+```
+cisterna/
+  registration/
+    __init__.py      # exports: tool, wire, validate, clear_registry, CisternaWireError
+    decorator.py     # @cisterna.tool — pure metadata marker; populates registry
+    registry.py      # ToolRegistry: dict[str, list[ToolEntry]]; named partitions
+    compose.py       # compose(registry_name, adapter) -> WiredRegistry
+    wired.py         # WiredRegistry: .register_mcp(server), .register_cli(app)
+    shim.py          # E1: _call_shim(fn, *args, **kwargs) — async/sync detection
+    errors.py        # CisternaWireError
+```
+
+### Public API
+
+```python
+# Registration marker (pure metadata, no wrapping)
+def tool(fn=None, *, registry: str = "default", name: str | None = None,
+         description: str | None = None):
+    """Mark fn as a cisterna tool. Returns fn UNCHANGED."""
+
+# Wire all tools in a registry to FastMCP server and/or Cyclopts app
+def wire(
+    server=None,                    # FastMCP server instance (optional)
+    *,
+    app=None,                       # cyclopts.App instance (optional)
+    adapter: AdapterBase | None = None,  # shape adapter for MCP (required if server supplied)
+    registry: str = "default",
+    validate: bool = True,          # raise CisternaWireError on import-order misses
+) -> "WiredRegistry": ...
+
+# Inspect registry contents (primarily for tests)
+def _registry(name: str = "default") -> list["ToolEntry"]: ...
+
+# Post-wire validation (also called internally by wire() when validate=True)
+def validate(
+    registry: str = "default",
+    expected: list[str] | None = None,  # if None, validates all registered tools are wired
+) -> None: ...  # raises CisternaWireError on failure
+
+# Clear registry (required in test teardown)
+def clear_registry(name: str | None = None) -> None: ...
+    # name=None clears all registries; name="bathos" clears only that partition
+
+class CisternaWireError(RuntimeError):
+    missing: list[str]  # tool names that could not be wired
+```
+
+### Internal architecture
+
+```
+@cisterna.tool
+    → ToolEntry(fn, name, registry) stored in _REGISTRY[registry]
+    → fn returned unchanged
+
+cisterna.wire(server, adapter=BathosAdapter(), registry="bathos")
+    → compose("bathos", BathosAdapter()) → WiredRegistry
+    → WiredRegistry.register_mcp(server):
+        for entry in registry:
+            mcp_callable = _make_mcp_callable(entry.fn, adapter)
+            # mcp_callable.__signature__ = inspect.signature(entry.fn)  [H1]
+            # mcp_callable is async (wraps entry.fn via E1 shim)
+            server.tool(name=entry.name)(mcp_callable)
+    → WiredRegistry.register_cli(app) [if app supplied]:
+        for entry in registry:
+            cli_callable = _make_cli_callable(entry.fn)
+            # cli_callable is sync; wraps entry.fn with asyncio.run() if needed [E1]
+            # cli_callable re-raises exceptions [F1]
+            app.command(name=entry.name)(cli_callable)
+    → validate() if validate=True [raises CisternaWireError on miss]
+
+E1 shim (_call_shim):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)  # MCP path
+    elif inspect.iscoroutinefunction(fn):
+        return asyncio.run(fn(*args, **kwargs))  # CLI path
+    else:
+        return fn(*args, **kwargs)  # sync path
+```
+
+### Backlog DAG
+
+```
+M2-PKG    Update pyproject: add cisterna.registration to packages. Gate: import works.
+    |
+    v
+M2-REGISTRY   decorator.py + registry.py: @cisterna.tool marker; ToolEntry; named registries;
+              clear_registry(); _registry(). Gate: AC-TOOL-1..3, AC-CLEAR-1..2.
+    |
+    v
+M2-COMPOSE    compose.py + wired.py + shim.py + errors.py: compose(); WiredRegistry;
+              _make_mcp_callable (H1 __signature__); _make_cli_callable (E1 shim);
+              CisternaWireError. Gate: AC-SIG-1..3, AC-ASYNC-1..2.
+    |
+    v
+M2-WIRE       wire() public API; validate(); post-wire validation (fail-fast).
+              Gate: AC-WIRE-1..4, AC-VALIDATE-1..3.
+    |
+    v
+M2-TELEM      Wire telemetry: connect compose step to M1 emit_start/end/error via adapter;
+              dual error contract F1. Gate: AC-TELEM-1..2, AC-ERROR-1..2.
+    |
+    v
+M2-INIT       Export tool, wire, validate, clear_registry from cisterna/__init__.py.
+              Update capability_probe to handle M2 surface. Gate: full import smoke test.
+
+--- M2.5 ---
+M2.5-XPERIRI  Wire XpeririAdapter (JSON-str returns) via M2 compose step. depends M2-WIRE.
+M2.5-MYXCEL   Wire MyxcelAdapter via M2 compose step. depends M2-WIRE.
+```
+
+### Pre-mortem mitigations (required in spec, not optional)
+
+1. **Validation disable path must warn loudly**: If `validate=False` is passed to `wire()`, emit `warnings.warn("cisterna.wire() called with validate=False — silent registration misses will not be detected", CisternaValidationDisabledWarning, stacklevel=2)`.
+2. **AC-SIG-3 guards against FastMCP signature drift**: A test that calls FastMCP's own schema generation on a wired tool and asserts the output JSON schema matches the original function's annotations must be in the suite.
+3. **clear_registry() must be called in test fixtures**: All tests that call `wire()` must call `clear_registry()` in teardown; a pytest autouse fixture should be provided in `tests/conftest.py`.
