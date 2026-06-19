@@ -55,6 +55,14 @@ from cisterna.registration.decorator import tool
 from cisterna.registration.errors import CisternaWireError
 from cisterna.registration.registry import clear_registry
 
+# M3 (assets export)
+from cisterna.assets.spec import AssetSpec
+from cisterna.assets.bundle import AssetBundle
+from cisterna.assets.source import registry_assets
+from cisterna.export.base import Emitter
+from cisterna.export.claude import ClaudeEmitter
+from cisterna.export.write import write_bundle
+
 
 def init(
     log_dir: str | Path | None = None,
@@ -130,4 +138,11 @@ __all__ = [
     "WiredRegistry",
     "CisternaWireError",
     "clear_registry",
+    # M3 (assets export)
+    "AssetSpec",
+    "AssetBundle",
+    "registry_assets",
+    "Emitter",
+    "ClaudeEmitter",
+    "write_bundle",
 ]
