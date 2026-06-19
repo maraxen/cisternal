@@ -2,6 +2,11 @@
 
 Provides a single shared SpyAdapter class used across test modules to avoid
 duplication and ensure consistent spy behavior.
+
+Also provides an autouse fixture that clears ALL registry partitions before
+and after each test (B3 resolution, spec §test-infrastructure).  This makes
+test_assets_*.py and test_export_*.py order-independent regardless of how
+many named partitions are created during a test run.
 """
 
 from __future__ import annotations
@@ -45,3 +50,32 @@ class SpyAdapter:
 def spy_adapter() -> SpyAdapter:
     """Return a fresh SpyAdapter instance for asserting no adapter methods are called."""
     return SpyAdapter()
+
+
+# ---------------------------------------------------------------------------
+# Registry isolation (B3 / spec §test-infrastructure)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_all_registries() -> Any:
+    """Clear ALL registry partitions before and after each test.
+
+    This prevents cross-test registry contamination when tests register tools
+    in various named partitions.  The fixture runs at function scope (default)
+    so each test starts with a clean slate.
+
+    Implementation: accesses cisterna.registration.registry._REGISTRIES
+    directly to discover and clear ALL partitions, not just "default".
+    cisterna.clear_registry() only clears one partition at a time, so we
+    call it for each known partition, then also clear the live dict entirely.
+    """
+    from cisterna.registration.registry import _REGISTRIES
+
+    # --- SETUP: clear before the test ---
+    _REGISTRIES.clear()
+
+    yield
+
+    # --- TEARDOWN: clear after the test ---
+    _REGISTRIES.clear()
