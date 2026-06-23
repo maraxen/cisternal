@@ -1,0 +1,27 @@
+[sprint]
+sprint_id = "260623_m32-epic-audit"
+name = "M3.2 inter-epic closeout audit (#2563)"
+description = "OPTION-B hybrid: VERIFY + CLI exit-2 hygiene + M3.3 triage registration."
+
+[[tracks]]
+id = "w1"
+[[tracks.items]]
+phase_name = "W1 — mechanical VERIFY"
+reviewer_prompt = "281 pytest green; closeout memo with 7/7 AC citations. PASS."
+
+[[tracks]]
+id = "w2"
+[[tracks.items]]
+phase_name = "W2 — hygiene"
+fixer_prompt = "Add CLI unknown-surface exit 2 tests; fix spec factory names."
+reviewer_prompt = "Tests pass. PASS."
+
+[[tracks]]
+id = "w3"
+[[tracks.items]]
+phase_name = "W3 — triage"
+fixer_prompt = "Register M3.3 parent backlog; loop_state TRIAGE."
+reviewer_prompt = "Backlog + loop updated. PASS."
+
+[orchestration]
+sequential = ["w1", "w2", "w3"]
