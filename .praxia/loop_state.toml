@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-23 — M4 epic audit VERIFY PASS; TRIAGE for M5
+# Updated 2026-06-23 — M5 brainstorm complete; telemetry adoption spec ready
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,27 +7,26 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_epic-audit_m4"
-current_phase = "TRIAGE"
-last_subphase = "epic_audit_verify_pass"
-last_artifact_path = ".praxia/docs/research/260623_m4-epic-closeout-audit.md"
-iteration_count = 14
-last_activation = "2026-06-23T23:30:00Z"
+task_id = "260623_m5-brainstorm"
+current_phase = "DESIGN"
+last_subphase = "brainstorm_finalize"
+last_artifact_path = ".praxia/docs/specs/260623_hmw-select-cisterna-m5-milestone-after-m.md"
+iteration_count = 15
+last_activation = "2026-06-23T23:45:00Z"
 autonomy_level = "L2"
 selected_item_ids = []
-selection_mode = "post_m4_audit"
-brainstorm_needed = true
-next_phase = "BRAINSTORM"
+selection_mode = "m5_telemetry_adoption"
+brainstorm_needed = false
+next_phase = "STAFF_DESIGN"
 rubric_version = "1.0"
 
 [loop.selected]
 closed_epic_id = 2597
-m31_rev2_deferred_complete = true
 m4_export_trust_complete = true
 
 [loop.gates]
 spec_confirmed = false
-spec_path = ""
+spec_path = ".praxia/docs/specs/260623_hmw-select-cisterna-m5-milestone-after-m.md"
 design_path = ""
 adversarial_verdict = ""
 sprint_approved = false
