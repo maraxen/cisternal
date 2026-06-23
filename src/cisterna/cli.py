@@ -204,10 +204,10 @@ def export(
         bundle = AssetBundle(metadata=metadata, commands=commands)
 
     # Emit.
-    from cisterna.assets.validate_golden import emit_surface_files  # noqa: PLC0415
+    from cisterna.export.registry import get_emitter, list_emitter_surfaces  # noqa: PLC0415
     from cisterna.export.write import write_bundle  # noqa: PLC0415
 
-    if surface not in {"claude", "cursor", "copilot", "antigravity"}:
+    if surface not in list_emitter_surfaces():
         _log.error("cisterna.cli: unsupported export surface %r", surface)
         raise SystemExit(2)
 
@@ -219,7 +219,12 @@ def export(
         )
         bodies = False
 
-    files = emit_surface_files(bundle, surface, emit_command_bodies=bodies)
+    emitter = get_emitter(surface, emit_command_bodies=bodies)
+    if emitter is None:
+        _log.error("cisterna.cli: could not load emitter for surface %r", surface)
+        raise SystemExit(2)
+
+    files = emitter.emit(bundle)
     result = write_bundle(files, out, dry_run=dry_run)
 
     if dry_run:
@@ -326,6 +331,11 @@ def validate_assets(
         golden_digest_path,
         surface_digest,
     )
+    from cisterna.export.registry import list_emitter_surfaces  # noqa: PLC0415
+
+    if surface not in list_emitter_surfaces():
+        _log.error("cisterna.cli: unsupported validate surface %r", surface)
+        raise SystemExit(2)
 
     report = load_asset_report(manifest=manifest, registry=registry)
 

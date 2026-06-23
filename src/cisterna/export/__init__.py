@@ -15,6 +15,7 @@ from cisterna.export.antigravity import AntigravityEmitter
 from cisterna.export.claude import ClaudeEmitter
 from cisterna.export.copilot import CopilotEmitter
 from cisterna.export.cursor import CursorEmitter
+from cisterna.export.registry import get_emitter, list_emitter_surfaces
 from cisterna.export.write import WriteResult, write_bundle
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "ClaudeEmitter",
     "CopilotEmitter",
     "CursorEmitter",
+    "get_emitter",
+    "list_emitter_surfaces",
     "WriteResult",
     "write_bundle",
 ]
