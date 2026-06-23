@@ -87,6 +87,20 @@ def test_validate_copilot_golden() -> None:
     )
 
 
+def test_validate_antigravity_golden() -> None:
+    """AC-M31c-3: validate --surface antigravity passes golden."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "antigravity",
+        ]
+    )
+
+
 def test_validate_cursor_missing_skill_path_exits_one(tmp_path: Path) -> None:
     """AC-M31b-7: missing skill path → validate exit 1 on cursor surface."""
     manifest_dir = tmp_path / "plugin"

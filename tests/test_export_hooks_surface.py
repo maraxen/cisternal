@@ -19,6 +19,7 @@ def test_hooks_for_surface_empty_means_all() -> None:
     )
     assert hooks_for_surface((spec,), "cursor") == (spec,)
     assert hooks_for_surface((spec,), "copilot") == (spec,)
+    assert hooks_for_surface((spec,), "antigravity") == (spec,)
 
 
 def test_hooks_for_surface_filters_by_token() -> None:
@@ -34,10 +35,40 @@ def test_hooks_for_surface_filters_by_token() -> None:
         script="copilot.sh",
         surfaces=("copilot",),
     )
-    specs = (cursor_only, copilot_only)
+    antigravity_only = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="anti.sh",
+        surfaces=("antigravity",),
+    )
+    specs = (cursor_only, copilot_only, antigravity_only)
 
     assert hooks_for_surface(specs, "cursor") == (cursor_only,)
     assert hooks_for_surface(specs, "copilot") == (copilot_only,)
+    assert hooks_for_surface(specs, "antigravity") == (antigravity_only,)
+
+
+def test_antigravity_only_hook_not_on_cursor_export() -> None:
+    """AC-M31c-2: surfaces=['antigravity'] hook appears only on antigravity export."""
+    from cisterna.export.antigravity import AntigravityEmitter
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(
+            HookSpecAsset(
+                event="PreToolUse",
+                matcher="Bash",
+                script="only-anti.sh",
+                surfaces=("antigravity",),
+            ),
+        ),
+    )
+
+    anti_files = AntigravityEmitter().emit(bundle)
+    cursor_files = CursorEmitter().emit(bundle)
+
+    assert "hooks/hooks.json" in anti_files
+    assert "hooks/hooks.json" not in cursor_files
 
 
 def test_cursor_only_hook_not_in_copilot_export() -> None:

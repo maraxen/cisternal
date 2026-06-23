@@ -40,3 +40,25 @@ def test_export_surface_cursor_writes_layout(tmp_path: Path) -> None:
     assert (out_dir / ".cursor-plugin" / "plugin.json").is_file()
     assert (out_dir / ".cursor" / "hooks.json").is_file()
     assert (out_dir / "agents" / "recon.agent.md").is_file()
+
+
+def test_export_surface_antigravity_writes_layout(tmp_path: Path) -> None:
+    """AC-M31c-5: export --surface antigravity writes gemini-extension layout."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    _invoke_app(
+        [
+            "assets",
+            "export",
+            "--surface",
+            "antigravity",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert (out_dir / "gemini-extension.json").is_file()
+    assert (out_dir / "agents" / "recon.md").is_file()
