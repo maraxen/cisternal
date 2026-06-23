@@ -1,0 +1,8 @@
+[sprint]
+sprint_id = "260623_m33bc-parallel"
+name = "M3.3b + M3.3c parallel wave"
+task_id = "260623_m33bc-parallel"
+
+[orchestration]
+sequential = ["integrate", "m33d"]
+concurrent = ["m33b", "m33c"]
