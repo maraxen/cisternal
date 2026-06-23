@@ -10,5 +10,5 @@ skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
 closed = 2563
-active = null
-active_title = ""
+active = 2581
+active_title = "M3.3: deferred export infrastructure (rev2 remainder)"
