@@ -1,0 +1,274 @@
+[sprint]
+sprint_id = "260623_m31a-manifest-validate"
+sprint_num = 2
+name = "Cisterna M3.1a — manifest source, validate, capability"
+description = "Four sequential waves implementing M3.1a per rev2 spec (backlog #2486). IR extension → manifest/composite sources → capability layer → inspect/validate/golden → Claude command bodies."
+context = '''
+Project: cisterna (Python 3.13, uv/pytest/ruff). Authoritative spec:
+.praxia/docs/specs/260623_m31-buildable-spec.md (rev2, PI-approved).
+
+M3 baseline: 220 tests green; ClaudeEmitter names-only; registry_assets in source.py;
+AssetBundle has commands+mcp_servers only.
+
+Stack rules: uv run pytest; uv run ruff check .; never bare python.
+Reference: /home/marielle/projects/praxia/crates/praxia-config/src/manifest.rs
+Do NOT touch M3.1b emitters (Cursor/Copilot) in this sprint.
+Preserve M3 default: ClaudeEmitter() byte-identical to pre-M3.1a (AC-M31a-4).
+'''
+max_fix_retries = 1
+
+# ============================================================
+# WAVE 1 — N0: IR extension + LoadReport + tests
+# ============================================================
+[[tracks]]
+id = "w1"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2486"
+phase_name = "M3.1a-W1 — IR extension (Skill/Agent/HookSpec/LoadReport)"
+fixer_prompt = '''
+task_id: 260623_autonomous-loop
+
+## Objective
+Implement spec rev2 AssetBundle IR extension (N0): SkillAsset, AgentAsset,
+HookSpecAsset, LoadReport; extend AssetBundle with skills/agents/hook_specs
+tuples + sort invariants.
+
+## Anchors
+- src/cisterna/assets/bundle.py — existing CommandAsset, McpAsset, AssetBundle
+- Spec: .praxia/docs/specs/260623_m31-buildable-spec.md § AssetBundle IR extension
+
+## Tasks
+1. Add SkillAsset, AgentAsset, HookSpecAsset dataclasses (frozen, slots) to bundle.py
+2. Extend AssetBundle with skills, agents, hook_specs tuple fields (default ())
+3. Enforce sort invariants in __post_init__: skills/agents by name;
+   hook_specs by (event, matcher, script) via object.__setattr__
+4. Add LoadReport dataclass (bundle, warnings, conflicts tuples)
+5. Export new types from src/cisterna/assets/__init__.py
+6. Add tests/test_assets_bundle_m31.py covering sort invariants + hashability
+
+## Constraints
+- Do not break existing M3 tests
+- No ManifestAssetSource yet — types only
+- Run: uv run ruff check . && uv run pytest
+
+## Commit
+feat(assets): extend AssetBundle IR for M3.1a (#2486 W1)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. SkillAsset, AgentAsset, HookSpecAsset, LoadReport exist in bundle.py
+2. AssetBundle has skills/agents/hook_specs with sort invariants
+3. Public exports updated in assets/__init__.py
+4. tests/test_assets_bundle_m31.py passes
+5. uv run pytest full suite green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 2 — N1-N3: AssetSource, Manifest, Composite, registry_bundle
+# ============================================================
+[[tracks]]
+id = "w2"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2486"
+phase_name = "M3.1a-W2 — ManifestAssetSource + Composite + registry_bundle"
+fixer_prompt = '''
+task_id: 260623_autonomous-loop
+
+## Objective
+Implement AssetSource Protocol, ManifestAssetSource, registry_bundle(),
+CompositeAssetSource per spec L1-L4, L12-L13, composite merge rules.
+
+## Anchors
+- src/cisterna/assets/source.py — registry_assets (keep public API)
+- src/cisterna/assets/bundle.py — extended IR from W1
+- praxia manifest.rs — Manifest, PluginSection, export_command.claude_code
+
+## Tasks
+1. Add AssetSource Protocol with load() -> LoadReport (never-raise)
+2. Create src/cisterna/assets/manifest.py — parse .praxia/manifest.toml (tomllib):
+   skills, agents (tools or frontmatter default_tools), hook_specs, plugin.mcp,
+   export_command.claude_code paths → CommandAsset
+3. Implement ManifestAssetSource(manifest_path)
+4. Implement registry_bundle(registry, metadata=None) -> AssetBundle in source.py
+5. Implement CompositeAssetSource(manifest_path, registry) with merge rules +
+   conflict detection (manifest wins; record conflicts in LoadReport)
+6. Tests: tests/test_assets_manifest.py, tests/test_assets_composite.py
+   - AC-M31a-1, AC-M31a-2, AC-M31a-3b, AC-M31a-9 fixtures
+7. Use tests/fixtures/manifest_minimal.toml for manifest tests
+
+## Constraints
+- registry_assets() unchanged signature/behavior
+- workflows/pipelines/snippets not loaded into IR (L14)
+- requires_praxia validation: skip or relax for cisterna test manifests
+
+## Commit
+feat(assets): ManifestAssetSource and CompositeAssetSource (#2486 W2)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. AssetSource Protocol + ManifestAssetSource + CompositeAssetSource exist
+2. registry_bundle() returns AssetBundle from registry only
+3. Composite manifest-wins + conflict recorded (AC-M31a-2 fixture)
+4. export_command.claude_code paths become CommandAsset (L12)
+5. All new tests pass; full pytest green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 3 — N4: Capability enum + vendor maps
+# ============================================================
+[[tracks]]
+id = "w3"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2486"
+phase_name = "M3.1a-W3 — Capability enum + resolve_tools + model_hint"
+fixer_prompt = '''
+task_id: 260623_autonomous-loop
+
+## Objective
+Port capability layer (N4): Capability enum (14 verbs), vendor_tools maps,
+resolve_tools(), resolve_model_hint().
+
+## Anchors
+- praxia: crates/praxia-agent-assets/src/capability.rs
+- praxia: agent_assets/portable_export/vendor_tools.toml
+- Spec AC-M31a-3, AC-M31a-10
+
+## Tasks
+1. Create src/cisterna/assets/capability.py with Capability enum (14 verbs)
+2. Load vendor maps from src/cisterna/assets/data/vendor_tools.toml (port subset:
+   claude_code at minimum; structure for cursor/copilot)
+3. resolve_tools(tokens, surface) -> tuple[str, ...] per spec resolution rules
+4. resolve_model_hint(hint, surface) -> str | None
+5. tests/test_assets_capability.py — AC-M31a-3 cases (read+search, invalid token)
+
+## Constraints
+- Empty capability_map entry raises ValueError
+- mcp__ pass-through tokens supported
+
+## Commit
+feat(assets): Capability enum and vendor tool resolution (#2486 W3)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. Capability enum has 14 verbs matching praxia
+2. resolve_tools(("read","search"), "claude_code") returns concrete tools
+3. Invalid token raises ValueError
+4. tests/test_assets_capability.py passes; full suite green
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 4 — N5-N6: inspect + validate CLI + golden harness
+# ============================================================
+[[tracks]]
+id = "w4"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2486"
+phase_name = "M3.1a-W4 — inspect + validate subcommands + golden harness"
+fixer_prompt = '''
+task_id: 260623_autonomous-loop
+
+## Objective
+Add cisterna assets inspect and cisterna assets validate (N5-N6) with golden
+hash harness per L7, L9, CLI contracts in spec.
+
+## Anchors
+- src/cisterna/cli.py — assets_app, existing export command
+- src/cisterna/export/_hash.py — existing hash utilities
+- CompositeAssetSource from W2
+
+## Tasks
+1. Add @assets_app.command inspect — JSON LoadReport to stdout;
+   flags: --manifest, --registry, --resolve-tools, --surface
+2. Add @assets_app.command validate — re-emit in-process, compare golden hash;
+   flags: --manifest, --registry, --surface, --emit-command-bodies, --use-native-cli
+3. Golden harness: tests/golden/claude/names_only/ fixture from current M3 export
+4. tests/test_cli_assets_inspect.py, tests/test_cli_assets_validate.py
+5. AC-M31a-6, AC-M31a-7, AC-M31a-8, AC-M31a-10 coverage
+
+## Constraints
+- inspect never writes files
+- validate exit 0 on match, 1 on drift/missing paths/conflicts
+- Default source CompositeAssetSource when --manifest provided
+
+## Commit
+feat(cli): assets inspect and validate subcommands (#2486 W4)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. cisterna assets inspect --help and validate --help work
+2. inspect prints JSON, no file writes (AC-M31a-7)
+3. validate compares golden hash for claude/names_only (AC-M31a-6)
+4. validate exit 1 on missing manifest command path (AC-M31a-8)
+5. --resolve-tools enriches inspect JSON (AC-M31a-10)
+6. Full pytest green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 5 — N7-N8: Claude command bodies + integration
+# ============================================================
+[[tracks]]
+id = "w5"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2486"
+phase_name = "M3.1a-W5 — ClaudeEmitter command bodies + export integration"
+fixer_prompt = '''
+task_id: 260623_autonomous-loop
+
+## Objective
+ClaudeEmitter emit_command_bodies flag (N7-N8); wire export CLI; golden
+with_command_bodies mode; preserve M3 default (AC-M31a-4/5).
+
+## Anchors
+- src/cisterna/export/claude.py — ClaudeEmitter, _build_manifest
+- src/cisterna/cli.py — export command
+- Spec L6, L11, AC-M31a-4, AC-M31a-5
+
+## Tasks
+1. Add emit_command_bodies: bool = False to ClaudeEmitter.__init__
+2. When True, emit commands/<name>.md for commands with non-empty body;
+   plugin.json commands array remains name strings only (L11)
+3. Add --emit-command-bodies to assets export and validate
+4. Optional: wire export to CompositeAssetSource when --manifest passed
+5. tests/golden/claude/with_command_bodies/ fixture
+6. tests/test_export_claude_bodies.py — AC-M31a-4 regression + AC-M31a-5
+7. Update src/cisterna/__init__.py lazy exports if needed
+
+## Constraints
+- ClaudeEmitter() default output byte-identical to M3 (AC-M31a-4)
+- No Cursor/Copilot emitters
+
+## Commit
+feat(export): optional Claude command body emission (#2486 W5)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. ClaudeEmitter() default matches M3 golden (AC-M31a-4)
+2. ClaudeEmitter(emit_command_bodies=True) emits commands/*.md (AC-M31a-5)
+3. plugin.json commands are name strings not paths (L11)
+4. export --manifest uses CompositeAssetSource
+5. All M3 tests still pass; new body tests pass; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+[orchestration]
+sequential = ["w1", "w2", "w3", "w4", "w5"]
+concurrent = []

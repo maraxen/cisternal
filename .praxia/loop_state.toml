@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-23 — VERIFY PASS, loop-again → BRAINSTORM for #2326
+# Updated 2026-06-23 — M3.1a VERIFY PASS; epic-audit APPROVE; route to M3.1b #2487
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,21 +7,25 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_autonomous-loop"
-current_phase = "BRAINSTORM"
-last_subphase = "research_complete"
-last_artifact_path = ".praxia/docs/research/260623_m31-research.md"
-iteration_count = 1
-last_activation = "2026-06-23T14:40:00Z"
+task_id = "260623_epic-audit_m31a"
+current_phase = "TRIAGE"
+last_subphase = "epic_audit_complete"
+last_artifact_path = ".praxia/docs/research/260623_m31a-epic-closeout-audit.md"
+iteration_count = 2
+last_activation = "2026-06-23T18:00:00Z"
 autonomy_level = "L2"
-selected_item_ids = [2326]
+selected_item_ids = [2487]
 selection_mode = "p2_fallback"
 brainstorm_needed = true
 adversarial_tier = "TIER3"
 pcw_template = "spec_driven_dev"
 worktree_safe = false
-next_phase = "ADVERSARIAL_REVIEW"
+next_phase = "BRAINSTORM"
 rubric_version = "1.0"
+
+[loop.selected]
+closed_epic_id = 2486
+next_epic_id = 2487
 
 [loop.lock]
 token = ""
@@ -29,10 +33,10 @@ expiry_ts = ""
 timeout_minutes = 45
 
 [loop.gates]
-spec_confirmed = false
-spec_path = ""
-sprint_approved = false
-sprint_plan_path = ""
+spec_confirmed = true
+spec_path = ".praxia/docs/specs/260623_m31-buildable-spec.md"
+sprint_approved = true
+sprint_plan_path = ".praxia/sprint_plans/260623_m31a-manifest-validate.toml"
 
 [loop.metrics]
 backlog_items_closed_per_iteration = 1
