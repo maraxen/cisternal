@@ -9,9 +9,10 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2609
-active = 2613
-active_title = "M5.2 — contemplex repo cutover PR"
+closed = 2624
+active = 0
+active_title = ""
 m31_rev2_deferred_complete = true
 m4_export_trust_complete = true
 m5_telemetry_gate_complete = true
+m6_bathos_cutover_complete = true
