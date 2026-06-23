@@ -9,6 +9,6 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2326
-active = 2563
-active_title = "M3.2: entry_point emitter plugins + dispatch registry"
+closed = 2563
+active = null
+active_title = ""
