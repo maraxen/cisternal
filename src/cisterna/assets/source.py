@@ -1,11 +1,8 @@
 """Registry-sourced AssetSpec builder (spec §1, G1/M5).
 
 registry_assets extracts AssetSpec instances from a named registry partition
-via the deliberate, tested coupling to
-``cisterna.registration.registry._snapshot``.  The coupling is intentional
-and pinned by AC-M3-2: if ``_snapshot`` changes its contract, that acceptance
-criterion fails loudly.  A public ``registration.snapshot()`` accessor is an
-optional M3.1 cleanup.
+via the public :func:`cisterna.registration.registry.snapshot` accessor.
+The coupling to registry snapshot semantics is pinned by AC-M3-2 / AC-M33a-4.
 
 Design invariants:
     - NEVER raises: empty/unknown registry → (); introspection failures → ()
@@ -38,9 +35,8 @@ _log = logging.getLogger("cisterna.export")
 def registry_assets(registry: str = "default") -> tuple[AssetSpec, ...]:
     """Return AssetSpec tuples for every tool in the named registry partition.
 
-    Calls ``cisterna.registration.registry._snapshot(registry)`` (deliberate
-    tested coupling per spec §1/M5).  Empty or unknown registries return ``()``
-    without raising.  The result is sorted by name for canonical determinism.
+    Calls :func:`cisterna.registration.registry.snapshot` when the partition
+    exists.  Unknown registries return ``()`` without creating a partition.
 
     Args:
         registry: Registry partition name.  Defaults to ``"default"``.
@@ -49,25 +45,22 @@ def registry_assets(registry: str = "default") -> tuple[AssetSpec, ...]:
         A tuple of :class:`AssetSpec` instances, sorted by ``name``.
         Empty if the registry is unknown or empty.  Never raises.
     """
-    from cisterna.registration.registry import _REGISTRIES, _snapshot
+    from cisterna.registration.registry import list_registries, snapshot
 
-    # Pre-check: avoid silently creating an empty partition as a side effect of
-    # _snapshot() -> _registry() -> _REGISTRIES[name] = {}.  Unknown registry is
-    # treated as empty (never-raise / pure-read semantics, spec section 1 / M5).
-    if registry not in _REGISTRIES:
+    if registry not in list_registries():
         return ()
 
     try:
-        snapshot = _snapshot(registry)
+        tool_snapshot = snapshot(registry)
     except Exception:
         _log.warning(
-            "cisterna.export: _snapshot(%r) raised; returning empty tuple",
+            "cisterna.export: snapshot(%r) raised; returning empty tuple",
             registry,
         )
         return ()
 
     specs: list[AssetSpec] = []
-    for entry in snapshot.values():
+    for entry in tool_snapshot.values():
         description = _extract_description(entry.fn)
         params = _extract_params(entry.name, entry.fn)
         specs.append(

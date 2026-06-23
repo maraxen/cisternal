@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from cisterna.registration.compose import compose_mcp_callable
 from cisterna.registration.errors import CisternaWireError
-from cisterna.registration.registry import _snapshot
+from cisterna.registration.registry import snapshot
 
 if TYPE_CHECKING:
     pass
@@ -129,11 +129,11 @@ def wire(
             and ``validate=True``.
     """
     # C6: snapshot at wire-time; post-wire decorations are excluded.
-    snapshot = _snapshot(registry)
+    snapshot_view = snapshot(registry)
 
     # Validation: check expected names against the snapshot (AC-M2-9 / AC-M2-10).
     if expected is not None:
-        missing = [n for n in expected if n not in snapshot]
+        missing = [n for n in expected if n not in snapshot_view]
         if missing:
             if validate:
                 raise CisternaWireError(missing=missing)
@@ -147,7 +147,7 @@ def wire(
     mcp_tool_names: list[str] = []
     cli_command_names: list[str] = []
 
-    for entry in snapshot.values():
+    for entry in snapshot_view.values():
         # Generate the async MCP callable (E2/E1/H1 guarantees from compose).
         mcp_callable = compose_mcp_callable(entry.fn)
 
