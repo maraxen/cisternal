@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 
 from .exporter import ExporterBase, JsonlExporter
+from .otlp_exporter import maybe_create_otlp_exporter
 from .record import Record
 
 # Global pipeline instance for init()/emit_event()
@@ -278,6 +279,10 @@ def init_pipeline(
         exporters.append(
             JsonlExporter(jsonl_path, max_bytes=max_bytes, backup_count=backup_count)
         )
+
+        otlp_exporter = maybe_create_otlp_exporter()
+        if otlp_exporter is not None:
+            exporters.append(otlp_exporter)
 
         _global_pipeline = EventPipeline(exporters=exporters)
 

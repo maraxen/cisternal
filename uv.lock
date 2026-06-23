@@ -169,6 +169,9 @@ otlp = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-semantic-conventions" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -189,6 +192,9 @@ provides-extras = ["otlp"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.42.1" },
+    { name = "opentelemetry-sdk", specifier = ">=1.42.1" },
+    { name = "opentelemetry-semantic-conventions", specifier = ">=0.63b1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
