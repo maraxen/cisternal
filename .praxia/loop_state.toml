@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-23 — M3.1 epic audit PASS; route to M3.2 triage (#2563)
+# Updated 2026-06-23 — M3.2 executed (#2563)
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,20 +7,20 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_epic-audit_m31"
-current_phase = "TRIAGE"
-last_subphase = "epic_audit_verify_pass"
-last_artifact_path = ".praxia/docs/research/260623_m31-epic-closeout-audit.md"
-iteration_count = 4
-last_activation = "2026-06-23T22:00:00Z"
+task_id = "260623_m32-entry-points"
+current_phase = "VERIFY"
+last_subphase = "sprint_executed"
+last_artifact_path = ".praxia/sprint_plans/260623_m32-entry-points.toml"
+iteration_count = 5
+last_activation = "2026-06-23T23:00:00Z"
 autonomy_level = "L2"
 selected_item_ids = [2563]
-selection_mode = "epic_audit_handoff"
-brainstorm_needed = true
+selection_mode = "epic_triage"
+brainstorm_needed = false
 adversarial_tier = "TIER3"
 pcw_template = "spec_driven_dev"
 worktree_safe = false
-next_phase = "BRAINSTORM"
+next_phase = "COMPLETE"
 rubric_version = "1.0"
 
 [loop.selected]
@@ -34,16 +34,16 @@ expiry_ts = ""
 timeout_minutes = 45
 
 [loop.gates]
-spec_confirmed = false
-spec_path = ""
-sprint_approved = false
-sprint_plan_path = ""
+spec_confirmed = true
+spec_path = ".praxia/docs/specs/260623_m32-buildable-spec-rev1.md"
+sprint_approved = true
+sprint_plan_path = ".praxia/sprint_plans/260623_m32-entry-points.toml"
 
 [loop.metrics]
 backlog_items_closed_per_iteration = 1
 consecutive_zero_progress_iterations = 0
 max_zero_progress = 3
-last_items_closed = 3
+last_items_closed = 1
 remediate_attempt = 0
 
 [loop.popperian]
