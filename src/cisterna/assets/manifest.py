@@ -9,12 +9,13 @@ from cisterna.assets.bundle import (
     AgentAsset,
     AssetBundle,
     BundleMetadata,
-    CommandAsset,
     HookSpecAsset,
     LoadReport,
     McpAsset,
     SkillAsset,
 )
+from cisterna.assets.manifest_commands import load_export_commands
+from cisterna.assets.manifest_extensions import validate_extension_sections
 
 class ManifestAssetSource:
     """Load assets from a praxia-style ``.praxia/manifest.toml`` file."""
@@ -51,7 +52,8 @@ class ManifestAssetSource:
         agents = _load_agents(plugin, self._root, warnings)
         hook_specs = _load_hook_specs(plugin)
         mcp_servers = _load_mcp(plugin, name)
-        commands = _load_commands(plugin, self._root, warnings)
+        commands = load_export_commands(plugin, self._root, warnings)
+        warnings.extend(validate_extension_sections(plugin, self._root))
 
         bundle = AssetBundle(
             metadata=metadata,
@@ -180,28 +182,6 @@ def _load_mcp(plugin: dict[str, object], plugin_name: str) -> tuple[McpAsset, ..
         return ()
     argv = tuple(str(part) for part in command)
     return (McpAsset(name=plugin_name or "mcp", command=argv),)
-
-
-def _load_commands(
-    plugin: dict[str, object],
-    root: Path,
-    warnings: list[str],
-) -> tuple[CommandAsset, ...]:
-    export_cmd = plugin.get("export_command")
-    if not isinstance(export_cmd, dict):
-        return ()
-    paths = export_cmd.get("claude_code")
-    if not isinstance(paths, list):
-        return ()
-    commands: list[CommandAsset] = []
-    for rel in paths:
-        rel_path = str(rel)
-        path = root / rel_path
-        name = path.stem
-        text = _read_text(path, warnings, f"command {name!r}")
-        body = text if text is not None else ""
-        commands.append(CommandAsset(name=name, description=None, body=body))
-    return tuple(commands)
 
 
 def _parse_agent_markdown(text: str) -> tuple[tuple[str, ...], str]:

@@ -1,0 +1,9 @@
+[plugin]
+name = "vendor-commands-plugin"
+version = "1.0.0"
+description = "Fixture for M3.3c vendor export_command paths"
+requires_praxia = "0.0.0"
+
+[plugin.export_command]
+claude_code = ["commands/foo.md"]
+cursor = ["commands/cursor-cmd.md"]
