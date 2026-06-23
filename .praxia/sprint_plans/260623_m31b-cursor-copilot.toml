@@ -1,0 +1,222 @@
+[sprint]
+sprint_id = "260623_m31b-cursor-copilot"
+sprint_num = 3
+name = "Cisterna M3.1b — Cursor + Copilot emitters"
+description = "Four sequential waves implementing M3.1b per rev3 spec (backlog #2487). CursorEmitter → CopilotEmitter + hook filter → CLI/golden → regression."
+context = '''
+Project: cisterna (Python 3.13, uv/pytest/ruff). Authoritative spec:
+.praxia/docs/specs/260623_m31b-buildable-spec-rev3.md (PI-approved).
+
+M3.1a baseline: 253 tests green; CompositeAssetSource; validate/inspect CLI;
+ClaudeEmitter + golden claude/{names_only,with_command_bodies}; manifest_minimal fixture.
+
+Stack rules: uv run pytest; uv run ruff check .; never bare python.
+Praxia ports: bundle_cursor.rs, bundle_copilot.rs, hooks_emit.rs (filter copilot in cisterna per L15).
+Do NOT implement Antigravity (#2559 M3.1c) in this sprint.
+Preserve Claude default: ClaudeEmitter() + claude golden unchanged (AC-M31b-5 / N12).
+Locked: L15-L21 (fail-closed cursor only, no provenance on cursor/copilot, commands claude-only).
+'''
+max_fix_retries = 1
+
+# ============================================================
+# WAVE 1 — N9: CursorEmitter + L17 fail-closed
+# ============================================================
+[[tracks]]
+id = "w1"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2487"
+phase_name = "M3.1b-W1 — CursorEmitter + fail-closed (L17)"
+fixer_prompt = '''
+task_id: 260623_m31b-brainstorm
+
+## Objective
+Implement CursorEmitter (N9) porting praxia bundle_cursor.rs with cisterna L17
+fail-closed: omit agents/skills keys when files not emitted (AC-M31b-6).
+
+## Anchors
+- src/cisterna/export/claude.py — ClaudeEmitter pattern
+- src/cisterna/export/base.py — Emitter ABC
+- praxia: bundle_cursor.rs (dual hooks: plugin.json + .cursor/hooks.json)
+- Spec rev3 § CursorEmitter, L17, L18 (no provenance sidecar)
+
+## Tasks
+1. Create src/cisterna/export/cursor.py — CursorEmitter.emit(bundle) -> dict[str,str]
+2. Emit .cursor-plugin/plugin.json (agents/skills/hooks/mcpServers keys absent when empty)
+3. Emit agents/<n>.agent.md and skills/<n>/SKILL.md only when body non-empty
+4. Emit .cursor/hooks.json camelCase v1 + inline hooks in plugin.json (praxia parity)
+5. Emit .mcp.json when mcp_servers non-empty
+6. No cisterna-provenance.json (L18)
+7. tests/test_export_cursor.py — AC-M31b-1, AC-M31b-6 using manifest_minimal bundle
+
+## Constraints
+- Pure emit (no I/O); never-raise
+- Do not add --surface CLI yet (W3)
+- Run: uv run ruff check . && uv run pytest
+
+## Commit
+feat(export): CursorEmitter with fail-closed manifest keys (#2487 W1)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. CursorEmitter exists in src/cisterna/export/cursor.py
+2. AC-M31b-1: manifest_minimal bundle emits plugin.json + hooks + agent/skill files
+3. AC-M31b-6: agents key absent when agent bodies would not be emitted
+4. No provenance sidecar in cursor output
+5. uv run pytest full suite green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 2 — N10: CopilotEmitter + hooks_for_surface (L15)
+# ============================================================
+[[tracks]]
+id = "w2"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2487"
+phase_name = "M3.1b-W2 — CopilotEmitter + HookSpec surface filter"
+fixer_prompt = '''
+task_id: 260623_m31b-brainstorm
+
+## Objective
+Implement CopilotEmitter (N10) and shared hooks_for_surface filter (L15) for
+AC-M31b-2, AC-M31b-3.
+
+## Anchors
+- src/cisterna/export/cursor.py — W1 CursorEmitter
+- praxia: bundle_copilot.rs (inline hooks in plugin.json, agents/*.agent.md)
+- praxia: hooks_emit.rs surface filter (extend with copilot per L15)
+- tests/fixtures/manifest_minimal/manifest.toml — hook with surfaces=[]
+
+## Tasks
+1. Create src/cisterna/export/hooks.py — hooks_for_surface(hook_specs, surface) per L15
+   (surfaces==() -> all; else match claude|cursor|copilot)
+2. Wire hooks_for_surface into CursorEmitter (filter before hook build)
+3. Create src/cisterna/export/copilot.py — CopilotEmitter (inline camelCase hooks)
+4. Copilot: emit agents/skills when body non-empty; list names only when files emitted
+   (no L17 fail-closed on copilot — rev3 asymmetry)
+5. tests/test_export_copilot.py — AC-M31b-2
+6. tests/test_export_hooks_surface.py — AC-M31b-3 (cursor-only hook fixture)
+
+## Constraints
+- No commands in cursor/copilot plugin.json (L19)
+- Run: uv run ruff check . && uv run pytest
+
+## Commit
+feat(export): CopilotEmitter and HookSpec surface filter (#2487 W2)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. hooks_for_surface in src/cisterna/export/hooks.py with copilot token (L15)
+2. CopilotEmitter emits plugin.json with inline hooks (AC-M31b-2)
+3. AC-M31b-3: surfaces=["cursor"] hook only in cursor export
+4. CursorEmitter uses surface filter
+5. Full pytest green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 3 — N11: CLI --surface + validate golden cursor|copilot
+# ============================================================
+[[tracks]]
+id = "w3"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2487"
+phase_name = "M3.1b-W3 — export --surface + validate golden cursor/copilot"
+fixer_prompt = '''
+task_id: 260623_m31b-brainstorm
+
+## Objective
+Wire CLI --surface (L20), extend validate surface_digest for cursor/copilot,
+add golden fixtures (N11).
+
+## Anchors
+- src/cisterna/cli.py — export, validate commands
+- src/cisterna/assets/validate_golden.py — surface_digest, emit_claude_files pattern
+- tests/golden/claude/names_only/ — existing golden pattern
+- tests/fixtures/manifest_minimal/manifest.toml
+
+## Tasks
+1. Add --surface claude|cursor|copilot to assets export (default claude); dispatch Emitter
+2. Extend validate_golden.surface_digest for cursor and copilot surfaces
+3. Compute and commit golden digests:
+   tests/golden/cursor/names_only/digest.sha256
+   tests/golden/copilot/names_only/digest.sha256
+   (bundle from manifest_minimal via CompositeAssetSource)
+4. --emit-command-bodies ignored for cursor/copilot (L19)
+5. tests/test_cli_assets_export_surface.py — AC-M31b-8
+6. Extend tests/test_cli_assets_validate.py for cursor/copilot golden (AC-M31b-4)
+7. AC-M31b-7: validate --surface cursor exit 1 on missing skill path
+
+## Constraints
+- Claude export path unchanged when --surface claude (default)
+- Update _native_cli_surface_digest to pass --surface
+
+## Commit
+feat(cli): export --surface and cursor/copilot golden validate (#2487 W3)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. cisterna assets export --surface cursor --help works
+2. AC-M31b-8: export --surface cursor writes .cursor-plugin layout
+3. AC-M31b-4: validate --surface cursor|copilot exit 0 on manifest_minimal
+4. AC-M31b-7: missing skill path validate exit 1
+5. Golden files exist under tests/golden/cursor/ and tests/golden/copilot/
+6. Full pytest green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+# ============================================================
+# WAVE 4 — N12: Regression + public API
+# ============================================================
+[[tracks]]
+id = "w4"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2487"
+phase_name = "M3.1b-W4 — Claude regression + public exports"
+fixer_prompt = '''
+task_id: 260623_m31b-brainstorm
+
+## Objective
+Regression gate (N12): ClaudeEmitter default + claude golden unchanged (AC-M31b-5).
+Export new emitters from public API if needed.
+
+## Anchors
+- tests/test_export_claude.py — M3 ACs
+- tests/golden/claude/ — existing digests
+- src/cisterna/__init__.py — lazy exports
+- tests/test_assets_public_api.py
+
+## Tasks
+1. tests/test_export_regression_m31b.py — explicit AC-M31b-5:
+   ClaudeEmitter() unchanged; validate --surface claude golden still passes
+2. Export CursorEmitter, CopilotEmitter from cisterna.export or __init__ if pattern requires
+3. Optional: debt test validate conflict exit 1 (P3 from epic audit)
+4. Full suite + ruff
+
+## Commit
+test(export): M3.1b regression gate for Claude surface (#2487 W4)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. AC-M31b-5: all M3 + M3.1a tests still pass
+2. Claude golden digests unchanged
+3. Public API tests updated if exports added
+4. uv run pytest full green; ruff clean
+
+PASS if all VERIFY satisfied.
+'''
+
+[orchestration]
+sequential = ["w1", "w2", "w3", "w4"]
+concurrent = []
