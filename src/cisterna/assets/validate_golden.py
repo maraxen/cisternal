@@ -3,22 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
 
 from cisterna.assets.bundle import AssetBundle
 from cisterna.export._hash import bundle_sha256
-from cisterna.export.antigravity import AntigravityEmitter
-from cisterna.export.claude import ClaudeEmitter
-from cisterna.export.copilot import CopilotEmitter
-from cisterna.export.cursor import CursorEmitter
+from cisterna.export.registry import get_emitter
 
 _PROVENANCE_FRAGMENT = "cisterna-provenance.json"
-_EMITTERS: dict[str, Callable[[AssetBundle], dict[str, str]]] = {
-    "claude": lambda bundle: ClaudeEmitter().emit(bundle),
-    "cursor": lambda bundle: CursorEmitter().emit(bundle),
-    "copilot": lambda bundle: CopilotEmitter().emit(bundle),
-    "antigravity": lambda bundle: AntigravityEmitter().emit(bundle),
-}
 
 
 def emit_claude_files(
@@ -27,7 +17,11 @@ def emit_claude_files(
     emit_command_bodies: bool = False,
 ) -> dict[str, str]:
     """Emit Claude surface files for *bundle*."""
-    return ClaudeEmitter(emit_command_bodies=emit_command_bodies).emit(bundle)
+    emitter = get_emitter("claude", emit_command_bodies=emit_command_bodies)
+    if emitter is None:
+        msg = "claude emitter is not registered"
+        raise ValueError(msg)
+    return emitter.emit(bundle)
 
 
 def emit_surface_files(
@@ -36,13 +30,18 @@ def emit_surface_files(
     *,
     emit_command_bodies: bool = False,
 ) -> dict[str, str]:
-    """Emit files for *surface* (claude, cursor, or copilot)."""
-    if surface == "claude":
-        return emit_claude_files(bundle, emit_command_bodies=emit_command_bodies)
-    if surface not in _EMITTERS:
+    """Emit files for *surface* via the emitter registry."""
+    if surface != "claude" and emit_command_bodies:
+        msg = f"emit_command_bodies applies to claude surface only, not {surface!r}"
+        raise ValueError(msg)
+    emitter = get_emitter(
+        surface,
+        emit_command_bodies=emit_command_bodies if surface == "claude" else False,
+    )
+    if emitter is None:
         msg = f"unsupported validate surface: {surface!r}"
         raise ValueError(msg)
-    return _EMITTERS[surface](bundle)
+    return emitter.emit(bundle)
 
 
 def surface_digest(
