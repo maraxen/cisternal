@@ -1,0 +1,12 @@
+[sprint]
+sprint_id = "260624_m33-epic-audit"
+name = "M3.3 inter-epic closeout audit"
+
+[[tracks]]
+id = "w1"
+[[tracks.items]]
+phase_name = "W1 — VERIFY"
+reviewer_prompt = "296 pytest; 15/15 AC citations in closeout memo. PASS."
+
+[orchestration]
+sequential = ["w1"]
