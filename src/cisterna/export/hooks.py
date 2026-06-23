@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from cisterna.assets.bundle import HookSpecAsset
 
-_EMIT_SURFACES = frozenset({"claude", "cursor", "copilot"})
+_EMIT_SURFACES = frozenset({"claude", "cursor", "copilot", "antigravity"})
 
 
 def hooks_for_surface(

@@ -11,14 +11,18 @@ Public API:
 
 from cisterna.export.base import Emitter
 from cisterna.export._hash import bundle_sha256
+from cisterna.export.antigravity import AntigravityEmitter
 from cisterna.export.claude import ClaudeEmitter
+from cisterna.export.copilot import CopilotEmitter
 from cisterna.export.cursor import CursorEmitter
 from cisterna.export.write import WriteResult, write_bundle
 
 __all__ = [
     "Emitter",
+    "AntigravityEmitter",
     "bundle_sha256",
     "ClaudeEmitter",
+    "CopilotEmitter",
     "CursorEmitter",
     "WriteResult",
     "write_bundle",
