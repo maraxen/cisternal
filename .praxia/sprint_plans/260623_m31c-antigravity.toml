@@ -1,0 +1,161 @@
+[sprint]
+sprint_id = "260623_m31c-antigravity"
+sprint_num = 4
+name = "Cisterna M3.1c — Antigravity CLI emitter"
+description = "Four sequential waves implementing M3.1c per rev1 spec (backlog #2559). AntigravityEmitter → hook filter → CLI/golden → regression. Closes parent #2326."
+context = '''
+Project: cisterna (Python 3.13, uv/pytest/ruff). Authoritative spec:
+.praxia/docs/specs/260623_m31c-buildable-spec-rev1.md
+
+M3.1b baseline: 269 tests green; Cursor/Copilot emitters; export --surface;
+golden harness for claude/cursor/copilot; manifest_minimal fixture.
+
+Schema bet L22: gemini-extension.json per praxia bundle_antigravity.rs (not plugin.json).
+Stack rules: uv run pytest; uv run ruff check .
+Do NOT implement entry_point plugins (remains M3.2+).
+'''
+max_fix_retries = 1
+
+# ============================================================
+# WAVE 1 — N13: AntigravityEmitter
+# ============================================================
+[[tracks]]
+id = "w1"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2559"
+phase_name = "M3.1c-W1 — AntigravityEmitter"
+fixer_prompt = '''
+task_id: 260623_m31c-antigravity
+
+## Objective
+Implement AntigravityEmitter (N13) porting praxia bundle_antigravity.rs (L22-L28).
+
+## Anchors
+- src/cisterna/export/copilot.py — emitter pattern
+- src/cisterna/export/_markdown.py — shared formatters
+- praxia: bundle_antigravity.rs
+
+## Tasks
+1. Create src/cisterna/export/antigravity.py — AntigravityEmitter.emit()
+2. Emit gemini-extension.json with contextFileName GEMINI.md, settings {}
+3. Emit agents/<n>.md, skills/<n>/SKILL.md when body non-empty
+4. Omit empty name arrays from gemini-extension.json (L28)
+5. Emit hooks/hooks.json (PascalCase Claude-shaped nested hooks) for all hook_specs (filter in W2)
+6. Emit .mcp.json when mcp_servers present; inline mcpServers in extension json
+7. tests/test_export_antigravity.py — AC-M31c-1
+
+## Commit
+feat(export): AntigravityEmitter for gemini-extension.json (#2559 W1)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. AntigravityEmitter exists and emits gemini-extension.json
+2. AC-M31c-1 manifest_minimal fixture passes
+3. agents/*.md not *.agent.md (L25)
+4. Full pytest green; ruff clean
+PASS if all satisfied.
+'''
+
+# ============================================================
+# WAVE 2 — N14: hooks_for_surface antigravity
+# ============================================================
+[[tracks]]
+id = "w2"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2559"
+phase_name = "M3.1c-W2 — antigravity hook surface filter"
+fixer_prompt = '''
+task_id: 260623_m31c-antigravity
+
+## Objective
+Extend hooks_for_surface for antigravity token (L24) and wire AntigravityEmitter (AC-M31c-2).
+
+## Tasks
+1. Add antigravity to hooks_for_surface allowed set in export/hooks.py
+2. AntigravityEmitter uses hooks_for_surface(bundle.hook_specs, "antigravity")
+3. tests/test_export_hooks_surface.py — AC-M31c-2 antigravity-only hook fixture
+
+## Commit
+feat(export): antigravity HookSpec surface filter (#2559 W2)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. hooks_for_surface supports antigravity
+2. AC-M31c-2: antigravity-only hook not on cursor export
+3. pytest green; ruff clean
+PASS if all satisfied.
+'''
+
+# ============================================================
+# WAVE 3 — N15: CLI + golden
+# ============================================================
+[[tracks]]
+id = "w3"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2559"
+phase_name = "M3.1c-W3 — export/validate antigravity + golden"
+fixer_prompt = '''
+task_id: 260623_m31c-antigravity
+
+## Objective
+Wire --surface antigravity on export/validate; golden harness (N15).
+
+## Tasks
+1. Extend validate_golden.emit_surface_files for antigravity
+2. export CLI accepts --surface antigravity
+3. tests/golden/antigravity/names_only/digest.sha256 from manifest_minimal
+4. tests/test_cli_assets_export_surface.py — AC-M31c-5
+5. validate test AC-M31c-3 in test_cli_assets_validate.py
+
+## Commit
+feat(cli): antigravity surface export and golden validate (#2559 W3)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. export --surface antigravity works (AC-M31c-5)
+2. validate --surface antigravity golden pass (AC-M31c-3)
+3. pytest green; ruff clean
+PASS if all satisfied.
+'''
+
+# ============================================================
+# WAVE 4 — N16: regression + capability
+# ============================================================
+[[tracks]]
+id = "w4"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2559"
+phase_name = "M3.1c-W4 — regression + antigravity_cli capability"
+fixer_prompt = '''
+task_id: 260623_m31c-antigravity
+
+## Objective
+Regression AC-M31c-4 (cursor/copilot/claude goldens) + AC-M31c-6 capability test.
+
+## Tasks
+1. tests/test_export_regression_m31c.py — prior surface goldens unchanged
+2. tests/test_assets_capability.py — antigravity_cli read+search case
+3. Export AntigravityEmitter from export/__init__.py if missing
+
+## Commit
+test(export): M3.1c regression and antigravity_cli capability (#2559 W4)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. AC-M31c-4: full suite green; claude/cursor/copilot goldens unchanged
+2. AC-M31c-6: resolve_tools antigravity_cli test passes
+3. ruff clean
+PASS if all satisfied.
+'''
+
+[orchestration]
+sequential = ["w1", "w2", "w3", "w4"]
+concurrent = []
