@@ -1,0 +1,21 @@
+[sprint]
+sprint_id = "260624_m5-epic-audit"
+name = "M5 Telemetry Adoption epic closeout audit"
+task_id = "260623_epic-audit_m5"
+
+[[tracks]]
+id = "verify"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2609"
+phase_name = "M5 epic audit — mechanical verify"
+reviewer_prompt = '''
+VERIFY: 10/10 ACs in .praxia/docs/research/260624_m5-epic-closeout-audit.md.
+311 pytest; ruff clean; shadow 4; M4 validate. #2613 open by design.
+Verdict APPROVE → TRIAGE.
+'''
+
+[orchestration]
+sequential = ["verify"]
+concurrent = []

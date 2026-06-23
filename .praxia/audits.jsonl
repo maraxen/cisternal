@@ -29,3 +29,4 @@
 {"audit_id":"m33-epic-audit","summary":"M3.3 #2581 epic audit APPROVE: 15/15 ACs, rev2 deferred complete, 296 tests.","task_id":"260624_epic-audit_m33","verdict":"ACCEPT"}
 {"audit_id":"260623_m4-adversarial","verdict":"ACCEPT_WITH_NITS","summary":"Adversarial gate ACCEPT_WITH_NITS. Blockers C1/C2/C6 reconciled in buildable spec rev1. Parent M4 epic #2597.","task_id":"260623_m4-export-trust","_written_by":"audit-synthesis"}
 {"verdict":"APPROVE","audit_id":"260623_m4-epic-closeout","summary":"VERIFY APPROVE — M4 Export Trust 22/22 ACs. 307 pytest green. Uncommitted working tree noted.","task_id":"260623_epic-audit_m4","_written_by":"reviewer"}
+{"verdict":"APPROVE","audit_id":"260624_m5-epic-closeout","summary":"VERIFY APPROVE — M5 Telemetry Adoption 10/10 ACs. Flaky #238 noted.","task_id":"260623_epic-audit_m5","_written_by":"reviewer"}
