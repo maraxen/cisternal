@@ -9,7 +9,8 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2581
+closed = 2597
 active = null
 active_title = ""
 m31_rev2_deferred_complete = true
+m4_export_trust_complete = true

@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — M3.3 epic audit PASS; TRIAGE for next milestone
+# Updated 2026-06-23 — M4 epic audit VERIFY PASS; TRIAGE for M5
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,25 +7,28 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_epic-audit_m33"
+task_id = "260623_epic-audit_m4"
 current_phase = "TRIAGE"
 last_subphase = "epic_audit_verify_pass"
-last_artifact_path = ".praxia/docs/research/260624_m33-epic-closeout-audit.md"
-iteration_count = 9
-last_activation = "2026-06-24T02:00:00Z"
+last_artifact_path = ".praxia/docs/research/260623_m4-epic-closeout-audit.md"
+iteration_count = 14
+last_activation = "2026-06-23T23:30:00Z"
 autonomy_level = "L2"
 selected_item_ids = []
-selection_mode = "post_m33_audit"
+selection_mode = "post_m4_audit"
 brainstorm_needed = true
 next_phase = "BRAINSTORM"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2581
+closed_epic_id = 2597
 m31_rev2_deferred_complete = true
+m4_export_trust_complete = true
 
 [loop.gates]
 spec_confirmed = false
 spec_path = ""
+design_path = ""
+adversarial_verdict = ""
 sprint_approved = false
 sprint_plan_path = ""

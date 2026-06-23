@@ -1,0 +1,168 @@
+[sprint]
+sprint_id = "260623_m4-export-trust"
+sprint_num = 8
+name = "M4 Export Trust — dogfood CI, manifest goldens, example emitter"
+description = "W1 parallel manifests + example → W2 golden resolver + native tests → W3 CI workflow (#2597)."
+context = '''
+Spec: .praxia/docs/specs/260623_m4-export-trust-buildable-spec-rev1.md
+Design: .praxia/docs/designs/260623_m4-export-trust_design.md
+Parent epic: #2597 (depends_on #2581)
+Baseline: 296 pytest green. Legacy golden digests must not drift (AC-M4-0b).
+Stack: uv run pytest; uv run ruff check .
+Built-in surfaces: antigravity, claude, copilot, cursor
+'''
+max_fix_retries = 1
+task_id = "260623_m4-export-trust"
+
+[[tracks]]
+id = "w1a"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2598"
+phase_name = "M4.1a — repo self-manifest"
+fixer_prompt = '''
+task_id: 260623_m4-export-trust
+
+FILES OWNED: .praxia/**, tests/test_self_manifest.py ONLY.
+
+Create .praxia/manifest.toml per design §Self-manifest:
+- [plugin].name = "cisterna", version sync with pyproject.toml
+- ≥1 skill, ≥1 agent, ≥1 hook_spec, export_command claude_code + cursor
+- L14 [[plugin.workflows]] with existing file
+- Asset paths under .praxia/ (skills, agents, commands, hooks, workflows)
+
+AC-M4-1a, AC-M4-1b. Do NOT touch validate_golden.py or cli.py.
+
+Commit: feat(m4): add cisterna self-manifest for dogfood (#2598)
+'''
+reviewer_prompt = '''
+VERIFY AC-M4-1a/1b: load clean, inspect JSON metadata.name matches.
+pytest tests/test_self_manifest.py green. PASS if satisfied.
+'''
+
+[[tracks]]
+id = "w1b"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2599"
+phase_name = "M4.1b — praxia-scale dogfood fixture"
+fixer_prompt = '''
+task_id: 260623_m4-export-trust
+
+FILES OWNED: tests/fixtures/manifest_dogfood_praxia/**, tests/test_dogfood_praxia_fixture.py ONLY.
+
+Vendored fixture tree per design: ≥2 skills, ≥1 agent, ≥1 hook, export_command ≥2 vendors,
+workflows/pipelines/snippets with real files (AC-M4-1c).
+AC-M4-1d via tmp_path or manifest_dogfood_praxia_broken/ (NOT same path as good fixture).
+
+Do NOT touch .praxia/ or validate_golden.py.
+
+Commit: test(m4): praxia-scale dogfood manifest fixture (#2599)
+'''
+reviewer_prompt = '''
+VERIFY AC-M4-1c/1d. pytest tests/test_dogfood_praxia_fixture.py green. PASS if satisfied.
+'''
+
+[[tracks]]
+id = "w1c"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2600"
+phase_name = "M4.4 — third-party emitter example"
+fixer_prompt = '''
+task_id: 260623_m4-export-trust
+
+FILES OWNED: examples/minimal_emitter/** ONLY.
+
+Standalone package with [project.entry-points."cisterna.emitters"] minimal = factory.
+MinimalEmitter.emit() returns minimal-plugin.json. README per AC-M4-4e.
+Tests: get_emitter("minimal") after pip install -e.
+
+Do NOT touch core cisterna src except as dependency in example pyproject.
+
+Commit: docs(m4): minimal third-party emitter example (#2600)
+'''
+reviewer_prompt = '''
+VERIFY AC-M4-4a/c/e structure. uv pip install -e examples/minimal_emitter + pytest green. PASS.
+'''
+
+[[tracks]]
+id = "w2golden"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2601"
+phase_name = "M4-GOLDEN — manifest-scoped golden digests"
+fixer_prompt = '''
+task_id: 260623_m4-export-trust
+
+FILES OWNED: src/cisterna/assets/validate_golden.py, src/cisterna/cli.py (validate path only),
+tests/golden/self_manifest/**, tests/golden/dogfood_praxia/**,
+tests/test_validate_golden_resolver.py
+
+Extend golden_digest_path(manifest=Path) per buildable spec:
+- manifest_minimal → legacy tests/golden/<surface>/<mode>/
+- .praxia/manifest.toml → self_manifest/
+- manifest_dogfood_praxia → dogfood_praxia/
+- unknown manifest → fail closed (exit 1)
+
+Generate and commit digest.sha256 for self_manifest + dogfood_praxia (all 4 surfaces names_only;
+claude with_command_bodies for self_manifest if applicable).
+AC-M4-0b: legacy digests UNCHANGED.
+
+Commit: feat(validate): manifest-scoped golden digests (#2601)
+'''
+reviewer_prompt = '''
+VERIFY: legacy golden tests unchanged; validate passes on self-manifest + dogfood fixture all surfaces.
+pytest green. PASS if satisfied.
+'''
+
+[[tracks]]
+id = "w2native"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2603"
+phase_name = "M4.3 — subprocess validate lane"
+fixer_prompt = '''
+task_id: 260623_m4-export-trust
+
+FILES OWNED: tests/test_cli_native_validate.py, cli.py (native exit guard only AFTER golden merged)
+
+≥2 tests AC-M4-3a/b/c: manifest_minimal --manifest explicit, --use-native-cli claude names_only + bodies.
+AC-M4-3e: zero-file subprocess → exit 1.
+
+Commit: test(cli): native subprocess validate parity (#2603)
+'''
+reviewer_prompt = '''
+VERIFY AC-M4-3a/b/c/e. pytest tests/test_cli_native_validate.py green. PASS.
+'''
+
+[[tracks]]
+id = "w3"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2602"
+phase_name = "M4.2 — dogfood CI workflow"
+fixer_prompt = '''
+task_id: 260623_m4-export-trust
+
+FILES OWNED: .github/workflows/export-dogfood.yml
+
+Required job: uv sync, ruff, pytest, built-in validate loop (AC-M4-2b/d) BEFORE example install (AC-M4-2g),
+claude bodies, dry-run export, pip install -e examples/minimal_emitter + example tests (AC-M4-4d).
+Advisory job: native-validate-advisory, continue-on-error: true (AC-M4-3d).
+
+Commit: ci(m4): export-dogfood workflow (#2602)
+'''
+reviewer_prompt = '''
+VERIFY AC-M4-2a–g structure. Local dry-run of workflow steps if possible. PASS if satisfied.
+'''
+
+[orchestration]
+sequential = ["integrate_w1", "w2golden", "w2native", "w3"]
+concurrent = ["w1a", "w1b", "w1c"]

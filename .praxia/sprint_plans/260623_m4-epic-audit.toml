@@ -1,0 +1,23 @@
+[sprint]
+sprint_id = "260623_m4-epic-audit"
+name = "M4 Export Trust epic closeout audit"
+task_id = "260623_epic-audit_m4"
+description = "Mechanical AC verification for #2597; closeout memo; TRIAGE handoff."
+
+[[tracks]]
+id = "verify"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2597"
+phase_name = "M4 epic audit — mechanical verify"
+reviewer_prompt = '''
+VERIFY: 22/22 ACs in .praxia/docs/research/260623_m4-epic-closeout-audit.md.
+uv run pytest -q (307+); ruff clean; legacy goldens unchanged.
+export-dogfood.yml ordering AC-M4-2g.
+Verdict APPROVE → TRIAGE.
+'''
+
+[orchestration]
+sequential = ["verify"]
+concurrent = []
