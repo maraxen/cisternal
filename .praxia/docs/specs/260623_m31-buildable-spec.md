@@ -194,7 +194,13 @@ N11 CLI --surface cursor|copilot + golden + regression
 
 **Remaining M3.2:**
 
-entry_point plugins, WriterSink, `registration.snapshot()` public API, vendor path-array command mode, L14 workflow/pipeline/snippet validate-only parsing.
+entry_point plugins — **shipped M3.2 #2563**.
+
+**Remaining M3.3 (#2581):**
+
+**Shipped M3.3a:** public `registration.snapshot()` + `list_registries()` — see `.praxia/docs/specs/260623_m33a-snapshot-api-rev1.md`.
+
+WriterSink, vendor path-array command mode, L14 workflow/pipeline/snippet validate-only parsing.
 
 ---
 
