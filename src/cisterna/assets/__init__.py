@@ -24,17 +24,24 @@ from cisterna.assets.bundle import (
     McpAsset,
     SkillAsset,
 )
-from cisterna.assets.source import registry_assets
+from cisterna.assets.composite import CompositeAssetSource
+from cisterna.assets.manifest import ManifestAssetSource
+from cisterna.assets.protocol import AssetSource
+from cisterna.assets.source import registry_assets, registry_bundle
 
 __all__ = [
     "AssetSpec",
     "AgentAsset",
     "AssetBundle",
+    "AssetSource",
     "BundleMetadata",
     "CommandAsset",
+    "CompositeAssetSource",
     "HookSpecAsset",
     "LoadReport",
+    "ManifestAssetSource",
     "McpAsset",
     "SkillAsset",
     "registry_assets",
+    "registry_bundle",
 ]

@@ -26,6 +26,11 @@ import inspect
 import logging
 
 from cisterna.assets.spec import AssetSpec
+from cisterna.assets.bundle import (
+    AssetBundle,
+    BundleMetadata,
+    CommandAsset,
+)
 
 _log = logging.getLogger("cisterna.export")
 
@@ -76,6 +81,31 @@ def registry_assets(registry: str = "default") -> tuple[AssetSpec, ...]:
         )
 
     return tuple(sorted(specs, key=lambda s: s.name))
+
+
+def registry_bundle(
+    registry: str = "default",
+    *,
+    metadata: BundleMetadata | None = None,
+) -> AssetBundle:
+    """Build an :class:`AssetBundle` from a registry partition (commands only).
+
+    Agents, skills, hooks, and MCP entries are always empty — registry contributes
+    commands only per M3.1a spec L13.  Never raises.
+    """
+    if metadata is None:
+        metadata = BundleMetadata(name="cisterna", version="0.0.0", description="")
+
+    specs = registry_assets(registry)
+    commands = tuple(
+        CommandAsset(
+            name=spec.name,
+            description=spec.description,
+            body="",
+        )
+        for spec in specs
+    )
+    return AssetBundle(metadata=metadata, commands=commands)
 
 
 # ---------------------------------------------------------------------------

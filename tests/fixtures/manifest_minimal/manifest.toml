@@ -1,0 +1,24 @@
+[plugin]
+name = "fixture-plugin"
+version = "1.2.3"
+description = "Minimal manifest for M3.1a tests"
+requires_praxia = "0.0.0"
+
+[[plugin.skills]]
+name = "demo-skill"
+path = "skills/demo-skill/SKILL.md"
+
+[[plugin.agents]]
+name = "recon"
+path = "agents/recon.md"
+tools = []
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "hooks/pre.sh"
+tier = "essential"
+surfaces = []
+
+[plugin.export_command]
+claude_code = ["commands/foo.md"]
