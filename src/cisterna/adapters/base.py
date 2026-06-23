@@ -11,6 +11,7 @@ Tests monkeypatch _swallow_name_error to raise AssertionError instead.
 """
 
 from abc import ABC, abstractmethod
+import json
 import sys
 from typing import Any
 
@@ -176,3 +177,25 @@ class ContemplexAdapter(AdapterBase):
         except ImportError:
             # Fallback if contemplex is not available
             return {"ok": False, "error_code": "INTERNAL", "error": str(exc)}
+
+
+class XpeririAdapter(AdapterBase):
+    """Adapter for xperiri v2 decorator (sync, JSON-string MCP returns).
+
+    Event names (spec §4.2): mcp.call_start, mcp.call_end, mcp.tool_error.
+    Response shape: JSON string for success and error (xperiri MCP tools return str).
+    """
+
+    ALLOWED_NAMES = frozenset({"mcp.call_start", "mcp.call_end", "mcp.tool_error"})
+
+    def shape_ok(self, tool_name: str, result: Any) -> Any:
+        """Shape success: passthrough str; serialize dict/other to JSON."""
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, sort_keys=True)
+
+    def shape_error(self, tool_name: str, exc: BaseException, **fields: Any) -> Any:
+        """Shape error: JSON string envelope matching xperiri error returns."""
+        payload: dict[str, Any] = {"ok": False, "error": str(exc)}
+        payload.update(fields)
+        return json.dumps(payload, sort_keys=True)

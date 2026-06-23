@@ -20,6 +20,7 @@ def capture_legacy(consumer: str) -> Iterator[list[logging.LogRecord]]:
     Logger names verified from source:
     - bathos -> "bathos"
     - contemplex -> "contemplex"
+    - xperiri -> "xperiri" (cutover stub; legacy uses event_log stdout today)
 
     Args:
         consumer: Logger name (e.g., "bathos", "contemplex")

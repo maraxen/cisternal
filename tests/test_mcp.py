@@ -19,6 +19,7 @@ from cisterna.adapters.base import (
     AdapterBase,
     BathosAdapter,
     ContemplexAdapter,
+    XpeririAdapter,
 )
 from cisterna.adapters.v2_decorator import traced_tool
 from cisterna.adapters.v3_middleware import CisternaMiddleware
@@ -401,6 +402,12 @@ class TestAdapterAllowedNames:
     def test_contemplex_adapter_allowed_names(self):
         """ContemplexAdapter should have the correct ALLOWED_NAMES."""
         adapter = ContemplexAdapter()
+        expected = frozenset({"mcp.call_start", "mcp.call_end", "mcp.tool_error"})
+        assert adapter.ALLOWED_NAMES == expected
+
+    def test_xperiri_adapter_allowed_names(self):
+        """XpeririAdapter should have the correct ALLOWED_NAMES."""
+        adapter = XpeririAdapter()
         expected = frozenset({"mcp.call_start", "mcp.call_end", "mcp.tool_error"})
         assert adapter.ALLOWED_NAMES == expected
 

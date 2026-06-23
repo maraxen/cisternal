@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — M7 epic audit VERIFY PASS → TRIAGE
+# Updated 2026-06-24 — M8 epic audit VERIFY PASS → TRIAGE
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,37 +7,35 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_epic-audit_m7"
+task_id = "260624_epic-audit_m8"
 current_phase = "TRIAGE"
 last_subphase = "epic_audit_verify_pass"
-last_artifact_path = ".praxia/docs/research/260624_m7-epic-closeout-audit.md"
-iteration_count = 22
-last_activation = "2026-06-24T14:30:00Z"
+last_artifact_path = ".praxia/docs/research/260624_m8-epic-closeout-audit.md"
+iteration_count = 25
+last_activation = "2026-06-24T16:00:00Z"
 autonomy_level = "L2"
 selected_item_ids = []
-selection_mode = "post_m7_audit"
-brainstorm_needed = false
+selection_mode = "post_m8_audit"
+brainstorm_needed = true
 next_phase = "BRAINSTORM"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2627
-m4_export_trust_complete = true
-m5_telemetry_gate_complete = true
-m6_bathos_cutover_complete = true
+closed_epic_id = 2628
 m7_otlp_egress_complete = true
-next_backlog_id = 2145
+m8_xperiri_adapter_complete = true
+next_backlog_id = 2146
 
 [loop.gates]
 spec_confirmed = true
-spec_path = ".praxia/docs/specs/260624_m7-otlp-egress-buildable-spec-rev1.md"
+spec_path = ".praxia/docs/specs/260624_m8-xperiri-adapter-buildable-spec-rev1.md"
 design_path = ""
 adversarial_verdict = "ACCEPT"
 sprint_approved = true
 sprint_plan_path = ""
 
 [loop.epic_audit]
-closed_epic = "M7 OTLP Egress"
+closed_epic = "M8 XpeririAdapter"
 verdict = "APPROVE"
-audit_memo = ".praxia/docs/research/260624_m7-epic-closeout-audit.md"
+audit_memo = ".praxia/docs/research/260624_m8-epic-closeout-audit.md"
 uncommitted_ship = true
