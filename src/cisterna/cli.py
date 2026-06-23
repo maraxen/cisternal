@@ -128,7 +128,7 @@ def export(
         str,
         cyclopts.Parameter(
             name=["--surface"],
-            help="Emit surface: claude, cursor, or copilot (default: claude).",
+            help="Emit surface: claude, cursor, copilot, or antigravity (default: claude).",
         ),
     ] = "claude",
 ) -> None:
@@ -207,7 +207,7 @@ def export(
     from cisterna.assets.validate_golden import emit_surface_files  # noqa: PLC0415
     from cisterna.export.write import write_bundle  # noqa: PLC0415
 
-    if surface not in {"claude", "cursor", "copilot"}:
+    if surface not in {"claude", "cursor", "copilot", "antigravity"}:
         _log.error("cisterna.cli: unsupported export surface %r", surface)
         raise SystemExit(2)
 

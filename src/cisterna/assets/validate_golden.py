@@ -7,6 +7,7 @@ from typing import Callable
 
 from cisterna.assets.bundle import AssetBundle
 from cisterna.export._hash import bundle_sha256
+from cisterna.export.antigravity import AntigravityEmitter
 from cisterna.export.claude import ClaudeEmitter
 from cisterna.export.copilot import CopilotEmitter
 from cisterna.export.cursor import CursorEmitter
@@ -16,6 +17,7 @@ _EMITTERS: dict[str, Callable[[AssetBundle], dict[str, str]]] = {
     "claude": lambda bundle: ClaudeEmitter().emit(bundle),
     "cursor": lambda bundle: CursorEmitter().emit(bundle),
     "copilot": lambda bundle: CopilotEmitter().emit(bundle),
+    "antigravity": lambda bundle: AntigravityEmitter().emit(bundle),
 }
 
 
