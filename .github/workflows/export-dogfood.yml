@@ -16,6 +16,8 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest -q
+      - name: Shadow telemetry parity (bathos + contemplex patterns)
+        run: uv run pytest tests/shadow/ -q
       - name: Validate self-manifest (built-in surfaces)
         run: |
           for s in antigravity claude copilot cursor; do

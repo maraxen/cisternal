@@ -1,0 +1,59 @@
+"""M5.1b contemplex telemetry cutover gate smoke tests."""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+import cisterna
+from cisterna.adapters.base import ContemplexAdapter
+from cisterna.adapters.v2_decorator import traced_tool
+from cisterna.probe.telemetry_env import consumer_telemetry_enabled
+from cisterna.telemetry.exporter import ShadowExporter
+from cisterna.telemetry.pipeline import shutdown_pipeline
+
+
+@pytest.fixture(autouse=True)
+def _reset_pipeline() -> None:
+    shutdown_pipeline()
+    yield
+    shutdown_pipeline()
+
+
+def test_consumer_telemetry_enabled_contemplex_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-M5-2a: CISTERNA_TELEMETRY=contemplex enables contemplex."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "contemplex")
+    assert consumer_telemetry_enabled("contemplex") is True
+
+
+def test_consumer_telemetry_disabled_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M5-2b: unset env → disabled."""
+    monkeypatch.delenv("CISTERNA_TELEMETRY", raising=False)
+    assert consumer_telemetry_enabled("contemplex") is False
+
+
+def test_traced_tool_emits_when_cutover_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """AC-M5-2c: traced_tool + ContemplexAdapter emits mcp.call_start."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "contemplex")
+    assert consumer_telemetry_enabled("contemplex")
+
+    shadow = ShadowExporter()
+    cisterna.init(log_dir=tmp_path, exporters=[shadow], heartbeat_interval=30.0)
+
+    @traced_tool(ContemplexAdapter())
+    def demo_tool(msg: str) -> str:
+        return f"ok:{msg}"
+
+    result = demo_tool(msg="hi")
+    assert result == "ok:hi"
+    time.sleep(0.05)
+
+    starts = [r for r in shadow.records if r.name == "mcp.call_start"]
+    assert len(starts) >= 1
+    assert starts[0].fields.get("tool") == "demo_tool"
