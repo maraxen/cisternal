@@ -59,6 +59,66 @@ def test_validate_with_command_bodies_golden() -> None:
     )
 
 
+def test_validate_cursor_golden() -> None:
+    """AC-M31b-4: validate --surface cursor passes golden."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "cursor",
+        ]
+    )
+
+
+def test_validate_copilot_golden() -> None:
+    """AC-M31b-4: validate --surface copilot passes golden."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "copilot",
+        ]
+    )
+
+
+def test_validate_cursor_missing_skill_path_exits_one(tmp_path: Path) -> None:
+    """AC-M31b-7: missing skill path → validate exit 1 on cursor surface."""
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.skills]]
+name = "missing-skill"
+path = "skills/missing/SKILL.md"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(manifest_dir / "manifest.toml"),
+            "--surface",
+            "cursor",
+        ],
+        exit_code=1,
+    )
+
+
 def test_validate_missing_command_path_exits_one(tmp_path: Path) -> None:
     """AC-M31a-8: missing manifest command path → validate exit 1."""
     manifest_dir = tmp_path / "plugin"

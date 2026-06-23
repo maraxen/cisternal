@@ -121,11 +121,18 @@ def export(
         bool,
         cyclopts.Parameter(
             name=["--emit-command-bodies"],
-            help="Emit commands/<name>.md for commands with non-empty bodies.",
+            help="Emit commands/<name>.md for commands with non-empty bodies (claude only).",
         ),
     ] = False,
+    surface: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--surface"],
+            help="Emit surface: claude, cursor, or copilot (default: claude).",
+        ),
+    ] = "claude",
 ) -> None:
-    """Export registered tool assets to a Claude plugin bundle.
+    """Export agent assets to a plugin bundle for the selected surface.
 
     Reads tools from the named registry partition (or manifest + registry),
     builds a Claude plugin manifest, and writes (or dry-runs) the output to --out.
@@ -197,10 +204,22 @@ def export(
         bundle = AssetBundle(metadata=metadata, commands=commands)
 
     # Emit.
-    from cisterna.export.claude import ClaudeEmitter  # noqa: PLC0415
+    from cisterna.assets.validate_golden import emit_surface_files  # noqa: PLC0415
     from cisterna.export.write import write_bundle  # noqa: PLC0415
 
-    files = ClaudeEmitter(emit_command_bodies=emit_command_bodies).emit(bundle)
+    if surface not in {"claude", "cursor", "copilot"}:
+        _log.error("cisterna.cli: unsupported export surface %r", surface)
+        raise SystemExit(2)
+
+    bodies = emit_command_bodies
+    if surface != "claude" and emit_command_bodies:
+        _log.warning(
+            "cisterna.cli: --emit-command-bodies ignored for surface %r",
+            surface,
+        )
+        bodies = False
+
+    files = emit_surface_files(bundle, surface, emit_command_bodies=bodies)
     result = write_bundle(files, out, dry_run=dry_run)
 
     if dry_run:
@@ -330,6 +349,7 @@ def validate_assets(
         actual = _native_cli_surface_digest(
             registry=registry,
             manifest=manifest,
+            surface=surface,
             emit_command_bodies=emit_command_bodies,
         )
     else:
@@ -352,6 +372,7 @@ def _native_cli_surface_digest(
     *,
     registry: str,
     manifest: Path | None,
+    surface: str,
     emit_command_bodies: bool,
 ) -> str:
     """Run ``cisterna assets export`` in a subprocess and hash emitted files."""
@@ -374,6 +395,7 @@ def _native_cli_surface_digest(
             cmd.extend(["--manifest", str(manifest)])
         if emit_command_bodies:
             cmd.append("--emit-command-bodies")
+        cmd.extend(["--surface", surface])
         subprocess.run(cmd, check=True, capture_output=True)
         files: dict[str, str] = {}
         for path in out.rglob("*"):
