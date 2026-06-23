@@ -18,5 +18,6 @@ m5_telemetry_gate_complete = true
 m6_bathos_cutover_complete = true
 m7_otlp_egress_complete = true
 m8_xperiri_adapter_complete = true
+m8_2_xperiri_cutover_complete = true
 m9_myxcel_adapter_complete = true
 m9_2_myxcel_cutover_complete = true

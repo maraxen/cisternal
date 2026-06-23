@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — M9.2 myxcel cutover shipped
+# Updated 2026-06-24 — M8.2 xperiri cutover shipped
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,25 +7,26 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_m9.2-myxcel-cutover"
+task_id = "260624_m8.2-xperiri-cutover"
 current_phase = "TRIAGE"
-last_subphase = "m9.2_implement"
-last_artifact_path = "/home/marielle/projects/myxcel/src/myxcel/telemetry_bridge.py"
-iteration_count = 29
-last_activation = "2026-06-24T20:00:00Z"
+last_subphase = "m8.2_implement"
+last_artifact_path = "/home/marielle/projects/xperiri/src/xperiri/telemetry_bridge.py"
+iteration_count = 30
+last_activation = "2026-06-24T21:00:00Z"
 autonomy_level = "L2"
-selected_item_ids = [2146]
-selection_mode = "m9.2_cutover"
+selected_item_ids = [2145]
+selection_mode = "m8.2_cutover"
 brainstorm_needed = false
 next_phase = "TRIAGE"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2146
+closed_epic_id = 2145
 m8_xperiri_adapter_complete = true
+m8_2_xperiri_cutover_complete = true
 m9_myxcel_adapter_complete = true
 m9_2_myxcel_cutover_complete = true
-next_epic_candidate = "M8.2 xperiri repo cutover"
+next_epic_candidate = "M7.1 OTLP hardening"
 next_backlog_id = 0
 
 [loop.gates]
