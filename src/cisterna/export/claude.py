@@ -50,6 +50,9 @@ class ClaudeEmitter(Emitter):
     Pure, deterministic, never-raises.  See module docstring for full spec.
     """
 
+    def __init__(self, *, emit_command_bodies: bool = False) -> None:
+        self._emit_command_bodies = emit_command_bodies
+
     def emit(self, bundle: AssetBundle) -> dict[str, str]:
         """Render *bundle* to the Claude plugin file dict.
 

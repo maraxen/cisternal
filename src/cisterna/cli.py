@@ -5,6 +5,8 @@ Provides:
 
 Subcommand tree:
     cisterna assets export [OPTIONS]
+    cisterna assets inspect [OPTIONS]
+    cisterna assets validate [OPTIONS]
 
 This module is FASTMCP-FREE by design (spec M4): importing ``cisterna.cli``
 must succeed even when ``fastmcp`` is not installed.  All asset-export logic
@@ -32,7 +34,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import json
 import logging
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Annotated
 
@@ -165,3 +171,178 @@ def export(
     if dry_run:
         for path, sha256 in result.files:
             print(f"{path}  {sha256}")
+
+
+# ---------------------------------------------------------------------------
+# cisterna assets inspect / validate (M3.1a W4)
+# ---------------------------------------------------------------------------
+
+
+@assets_app.command(name="inspect")
+def inspect_assets(
+    *,
+    manifest: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Path to manifest.toml (uses CompositeAssetSource with --registry).",
+        ),
+    ] = None,
+    registry: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--registry"],
+            help="Registry partition when loading assets (default: 'default').",
+        ),
+    ] = "default",
+    resolve_tools: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--resolve-tools"],
+            help="Include resolved_tools for agents (requires --surface).",
+        ),
+    ] = False,
+    surface: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--surface"],
+            help="Vendor surface for tool resolution (e.g. claude_code).",
+        ),
+    ] = None,
+) -> None:
+    """Print a JSON LoadReport to stdout (no file writes)."""
+    if resolve_tools and not surface:
+        _log.error("cisterna.cli: --surface is required with --resolve-tools")
+        raise SystemExit(2)
+
+    from cisterna.assets.inspect_json import report_to_dict  # noqa: PLC0415
+    from cisterna.assets.load import load_asset_report  # noqa: PLC0415
+
+    report = load_asset_report(manifest=manifest, registry=registry)
+    payload = report_to_dict(
+        report,
+        resolve_tools_flag=resolve_tools,
+        surface=surface,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+@assets_app.command(name="validate")
+def validate_assets(
+    *,
+    manifest: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Path to manifest.toml (uses CompositeAssetSource with --registry).",
+        ),
+    ] = None,
+    registry: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--registry"],
+            help="Registry partition when loading assets (default: 'default').",
+        ),
+    ] = "default",
+    surface: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--surface"],
+            help="Emit surface for golden comparison (default: claude).",
+        ),
+    ] = "claude",
+    emit_command_bodies: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--emit-command-bodies"],
+            help="Include per-command body files in emission (golden mode switch).",
+        ),
+    ] = False,
+    use_native_cli: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--use-native-cli"],
+            help="Re-emit via subprocess export instead of in-process emitter.",
+        ),
+    ] = False,
+) -> None:
+    """Validate loaded assets: structural checks + golden digest (exit 0/1)."""
+    from cisterna.assets.load import load_asset_report  # noqa: PLC0415
+    from cisterna.assets.validate_golden import (  # noqa: PLC0415
+        golden_digest_path,
+        surface_digest,
+    )
+
+    report = load_asset_report(manifest=manifest, registry=registry)
+
+    if report.conflicts:
+        _log.error("cisterna.cli: validate failed — conflicts: %s", report.conflicts)
+        raise SystemExit(1)
+
+    if report.warnings:
+        _log.error("cisterna.cli: validate failed — warnings: %s", report.warnings)
+        raise SystemExit(1)
+
+    mode = "with_command_bodies" if emit_command_bodies else "names_only"
+    golden_path = golden_digest_path(surface, mode)
+    if not golden_path.is_file():
+        _log.error("cisterna.cli: validate failed — missing golden digest: %s", golden_path)
+        raise SystemExit(1)
+
+    expected = golden_path.read_text(encoding="utf-8").strip()
+
+    if use_native_cli:
+        if manifest is not None:
+            _log.warning(
+                "cisterna.cli: --use-native-cli ignores --manifest until export wiring (W5)"
+            )
+        actual = _native_cli_surface_digest(
+            registry=registry,
+            emit_command_bodies=emit_command_bodies,
+        )
+    else:
+        actual = surface_digest(
+            report.bundle,
+            surface,
+            emit_command_bodies=emit_command_bodies,
+        )
+
+    if actual != expected:
+        _log.error(
+            "cisterna.cli: validate failed — digest mismatch (expected %s, got %s)",
+            expected,
+            actual,
+        )
+        raise SystemExit(1)
+
+
+def _native_cli_surface_digest(
+    *,
+    registry: str,
+    emit_command_bodies: bool,
+) -> str:
+    """Run ``cisterna assets export`` in a subprocess and hash plugin.json."""
+    from cisterna.export._hash import bundle_sha256  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys; from cisterna.cli import app; app(sys.argv[1:])",
+            "assets",
+            "export",
+            "--registry",
+            registry,
+            "--out",
+            str(out),
+        ]
+        if emit_command_bodies:
+            cmd.append("--emit-command-bodies")
+        subprocess.run(cmd, check=True, capture_output=True)
+        plugin = out / ".claude-plugin" / "plugin.json"
+        if not plugin.is_file():
+            msg = "native export did not emit plugin.json"
+            raise RuntimeError(msg)
+        files = {".claude-plugin/plugin.json": plugin.read_text(encoding="utf-8")}
+        return bundle_sha256(files)
