@@ -21,6 +21,7 @@ def capture_legacy(consumer: str) -> Iterator[list[logging.LogRecord]]:
     - bathos -> "bathos"
     - contemplex -> "contemplex"
     - xperiri -> "xperiri" (cutover stub; legacy uses event_log stdout today)
+    - myxcel -> "myxcel" (cutover stub; HPC + MCP tools)
 
     Args:
         consumer: Logger name (e.g., "bathos", "contemplex")

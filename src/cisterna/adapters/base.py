@@ -199,3 +199,23 @@ class XpeririAdapter(AdapterBase):
         payload: dict[str, Any] = {"ok": False, "error": str(exc)}
         payload.update(fields)
         return json.dumps(payload, sort_keys=True)
+
+
+class MyxcelAdapter(AdapterBase):
+    """Adapter for myxcel v2 decorator (async MCP tools, dict returns).
+
+    Event names (spec §4.2): mcp.call_start, mcp.call_end, mcp.tool_error.
+    Response shape: dict passthrough; errors use {error, message} per myxcel.mcp_server._tool_error.
+    """
+
+    ALLOWED_NAMES = frozenset({"mcp.call_start", "mcp.call_end", "mcp.tool_error"})
+
+    def shape_ok(self, tool_name: str, result: Any) -> Any:
+        """Shape success: passthrough dict/list results (myxcel in-band errors included)."""
+        if isinstance(result, (dict, list)):
+            return result
+        return {"result": result}
+
+    def shape_error(self, tool_name: str, exc: BaseException, **fields: Any) -> Any:
+        """Shape error: myxcel _tool_error envelope."""
+        return {"error": type(exc).__name__, "message": str(exc)}

@@ -12,7 +12,7 @@ from .context import (
 from .record import Record
 from .exporter import ExporterBase, JsonlExporter, ShadowExporter
 from .pipeline import EventPipeline, init_pipeline, get_pipeline, shutdown_pipeline
-from .span import span, aspan
+from .span import span, aspan, job_span
 from .self_obs import status, StatusReport
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "shutdown_pipeline",
     "span",
     "aspan",
+    "job_span",
     "status",
     "StatusReport",
 ]

@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — M8 epic audit VERIFY PASS → TRIAGE
+# Updated 2026-06-24 — M9 epic audit VERIFY PASS
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,35 +7,35 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_epic-audit_m8"
+task_id = "260624_epic-audit_m9"
 current_phase = "TRIAGE"
-last_subphase = "epic_audit_verify_pass"
-last_artifact_path = ".praxia/docs/research/260624_m8-epic-closeout-audit.md"
-iteration_count = 25
-last_activation = "2026-06-24T16:00:00Z"
+last_subphase = "m9_epic_audit_verify"
+last_artifact_path = ".praxia/docs/research/260624_m9-epic-closeout-audit.md"
+iteration_count = 28
+last_activation = "2026-06-24T19:00:00Z"
 autonomy_level = "L2"
-selected_item_ids = []
-selection_mode = "post_m8_audit"
-brainstorm_needed = true
-next_phase = "BRAINSTORM"
+selected_item_ids = [2146]
+selection_mode = "m9_epic_audit"
+brainstorm_needed = false
+next_phase = "TRIAGE"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2628
-m7_otlp_egress_complete = true
+closed_epic_id = 2146
 m8_xperiri_adapter_complete = true
-next_backlog_id = 2146
+m9_myxcel_adapter_complete = true
+next_epic_candidate = "M9.2 myxcel repo cutover"
+next_backlog_id = 0
 
 [loop.gates]
 spec_confirmed = true
-spec_path = ".praxia/docs/specs/260624_m8-xperiri-adapter-buildable-spec-rev1.md"
+spec_path = ".praxia/docs/specs/260624_m9-myxcel-adapter-buildable-spec-rev1.md"
 design_path = ""
 adversarial_verdict = "ACCEPT"
 sprint_approved = true
-sprint_plan_path = ""
+sprint_plan_path = ".praxia/docs/specs/260624_m9-myxcel-adapter-buildable-spec-rev1.md"
 
-[loop.epic_audit]
-closed_epic = "M8 XpeririAdapter"
-verdict = "APPROVE"
-audit_memo = ".praxia/docs/research/260624_m8-epic-closeout-audit.md"
-uncommitted_ship = true
+[loop.brainstorm]
+session_id = "76929000"
+winner = "M9-A MyxcelAdapter + job_span helper"
+runner_up = "M9-F job_span-only thin adapter"

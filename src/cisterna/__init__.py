@@ -47,6 +47,7 @@ from cisterna.telemetry import (
     get_pipeline,
     span,
     aspan,
+    job_span,
     status,
     ExporterBase,
     _build_record,
@@ -131,6 +132,7 @@ __all__ = [
     "emit_event",
     "span",
     "aspan",
+    "job_span",
     "status",
     # M2 — Registration surface
     "tool",

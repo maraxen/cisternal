@@ -86,6 +86,52 @@ def span(name: str, **fields: Any) -> Iterator[None]:
         raise
 
 
+@contextmanager
+def job_span(name: str, **fields: Any) -> Iterator[None]:
+    """HPC/SLURM job span — sets task_id/run_uuid from env then delegates to span().
+
+    Reads ``MYX_JOB_ID`` or ``BTH_TASK_ID`` for task_id, and ``MYX_RUN_UUID`` or
+    ``BTH_RUN_UUID`` for run_uuid when not passed explicitly in *fields*.
+
+    Args:
+        name: Span name (e.g. ``slurm.submit``).
+        **fields: Extra fields forwarded to start/end events.
+
+    Yields:
+        None.
+    """
+    import os
+
+    from .context import run_uuid_var, task_id_var
+
+    span_fields = dict(fields)
+    tokens: list[tuple[Any, Any]] = []
+
+    task_id = span_fields.get("task_id") or os.environ.get("MYX_JOB_ID") or os.environ.get(
+        "BTH_TASK_ID"
+    )
+    if task_id:
+        span_fields.setdefault("task_id", task_id)
+        tokens.append((task_id_var, task_id_var.set(str(task_id))))
+
+    run_uuid = span_fields.get("run_uuid") or os.environ.get("MYX_RUN_UUID") or os.environ.get(
+        "BTH_RUN_UUID"
+    )
+    if run_uuid:
+        span_fields.setdefault("run_uuid", run_uuid)
+        tokens.append((run_uuid_var, run_uuid_var.set(str(run_uuid))))
+
+    try:
+        with span(name, **span_fields):
+            yield
+    finally:
+        for var, token in reversed(tokens):
+            try:
+                var.reset(token)
+            except ValueError:
+                pass
+
+
 @asynccontextmanager
 async def aspan(name: str, **fields: Any) -> AsyncIterator[None]:
     """Async context manager for timing with span emission and error recording.
