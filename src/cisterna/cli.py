@@ -329,6 +329,7 @@ def validate_assets(
     from cisterna.assets.load import load_asset_report  # noqa: PLC0415
     from cisterna.assets.validate_golden import (  # noqa: PLC0415
         golden_digest_path,
+        resolve_golden_slug,
         surface_digest,
     )
     from cisterna.export.registry import list_emitter_surfaces  # noqa: PLC0415
@@ -348,7 +349,20 @@ def validate_assets(
         raise SystemExit(1)
 
     mode = "with_command_bodies" if emit_command_bodies else "names_only"
-    golden_path = golden_digest_path(surface, mode)
+
+    if resolve_golden_slug(manifest) is None:
+        _log.error(
+            "cisterna.cli: validate failed — unknown manifest for golden: %s",
+            manifest,
+        )
+        raise SystemExit(1)
+
+    try:
+        golden_path = golden_digest_path(surface, mode, manifest=manifest)
+    except ValueError as exc:
+        _log.error("cisterna.cli: validate failed — %s", exc)
+        raise SystemExit(1) from exc
+
     if not golden_path.is_file():
         _log.error("cisterna.cli: validate failed — missing golden digest: %s", golden_path)
         raise SystemExit(1)
@@ -356,12 +370,16 @@ def validate_assets(
     expected = golden_path.read_text(encoding="utf-8").strip()
 
     if use_native_cli:
-        actual = _native_cli_surface_digest(
-            registry=registry,
-            manifest=manifest,
-            surface=surface,
-            emit_command_bodies=emit_command_bodies,
-        )
+        try:
+            actual = _native_cli_surface_digest(
+                registry=registry,
+                manifest=manifest,
+                surface=surface,
+                emit_command_bodies=emit_command_bodies,
+            )
+        except RuntimeError as exc:
+            _log.error("cisterna.cli: validate failed — %s", exc)
+            raise SystemExit(1) from exc
     else:
         actual = surface_digest(
             report.bundle,

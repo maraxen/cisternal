@@ -1,0 +1,30 @@
+[plugin]
+name = "cisterna"
+version = "0.1.0"
+description = "Agent-asset export CLI — dogfood manifest for M4 Export Trust"
+requires_praxia = "0.0.0"
+
+[[plugin.skills]]
+name = "export-trust"
+path = "skills/export-trust/SKILL.md"
+
+[[plugin.agents]]
+name = "validate-helper"
+path = "agents/validate-helper.md"
+description = "Documents validate, inspect, and export CLI usage"
+tools = []
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "hooks/pre-export.sh"
+tier = "essential"
+surfaces = ["claude", "cursor"]
+
+[plugin.export_command]
+claude_code = ["commands/export.md", "commands/validate.md"]
+cursor = ["commands/export.md"]
+
+[[plugin.workflows]]
+name = "export-dogfood"
+path = "workflows/export-dogfood.toml"

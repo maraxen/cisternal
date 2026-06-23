@@ -1,0 +1,57 @@
+name: export-dogfood
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - name: Validate self-manifest (built-in surfaces)
+        run: |
+          for s in antigravity claude copilot cursor; do
+            uv run cisterna assets validate \
+              --manifest .praxia/manifest.toml --surface "$s"
+          done
+      - name: Validate self-manifest (claude bodies)
+        run: |
+          uv run cisterna assets validate \
+            --manifest .praxia/manifest.toml --surface claude --emit-command-bodies
+      - name: Validate dogfood praxia fixture (built-in surfaces)
+        run: |
+          for s in antigravity claude copilot cursor; do
+            uv run cisterna assets validate \
+              --manifest tests/fixtures/manifest_dogfood_praxia/manifest.toml --surface "$s"
+          done
+      - name: Dry-run export self-manifest
+        run: |
+          uv run cisterna assets export \
+            --manifest .praxia/manifest.toml --surface claude --dry-run | grep -q .
+      - name: Install and test minimal_emitter example
+        run: |
+          uv pip install -e examples/minimal_emitter
+          uv run pytest examples/minimal_emitter/tests/ -q
+
+  native-validate-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Native CLI parity (claude)
+        run: |
+          uv run cisterna assets validate \
+            --manifest .praxia/manifest.toml --surface claude --use-native-cli
+          uv run cisterna assets validate \
+            --manifest .praxia/manifest.toml --surface claude \
+            --emit-command-bodies --use-native-cli

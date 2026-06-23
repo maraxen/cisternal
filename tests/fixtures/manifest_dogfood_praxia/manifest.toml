@@ -1,0 +1,43 @@
+[plugin]
+name = "dogfood-praxia"
+version = "2.0.0"
+description = "Praxia-scale dogfood fixture for M4 Export Trust"
+requires_praxia = "0.0.0"
+
+[[plugin.skills]]
+name = "orchestration"
+path = "skills/orchestration/SKILL.md"
+
+[[plugin.skills]]
+name = "handoff"
+path = "skills/handoff/SKILL.md"
+
+[[plugin.agents]]
+name = "recon"
+path = "agents/recon.md"
+description = "Recon agent for dogfood fixture"
+tools = []
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "hooks/pre-tool.sh"
+tier = "essential"
+surfaces = ["claude", "cursor"]
+
+[plugin.export_command]
+claude_code = ["commands/claude-export.md"]
+cursor = ["commands/cursor-sync.md"]
+
+[[plugin.workflows]]
+name = "sprint-plan"
+path = "workflows/sprint-plan.toml"
+
+[[plugin.pipelines]]
+name = "enrich"
+path = "pipelines/enrich.toml"
+
+[[plugin.snippets]]
+name = "scope-hint"
+path = "snippets/scope-hint.toml"
+scope = "project"

@@ -9,6 +9,40 @@ from cisterna.export._hash import bundle_sha256
 from cisterna.export.registry import get_emitter
 
 _PROVENANCE_FRAGMENT = "cisterna-provenance.json"
+_GOLDEN_ROOT = Path(__file__).resolve().parents[3] / "tests" / "golden"
+
+
+def resolve_golden_slug(manifest: Path | None) -> str | None:
+    """Map a manifest path to a golden tree slug, or None if unknown."""
+    if manifest is None:
+        return "legacy"
+    resolved = manifest.resolve()
+    parent_name = resolved.parent.name
+    if parent_name == "manifest_minimal":
+        return "legacy"
+    if parent_name == "manifest_dogfood_praxia":
+        return "dogfood_praxia"
+    if parent_name == ".praxia":
+        return "self_manifest"
+    return None
+
+
+def golden_digest_path(
+    surface: str,
+    mode: str = "names_only",
+    *,
+    manifest: Path | None = None,
+    golden_root: Path | None = None,
+) -> Path:
+    """Return path to stored golden digest file."""
+    root = golden_root or _GOLDEN_ROOT
+    slug = resolve_golden_slug(manifest)
+    if slug is None:
+        msg = f"unknown manifest for golden resolution: {manifest}"
+        raise ValueError(msg)
+    if slug == "legacy":
+        return root / surface / mode / "digest.sha256"
+    return root / slug / surface / mode / "digest.sha256"
 
 
 def emit_claude_files(
@@ -67,12 +101,17 @@ def surface_digest(
     return bundle_sha256(hashed)
 
 
-def golden_digest_path(
+def write_golden_digest(
+    bundle: AssetBundle,
     surface: str,
-    mode: str = "names_only",
     *,
-    golden_root: Path | None = None,
+    manifest: Path,
+    emit_command_bodies: bool = False,
 ) -> Path:
-    """Return path to stored golden digest file."""
-    root = golden_root or Path(__file__).resolve().parents[3] / "tests" / "golden"
-    return root / surface / mode / "digest.sha256"
+    """Write golden digest for *bundle* at the manifest-scoped path (dev helper)."""
+    mode = "with_command_bodies" if emit_command_bodies else "names_only"
+    digest = surface_digest(bundle, surface, emit_command_bodies=emit_command_bodies)
+    path = golden_digest_path(surface, mode, manifest=manifest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(digest + "\n", encoding="utf-8")
+    return path

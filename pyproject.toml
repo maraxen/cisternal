@@ -47,3 +47,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "cisterna.assets" = ["data/*.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

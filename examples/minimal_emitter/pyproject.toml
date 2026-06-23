@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minimal-emitter"
+version = "0.1.0"
+description = "Third-party cisterna.emitters example for M4 Export Trust"
+requires-python = ">=3.13"
+dependencies = ["cisterna"]
+
+[project.entry-points."cisterna.emitters"]
+minimal = "minimal_emitter:factory"
+
+[tool.setuptools.packages.find]
+where = ["src"]
