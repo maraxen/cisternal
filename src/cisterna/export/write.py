@@ -2,7 +2,7 @@
 
 write_bundle is intentionally Emitter-independent: it takes a plain
 ``dict[str, str]`` (as returned by ``Emitter.emit``) and a target directory,
-then writes (or dry-runs) each file.
+then writes (or dry-runs) each file via :class:`FileWriterSink`.
 
 Design invariants:
     - ``dry_run=True``: computes content_sha256 for each file, writes NOTHING,
@@ -27,29 +27,11 @@ B2 resolution — distinct hashes:
 
 from __future__ import annotations
 
-import hashlib
-import logging
-from dataclasses import dataclass
 from pathlib import Path
 
-_log = logging.getLogger("cisterna.export")
+from cisterna.export.sink import FileWriterSink, WriteResult
 
-
-@dataclass(frozen=True, slots=True)
-class WriteResult:
-    """Result of a write_bundle call.
-
-    Attributes:
-        files:   Tuple of ``(forward-slash-relative-path, content_sha256)``
-                 for each file processed.  content_sha256 is the SHA-256
-                 hex digest of the UTF-8 encoded file contents.
-                 Distinct from the provenance digest in the sidecar (B2).
-        dry_run: ``True`` if no files were written; ``False`` if files were
-                 written to disk.
-    """
-
-    files: tuple[tuple[str, str], ...]
-    dry_run: bool
+__all__ = ["WriteResult", "write_bundle"]
 
 
 def write_bundle(
@@ -74,23 +56,4 @@ def write_bundle(
         error).  When ``dry_run=False``, I/O errors are logged as WARNINGs and
         skipped — this function never raises on I/O failure.
     """
-    result: list[tuple[str, str]] = []
-
-    for rel_path, contents in files.items():
-        encoded = contents.encode()
-        sha = hashlib.sha256(encoded).hexdigest()
-        result.append((rel_path, sha))
-
-        if not dry_run:
-            target = out / rel_path
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(contents, encoding="utf-8")
-            except OSError as exc:
-                _log.warning(
-                    "cisterna.export: write_bundle failed to write %s: %s",
-                    target,
-                    exc,
-                )
-
-    return WriteResult(files=tuple(result), dry_run=dry_run)
+    return FileWriterSink().write(files, out, dry_run=dry_run)
