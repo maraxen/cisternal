@@ -47,10 +47,10 @@ def get_emitter(surface: str, *, emit_command_bodies: bool = False) -> Emitter |
 
 | Surface | Factory | Kwargs |
 |---------|---------|--------|
-| `claude` | `_claude_factory` | `emit_command_bodies` |
-| `cursor` | `_cursor_factory` | none |
-| `copilot` | `_copilot_factory` | none |
-| `antigravity` | `_antigravity_factory` | none |
+| `claude` | `claude_factory` | `emit_command_bodies` |
+| `cursor` | `cursor_factory` | none |
+| `copilot` | `copilot_factory` | none |
+| `antigravity` | `antigravity_factory` | none |
 
 ---
 

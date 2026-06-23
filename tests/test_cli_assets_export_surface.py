@@ -62,3 +62,22 @@ def test_export_surface_antigravity_writes_layout(tmp_path: Path) -> None:
 
     assert (out_dir / "gemini-extension.json").is_file()
     assert (out_dir / "agents" / "recon.md").is_file()
+
+
+def test_export_unknown_surface_exits_two(tmp_path: Path) -> None:
+    """L33: unknown export surface exits 2."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _invoke_app(
+        [
+            "assets",
+            "export",
+            "--surface",
+            "linear",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--out",
+            str(out_dir),
+        ],
+        exit_code=2,
+    )

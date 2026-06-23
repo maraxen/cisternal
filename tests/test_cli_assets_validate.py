@@ -101,6 +101,21 @@ def test_validate_antigravity_golden() -> None:
     )
 
 
+def test_validate_unknown_surface_exits_two() -> None:
+    """L33: unknown validate surface exits 2."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "linear",
+        ],
+        exit_code=2,
+    )
+
+
 def test_validate_cursor_missing_skill_path_exits_one(tmp_path: Path) -> None:
     """AC-M31b-7: missing skill path → validate exit 1 on cursor surface."""
     manifest_dir = tmp_path / "plugin"
