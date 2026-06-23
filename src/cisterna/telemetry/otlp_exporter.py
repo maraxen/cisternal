@@ -29,7 +29,9 @@ def _ns_from_ts(ts: float) -> int:
 
 
 class OtlpExporter(ExporterBase):
-    """Maps cisterna Records to OpenTelemetry spans and exports via OTLP gRPC.
+    """Maps cisterna Records to OpenTelemetry spans and exports via OTLP.
+
+    Protocol is selected by ``CISTERNA_OTLP_PROTOCOL`` (``grpc`` default, or ``http``).
 
     Span pairing:
     - ``mcp.call_start`` + ``mcp.call_end`` → one span (keyed by request_id)
@@ -46,6 +48,7 @@ class OtlpExporter(ExporterBase):
         *,
         service_name: str | None = None,
         span_exporter: Any | None = None,
+        protocol: str | None = None,
     ) -> None:
         import os
 
@@ -61,11 +64,10 @@ class OtlpExporter(ExporterBase):
             if not endpoint:
                 msg = "OtlpExporter requires endpoint or span_exporter"
                 raise ValueError(msg)
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                OTLPSpanExporter,
+            exporter: SpanExporter = create_otlp_span_exporter(
+                endpoint,
+                protocol=protocol or resolve_otlp_protocol(),
             )
-
-            exporter: SpanExporter = OTLPSpanExporter(endpoint=endpoint)
             processor = BatchSpanProcessor(exporter)
         else:
             processor = SimpleSpanProcessor(span_exporter)
@@ -203,6 +205,38 @@ class OtlpExporter(ExporterBase):
         span.end(end_time=_ns_from_ts(record.ts))
 
 
+def resolve_otlp_protocol() -> str:
+    """Return ``grpc`` or ``http`` from ``CISTERNA_OTLP_PROTOCOL`` (default grpc)."""
+    import os
+
+    raw = os.environ.get("CISTERNA_OTLP_PROTOCOL", "grpc").strip().lower()
+    if raw in ("http", "http/protobuf", "http_protobuf"):
+        return "http"
+    if raw in ("grpc", ""):
+        return "grpc"
+    print(
+        f"[cisterna] Unknown CISTERNA_OTLP_PROTOCOL={raw!r}; using grpc",
+        file=sys.stderr,
+    )
+    return "grpc"
+
+
+def create_otlp_span_exporter(endpoint: str, *, protocol: str) -> Any:
+    """Construct an OTLP ``SpanExporter`` for *protocol* (``grpc`` or ``http``)."""
+    if protocol == "http":
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
+
+        return OTLPSpanExporter(endpoint=endpoint)
+
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        OTLPSpanExporter,
+    )
+
+    return OTLPSpanExporter(endpoint=endpoint)
+
+
 def maybe_create_otlp_exporter() -> OtlpExporter | None:
     """Create OtlpExporter when endpoint is set and SDK is available."""
     import os
@@ -217,4 +251,5 @@ def maybe_create_otlp_exporter() -> OtlpExporter | None:
             file=sys.stderr,
         )
         return None
-    return OtlpExporter(endpoint=endpoint)
+    protocol = resolve_otlp_protocol()
+    return OtlpExporter(endpoint=endpoint, protocol=protocol)

@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — M8.2 xperiri cutover shipped
+# Updated 2026-06-24 — M7.1 OTLP HTTP + collector CI shipped
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,26 +7,26 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_m8.2-xperiri-cutover"
+task_id = "260624_m7.1-otlp-http"
 current_phase = "TRIAGE"
-last_subphase = "m8.2_implement"
-last_artifact_path = "/home/marielle/projects/xperiri/src/xperiri/telemetry_bridge.py"
-iteration_count = 30
-last_activation = "2026-06-24T21:00:00Z"
+last_subphase = "m7.1_implement"
+last_artifact_path = ".praxia/docs/specs/260624_m7.1-otlp-http-buildable-spec-rev1.md"
+iteration_count = 31
+last_activation = "2026-06-24T22:00:00Z"
 autonomy_level = "L2"
-selected_item_ids = [2145]
-selection_mode = "m8.2_cutover"
+selected_item_ids = []
+selection_mode = "m7.1_implement"
 brainstorm_needed = false
 next_phase = "TRIAGE"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2145
-m8_xperiri_adapter_complete = true
+closed_epic_id = 2627
+m7_otlp_egress_complete = true
+m7_1_otlp_http_complete = true
 m8_2_xperiri_cutover_complete = true
-m9_myxcel_adapter_complete = true
 m9_2_myxcel_cutover_complete = true
-next_epic_candidate = "M7.1 OTLP hardening"
+next_epic_candidate = "Operator runbook"
 next_backlog_id = 0
 
 [loop.gates]

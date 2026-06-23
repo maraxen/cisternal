@@ -57,3 +57,35 @@ jobs:
           uv run cisterna assets validate \
             --manifest .praxia/manifest.toml --surface claude \
             --emit-command-bodies --use-native-cli
+
+  otlp-collector-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Start otel-collector
+        run: |
+          docker run -d --name cisterna-otel \
+            -p 4317:4317 -p 4318:4318 \
+            -v "${{ github.workspace }}/tests/fixtures/otel-collector-config.yaml:/etc/otelcol/config.yaml" \
+            otel/opentelemetry-collector:0.109.0 \
+            --config=/etc/otelcol/config.yaml
+          for i in $(seq 1 30); do
+            if nc -z localhost 4317 2>/dev/null; then
+              echo "collector ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "collector did not become ready in time"
+          docker logs cisterna-otel || true
+          exit 1
+      - name: OTLP gRPC + HTTP integration smoke
+        run: uv run pytest tests/test_otlp_http.py -m integration -q
+      - name: Stop otel-collector
+        if: always()
+        run: docker rm -f cisterna-otel || true

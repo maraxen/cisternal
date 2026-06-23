@@ -17,6 +17,7 @@ m4_export_trust_complete = true
 m5_telemetry_gate_complete = true
 m6_bathos_cutover_complete = true
 m7_otlp_egress_complete = true
+m7_1_otlp_http_complete = true
 m8_xperiri_adapter_complete = true
 m8_2_xperiri_cutover_complete = true
 m9_myxcel_adapter_complete = true
