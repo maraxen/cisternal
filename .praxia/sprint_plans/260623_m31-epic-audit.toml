@@ -1,0 +1,84 @@
+[sprint]
+sprint_id = "260623_m31-epic-audit"
+sprint_num = 0
+name = "M3.1 epic inter-epic audit (#2326 → M3.2)"
+description = "OPTION-D hybrid audit: mechanical VERIFY, doc/debt hygiene, entry_point research, M3.2 triage registration."
+context = '''
+Closed epic #2326 (children #2486, #2487, #2559 completed).
+Baseline: 275 pytest, ruff clean.
+Research memo: .praxia/docs/research/260623_m31-epic-closeout-audit.md
+'''
+max_fix_retries = 0
+
+[[tracks]]
+id = "w1"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "audit-m31"
+phase_name = "W1 — mechanical VERIFY"
+fixer_prompt = '''
+task_id: 260623_epic-audit_m31
+Run uv run pytest -q && uv run ruff check .
+Confirm 24/24 AC citations in closeout memo. No code changes.
+'''
+reviewer_prompt = '''
+VERIFY: pytest green, ruff clean, closeout memo exists with AC table.
+PASS if satisfied.
+'''
+
+[[tracks]]
+id = "w2"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "audit-m31"
+phase_name = "W2 — doc drift + debt close"
+fixer_prompt = '''
+task_id: 260623_epic-audit_m31
+1. Amend .praxia/docs/specs/260623_m31-buildable-spec.md Deferred M3.2: Antigravity shipped M3.1c #2559
+2. mcp_praxia_debt close id=235 (validate-on-conflict test exists)
+'''
+reviewer_prompt = '''
+VERIFY: rev2 deferred section accurate; debt #235 closed.
+PASS if satisfied.
+'''
+
+[[tracks]]
+id = "w3"
+is_research = true
+
+[[tracks.items]]
+backlog_id = "audit-m31"
+phase_name = "W3 — entry_point packaging research"
+fixer_prompt = '''
+task_id: 260623_epic-audit_m31
+Research memo at .praxia/docs/research/260623_m32-entry-point-packaging.md
+Cite pyproject.toml build-backend. No product code.
+'''
+reviewer_prompt = '''
+VERIFY: memo cites setuptools backend and proposes entry-point group stub.
+PASS if satisfied.
+'''
+
+[[tracks]]
+id = "w4"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "audit-m31"
+phase_name = "W4 — M3.2 triage registration"
+fixer_prompt = '''
+task_id: 260623_epic-audit_m31
+1. backlog add M3.2 parent epic (entry_point emitter plugins)
+2. Update loop_state.toml: current_phase=TRIAGE, closed_epic_id=2326, next_epic_id=<new>
+3. Create loop_priorities.toml with default_ci if missing
+'''
+reviewer_prompt = '''
+VERIFY: M3.2 backlog item exists; loop_state routes to TRIAGE.
+PASS if satisfied.
+'''
+
+[orchestration]
+sequential = ["w1", "w2", "w3", "w4"]
+concurrent = []

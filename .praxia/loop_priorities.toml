@@ -1,0 +1,14 @@
+# Cisterna autonomous loop priorities and invariants
+
+[invariants]
+default_ci = "uv run pytest -q && uv run ruff check ."
+no_autonomous_push_or_merge_to_main = true
+
+[policies.inter_epic_audit]
+enabled = true
+skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
+
+[epics]
+closed = 2326
+active = 2563
+active_title = "M3.2: entry_point emitter plugins + dispatch registry"

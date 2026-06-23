@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-23 — M3.1b rev3 spec PI-approved (L2 spec_confirmed)
+# Updated 2026-06-23 — M3.1 epic audit PASS; route to M3.2 triage (#2563)
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,27 +7,26 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_m31b-brainstorm"
-current_phase = "EXECUTE"
-last_subphase = "w4_complete"
-last_artifact_path = ".praxia/sprint_plans/260623_m31b-cursor-copilot.toml"
-brainstorm_session_id = "f04480ad"
-iteration_count = 2
-last_activation = "2026-06-23T20:15:00Z"
+task_id = "260623_epic-audit_m31"
+current_phase = "TRIAGE"
+last_subphase = "epic_audit_verify_pass"
+last_artifact_path = ".praxia/docs/research/260623_m31-epic-closeout-audit.md"
+iteration_count = 4
+last_activation = "2026-06-23T22:00:00Z"
 autonomy_level = "L2"
-selected_item_ids = [2487]
-selection_mode = "p2_fallback"
-brainstorm_needed = false
+selected_item_ids = [2563]
+selection_mode = "epic_audit_handoff"
+brainstorm_needed = true
 adversarial_tier = "TIER3"
 pcw_template = "spec_driven_dev"
 worktree_safe = false
-next_phase = "EXECUTE"
+next_phase = "BRAINSTORM"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2486
-next_epic_id = 2487
-m31c_backlog_id = 2559
+closed_epic_id = 2326
+next_epic_id = 2563
+parent_epic_id = 2563
 
 [loop.lock]
 token = ""
@@ -35,16 +34,16 @@ expiry_ts = ""
 timeout_minutes = 45
 
 [loop.gates]
-spec_confirmed = true
-spec_path = ".praxia/docs/specs/260623_m31b-buildable-spec-rev3.md"
-sprint_approved = true
-sprint_plan_path = ".praxia/sprint_plans/260623_m31b-cursor-copilot.toml"
+spec_confirmed = false
+spec_path = ""
+sprint_approved = false
+sprint_plan_path = ""
 
 [loop.metrics]
 backlog_items_closed_per_iteration = 1
 consecutive_zero_progress_iterations = 0
 max_zero_progress = 3
-last_items_closed = 1
+last_items_closed = 3
 remediate_attempt = 0
 
 [loop.popperian]

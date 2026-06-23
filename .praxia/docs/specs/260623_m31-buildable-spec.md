@@ -190,7 +190,11 @@ N11 CLI --surface cursor|copilot + golden + regression
 
 ## Deferred M3.2
 
-AntigravityEmitter, entry_point plugins, WriterSink, `registration.snapshot()`, vendor path-array command mode.
+**Shipped in M3.1c (#2559):** AntigravityEmitter — see `.praxia/docs/specs/260623_m31c-buildable-spec-rev1.md`.
+
+**Remaining M3.2:**
+
+entry_point plugins, WriterSink, `registration.snapshot()` public API, vendor path-array command mode, L14 workflow/pipeline/snippet validate-only parsing.
 
 ---
 
