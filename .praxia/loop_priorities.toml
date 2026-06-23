@@ -9,8 +9,6 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2563
-active = 2581
-active_title = "M3.3: deferred export infrastructure (3 of 4 children remain)"
-m33a_complete = true
-next_child = 2587
+closed = 2581
+active = null
+active_title = ""
