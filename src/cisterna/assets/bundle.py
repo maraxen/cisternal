@@ -32,13 +32,22 @@ Fields:
         name:    MCP server identifier.
         command: Argv tuple for the server process.
         env:     Environment variable pairs ``((key, val), ...)``.
-                 Reserved for M3.1 — always empty in M3.
+
+    SkillAsset / AgentAsset / HookSpecAsset:
+        M3.1a manifest-loaded asset kinds (see rev2 buildable spec).
 
     AssetBundle:
         metadata:    BundleMetadata.
         commands:    Tuple of CommandAsset, sorted by name at construction.
-        mcp_servers: Always empty in M3 (reserved forward-compat).
-                     No skills/agents/hooks fields (PREMORTEM-1).
+        mcp_servers: MCP server entries.
+        skills:      Tuple of SkillAsset, sorted by name at construction.
+        agents:      Tuple of AgentAsset, sorted by name at construction.
+        hook_specs:  Tuple of HookSpecAsset, sorted by (event, matcher, script).
+
+    LoadReport:
+        bundle:     Loaded AssetBundle.
+        warnings:   Non-fatal load issues (missing files, parse degrade).
+        conflicts:  Composite merge conflict messages.
 """
 
 from __future__ import annotations
@@ -66,7 +75,7 @@ class CommandAsset:
 
 @dataclass(frozen=True, slots=True)
 class McpAsset:
-    """A single MCP server entry (reserved; always empty in M3)."""
+    """A single MCP server entry."""
 
     name: str
     command: tuple[str, ...] = ()
@@ -74,8 +83,39 @@ class McpAsset:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillAsset:
+    """A single skill asset entry."""
+
+    name: str
+    description: str = ""
+    body: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentAsset:
+    """A single agent asset entry."""
+
+    name: str
+    description: str = ""
+    tools: tuple[str, ...] = ()
+    model: str | None = None
+    body: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class HookSpecAsset:
+    """A hook specification asset entry."""
+
+    event: str
+    matcher: str
+    script: str
+    tier: str = ""
+    surfaces: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class AssetBundle:
-    """Complete asset bundle; commands are sorted by name at construction.
+    """Complete asset bundle with canonical sort invariants at construction.
 
     Design note: sorting is enforced via ``object.__setattr__`` in
     ``__post_init__`` rather than via a classmethod constructor.  See module
@@ -85,9 +125,42 @@ class AssetBundle:
     metadata: BundleMetadata
     commands: tuple[CommandAsset, ...] = ()
     mcp_servers: tuple[McpAsset, ...] = ()
+    skills: tuple[SkillAsset, ...] = ()
+    agents: tuple[AgentAsset, ...] = ()
+    hook_specs: tuple[HookSpecAsset, ...] = ()
 
     def __post_init__(self) -> None:
-        # Sort commands by name.  object.__setattr__ is required because the
-        # dataclass is frozen and self.commands = ... would raise FrozenInstanceError.
-        sorted_commands = tuple(sorted(self.commands, key=lambda c: c.name))
-        object.__setattr__(self, "commands", sorted_commands)
+        object.__setattr__(
+            self,
+            "commands",
+            tuple(sorted(self.commands, key=lambda c: c.name)),
+        )
+        object.__setattr__(
+            self,
+            "skills",
+            tuple(sorted(self.skills, key=lambda s: s.name)),
+        )
+        object.__setattr__(
+            self,
+            "agents",
+            tuple(sorted(self.agents, key=lambda a: a.name)),
+        )
+        object.__setattr__(
+            self,
+            "hook_specs",
+            tuple(
+                sorted(
+                    self.hook_specs,
+                    key=lambda h: (h.event, h.matcher, h.script),
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LoadReport:
+    """Result of an AssetSource load (never-raise convention on load itself)."""
+
+    bundle: AssetBundle
+    warnings: tuple[str, ...] = ()
+    conflicts: tuple[str, ...] = ()
