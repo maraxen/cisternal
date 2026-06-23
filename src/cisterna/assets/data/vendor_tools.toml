@@ -1,0 +1,34 @@
+# Portable vendor tools — ported subset from praxia vendor_tools.toml (M3.1a).
+
+[abstract]
+capabilities = [
+  "read", "search", "edit", "write", "execute", "web", "web_search", "delegate",
+  "transduction_log", "transduction_query", "lesson", "knowledge",
+  "recon_workspace", "code_index_workspace",
+]
+
+[claude_code]
+capability_map = { read = "Read", search = "Grep", edit = "Edit", write = "Write", execute = "Bash", web = "WebFetch", web_search = "WebSearch", delegate = "", transduction_log = "mcp__praxia__transduction_log", transduction_query = "mcp__praxia__transduction_query", lesson = "mcp__praxia__lesson", knowledge = "mcp__praxia__knowledge", recon_workspace = "mcp__praxia__recon_workspace", code_index_workspace = "mcp__praxia__code_index_workspace" }
+
+[cursor]
+capability_map = { read = "read_file", search = "search_file_content", edit = "replace", write = "write_file", execute = "", web = "", web_search = "", delegate = "", transduction_log = "", transduction_query = "", lesson = "", knowledge = "", recon_workspace = "", code_index_workspace = "" }
+
+[copilot]
+capability_map = { read = "read_file", search = "search_file_content", edit = "replace", write = "write_file", execute = "run_shell_command", web = "google_web_search", web_search = "google_web_search", delegate = "", transduction_log = "", transduction_query = "", lesson = "", knowledge = "", recon_workspace = "", code_index_workspace = "" }
+
+[antigravity_cli]
+capability_map = { read = "read_file", search = "search_file_content", edit = "replace", write = "write_file", execute = "run_shell_command", web = "google_web_search", web_search = "google_web_search", delegate = "", transduction_log = "mcp_praxia_transduction_log", transduction_query = "mcp_praxia_transduction_query", lesson = "mcp_praxia_lesson", knowledge = "mcp_praxia_knowledge", recon_workspace = "mcp_praxia_recon_workspace", code_index_workspace = "mcp_praxia_code_index_workspace" }
+allowed_names = ["read_file", "search_file_content", "replace", "write_file", "run_shell_command", "google_web_search", "web_fetch", "mcp_praxia_transduction_log", "mcp_praxia_transduction_query", "mcp_praxia_lesson", "mcp_praxia_knowledge", "mcp_praxia_recon_workspace", "mcp_praxia_code_index_workspace"]
+
+[export.models.claude_code]
+fast = "haiku"
+balanced = "sonnet"
+deep = "opus"
+
+[export.models.copilot]
+balanced = "auto"
+
+[export.models.antigravity_cli]
+fast = "gemini-3.1-flash-lite-preview"
+balanced = "gemini-3-flash-preview"
+deep = "gemini-3.1-pro-preview"

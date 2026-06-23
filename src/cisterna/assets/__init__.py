@@ -24,6 +24,7 @@ from cisterna.assets.bundle import (
     McpAsset,
     SkillAsset,
 )
+from cisterna.assets.capability import Capability, resolve_model_hint, resolve_tools
 from cisterna.assets.composite import CompositeAssetSource
 from cisterna.assets.manifest import ManifestAssetSource
 from cisterna.assets.protocol import AssetSource
@@ -35,6 +36,7 @@ __all__ = [
     "AssetBundle",
     "AssetSource",
     "BundleMetadata",
+    "Capability",
     "CommandAsset",
     "CompositeAssetSource",
     "HookSpecAsset",
@@ -44,4 +46,6 @@ __all__ = [
     "SkillAsset",
     "registry_assets",
     "registry_bundle",
+    "resolve_model_hint",
+    "resolve_tools",
 ]
