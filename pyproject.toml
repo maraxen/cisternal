@@ -33,6 +33,12 @@ dev = [
 [project.scripts]
 cisterna = "cisterna.cli:app"
 
+[project.entry-points."cisterna.emitters"]
+claude = "cisterna.export.registry:claude_factory"
+cursor = "cisterna.export.registry:cursor_factory"
+copilot = "cisterna.export.registry:copilot_factory"
+antigravity = "cisterna.export.registry:antigravity_factory"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 
