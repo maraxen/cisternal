@@ -310,7 +310,10 @@ class TestNeverRaise:
 
         # Should not raise despite RaisingExporter raising
         emit_event("test.event", field="value")
-        time.sleep(0.05)
+
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and len(shadow.records) < 1:
+            time.sleep(0.01)
 
         # Shadow exporter should still have received it
         assert len(shadow.records) >= 1
