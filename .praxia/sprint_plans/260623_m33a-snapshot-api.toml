@@ -1,0 +1,43 @@
+[sprint]
+sprint_id = "260623_m33a-snapshot-api"
+name = "Cisterna M3.3a — public registration.snapshot()"
+description = "Three waves: snapshot API, migrate callers, tests (#2581 child)."
+context = '''
+Spec: .praxia/docs/specs/260623_m33a-snapshot-api-rev1.md
+Baseline: 283 pytest green.
+'''
+max_fix_retries = 1
+
+[[tracks]]
+id = "w1"
+[[tracks.items]]
+backlog_id = "2581"
+phase_name = "M3.3a-W1 — snapshot API"
+fixer_prompt = '''
+task_id: 260623_m33a-snapshot-api
+Add snapshot(), list_registries(), _snapshot alias in registry.py.
+Commit: feat(registration): public snapshot() and list_registries() (#2581 W1)
+'''
+
+[[tracks]]
+id = "w2"
+[[tracks.items]]
+backlog_id = "2581"
+phase_name = "M3.3a-W2 — migrate callers"
+fixer_prompt = '''
+Migrate assets/source.py and wired.py to public snapshot/list_registries.
+Commit: refactor(assets): use public registration.snapshot() (#2581 W2)
+'''
+
+[[tracks]]
+id = "w3"
+[[tracks.items]]
+backlog_id = "2581"
+phase_name = "M3.3a-W3 — tests + exports"
+fixer_prompt = '''
+tests/test_registration_snapshot_public.py; export from registration __init__.
+Commit: test(registration): M3.3a snapshot public API (#2581 W3)
+'''
+
+[orchestration]
+sequential = ["w1", "w2", "w3"]
