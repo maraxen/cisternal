@@ -1,6 +1,51 @@
 # Cisterna autonomous dev-loop state
-# Created 2026-06-18.
+# Updated 2026-06-23 — VERIFY PASS, loop-again → BRAINSTORM for #2326
 
 [run]
-  mode = "hitl_semi_autonomous"     # human-in-the-loop, semi-autonomous
-  human_available = true            # PI is around for decision points this run
+mode = "hitl_semi_autonomous"
+human_available = true
+
+[loop]
+version = "1.0"
+task_id = "260623_autonomous-loop"
+current_phase = "BRAINSTORM"
+last_subphase = ""
+last_artifact_path = ""
+iteration_count = 1
+last_activation = "2026-06-23T14:40:00Z"
+autonomy_level = "L2"
+selected_item_ids = [2326]
+selection_mode = "p2_fallback"
+brainstorm_needed = true
+adversarial_tier = "TIER3"
+pcw_template = "spec_driven_dev"
+worktree_safe = false
+next_phase = "ADVERSARIAL_REVIEW"
+rubric_version = "1.0"
+
+[loop.lock]
+token = ""
+expiry_ts = ""
+timeout_minutes = 45
+
+[loop.gates]
+spec_confirmed = false
+spec_path = ""
+sprint_approved = false
+sprint_plan_path = ""
+
+[loop.metrics]
+backlog_items_closed_per_iteration = 1
+consecutive_zero_progress_iterations = 0
+max_zero_progress = 3
+last_items_closed = 1
+remediate_attempt = 0
+
+[loop.popperian]
+max_cost_usd = 25.0
+max_walltime_seconds = 3600
+max_rewinds = 5
+
+[loop.fingerprint]
+recent_tool_hashes = []
+stall_threshold = 3

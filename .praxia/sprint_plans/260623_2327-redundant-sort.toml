@@ -1,0 +1,50 @@
+[sprint]
+sprint_id = "260623_2327-redundant-sort"
+name = "M3 tech-debt #2327 — drop redundant command sort"
+description = "Remove redundant sorted() in ClaudeEmitter._build_manifest; AssetBundle.commands is already sorted at construction."
+context = '''
+Backlog #2327 (P3 debt, quick). Single-file surgical fix.
+Stack: uv run pytest, uv run ruff check .
+'''
+max_fix_retries = 1
+
+[[tracks]]
+id = "a"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2327"
+phase_name = "Drop redundant sort in _build_manifest"
+fixer_prompt = '''
+task_id: 260623_autonomous-loop
+
+## Objective
+Remove the redundant sorted() call in ClaudeEmitter._build_manifest.
+
+## Anchor
+src/cisterna/export/claude.py:97 — `obj["commands"] = sorted(cmd.name for cmd in bundle.commands)`
+
+AssetBundle.commands is already sorted by name in __post_init__ (src/cisterna/assets/bundle.py).
+Replace with a list comprehension preserving order: `[cmd.name for cmd in bundle.commands]`.
+
+## Constraints
+- Edit only src/cisterna/export/claude.py
+- Do not change tests unless a test explicitly asserts the redundant sort behavior
+- Run: uv run ruff check . && uv run pytest
+
+## Commit
+fix(export): drop redundant command-name sort in ClaudeEmitter (#2327)
+'''
+reviewer_prompt = '''
+VERIFY:
+1. _build_manifest uses list comprehension, not sorted(), for commands key
+2. uv run ruff check . passes
+3. uv run pytest passes (220+ tests)
+4. Export tests still assert commands are sorted in output (ordering invariant preserved via bundle)
+
+PASS if all VERIFY items satisfied.
+'''
+
+[orchestration]
+concurrent = ["a"]
+sequential = []

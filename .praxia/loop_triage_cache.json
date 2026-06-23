@@ -1,0 +1,29 @@
+{
+  "prioritized_items": [
+    {
+      "id": "2327",
+      "title": "M3 tech-debt: redundant sort in ClaudeEmitter._build_manifest",
+      "category": "debt",
+      "difficulty": "quick",
+      "source": "backlog",
+      "recommended_action": "promote",
+      "rationale": "One-liner cleanup; AssetBundle.commands already sorted at construction. Immediate executable value, zero design risk.",
+      "priority": "P3"
+    }
+  ],
+  "deferred": [
+    {
+      "id": "2326",
+      "reason": "M3.1 epic — needs brainstorm → adversarial spec → build cycle (PI-gated)"
+    },
+    {
+      "id": "2145",
+      "reason": "Out of cisterna scope — belongs in xperiri repo"
+    },
+    {
+      "id": "2146",
+      "reason": "Out of cisterna scope — belongs in myxcel repo"
+    }
+  ],
+  "discarded": []
+}

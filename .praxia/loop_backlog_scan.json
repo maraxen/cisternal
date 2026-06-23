@@ -1,0 +1,17 @@
+{
+  "executable_items": [
+    {
+      "id": 2327,
+      "title": "M3 tech-debt: redundant sort in ClaudeEmitter._build_manifest",
+      "category": "debt",
+      "difficulty": "quick",
+      "priority": "P3",
+      "depends_on": [],
+      "description": "Drop redundant sort in _build_manifest; AssetBundle.commands already sorted."
+    }
+  ],
+  "blocked_items": [],
+  "executable_count": 1,
+  "selection_mode": "p3_fallback",
+  "notes": "No P1/P2 in-scope executable items; #2326 is epic-shaped; #2145/#2146 out of repo"
+}

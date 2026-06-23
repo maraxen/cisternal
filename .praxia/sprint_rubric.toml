@@ -1,0 +1,11 @@
+# .praxia/sprint_rubric.toml — sprint selection parameters
+[rubric]
+version = "1.0"
+difficulty_budget = 6
+item_cap = 3
+staleness_threshold_days = 90
+
+[rubric.difficulty_cost]
+quick = 1
+standard = 3
+extended = 5

@@ -94,7 +94,7 @@ def _build_manifest(bundle: AssetBundle) -> dict[str, object]:
     }
 
     if bundle.commands:
-        obj["commands"] = sorted(cmd.name for cmd in bundle.commands)
+        obj["commands"] = [cmd.name for cmd in bundle.commands]
 
     if bundle.mcp_servers:
         obj["mcpServers"] = {
