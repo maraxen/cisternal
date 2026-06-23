@@ -38,6 +38,7 @@ from cisterna.export.base import Emitter
 
 _PLUGIN_JSON_PATH = ".claude-plugin/plugin.json"
 _PROVENANCE_PATH = ".claude-plugin/cisterna-provenance.json"
+_COMMAND_BODY_DIR = "commands"
 
 
 class ClaudeEmitter(Emitter):
@@ -66,15 +67,24 @@ class ClaudeEmitter(Emitter):
         manifest = _build_manifest(bundle)
         plugin_json = json.dumps(manifest, sort_keys=True, indent=2)
 
+        files: dict[str, str] = {_PLUGIN_JSON_PATH: plugin_json}
+        if self._emit_command_bodies:
+            for cmd in bundle.commands:
+                if cmd.body:
+                    path = f"{_COMMAND_BODY_DIR}/{cmd.name}.md"
+                    files[path] = cmd.body
+
         # Provenance digest covers only the non-provenance files.
-        non_provenance: dict[str, str] = {_PLUGIN_JSON_PATH: plugin_json}
+        non_provenance = {
+            path: contents
+            for path, contents in files.items()
+            if _PROVENANCE_PATH not in path
+        }
         digest = bundle_sha256(non_provenance)
         provenance_json = json.dumps({"sha256": digest}, sort_keys=True)
 
-        return {
-            _PLUGIN_JSON_PATH: plugin_json,
-            _PROVENANCE_PATH: provenance_json,
-        }
+        files[_PROVENANCE_PATH] = provenance_json
+        return files
 
 
 # ---------------------------------------------------------------------------

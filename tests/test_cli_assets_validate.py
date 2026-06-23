@@ -44,6 +44,21 @@ def test_validate_matches_golden_fixture() -> None:
     )
 
 
+def test_validate_with_command_bodies_golden() -> None:
+    """validate passes with_command_bodies golden for manifest_minimal."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "claude",
+            "--emit-command-bodies",
+        ]
+    )
+
+
 def test_validate_missing_command_path_exits_one(tmp_path: Path) -> None:
     """AC-M31a-8: missing manifest command path → validate exit 1."""
     manifest_dir = tmp_path / "plugin"

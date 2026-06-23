@@ -110,11 +110,25 @@ def export(
             help="Bundle version (default: installed package version or '0.0.0').",
         ),
     ] = None,
+    manifest: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Path to manifest.toml (CompositeAssetSource with --registry).",
+        ),
+    ] = None,
+    emit_command_bodies: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--emit-command-bodies"],
+            help="Emit commands/<name>.md for commands with non-empty bodies.",
+        ),
+    ] = False,
 ) -> None:
     """Export registered tool assets to a Claude plugin bundle.
 
-    Reads tools from the named registry partition, builds a Claude plugin
-    manifest, and writes (or dry-runs) the output to --out.
+    Reads tools from the named registry partition (or manifest + registry),
+    builds a Claude plugin manifest, and writes (or dry-runs) the output to --out.
 
     Always exits with code 0.  Warnings are emitted to stderr on empty
     registries or import errors.
@@ -126,46 +140,67 @@ def export(
         except Exception:
             _log.warning("cisterna.cli: could not import %r; skipping", m, exc_info=True)
 
-    # Import registry_assets via fastmcp-free path (spec M4).
-    from cisterna.assets.source import registry_assets  # noqa: PLC0415
-
-    snapshot = registry_assets(registry)
-
-    if len(snapshot) == 0:
-        _log.warning(
-            "cisterna.cli: registry %r is empty; emitting empty bundle",
-            registry,
-        )
-
-    # Resolve bundle metadata.
-    resolved_name = name or "cisterna"
-    if version is not None:
-        resolved_version = version
-    else:
-        try:
-            resolved_version = importlib.metadata.version("cisterna")
-        except importlib.metadata.PackageNotFoundError:
-            resolved_version = "0.0.0"
-
-    # Build IR.
     from cisterna.assets.bundle import AssetBundle, BundleMetadata, CommandAsset  # noqa: PLC0415
 
-    metadata = BundleMetadata(
-        name=resolved_name,
-        version=resolved_version,
-        description="",
-    )
-    commands = tuple(
-        CommandAsset(name=spec.name, description=spec.description)
-        for spec in snapshot
-    )
-    bundle = AssetBundle(metadata=metadata, commands=commands)
+    if manifest is not None:
+        from cisterna.assets.load import load_asset_report  # noqa: PLC0415
+
+        metadata_override: BundleMetadata | None = None
+        if name is not None or version is not None:
+            pre = load_asset_report(manifest=manifest, registry=registry)
+            metadata_override = BundleMetadata(
+                name=name or pre.bundle.metadata.name,
+                version=version or pre.bundle.metadata.version,
+                description=pre.bundle.metadata.description,
+            )
+        report = load_asset_report(
+            manifest=manifest,
+            registry=registry,
+            metadata=metadata_override,
+        )
+        bundle = report.bundle
+        for warning in report.warnings:
+            _log.warning("cisterna.cli: %s", warning)
+        for conflict in report.conflicts:
+            _log.warning("cisterna.cli: conflict: %s", conflict)
+    else:
+        # Import registry_assets via fastmcp-free path (spec M4).
+        from cisterna.assets.source import registry_assets  # noqa: PLC0415
+
+        snapshot = registry_assets(registry)
+
+        if len(snapshot) == 0:
+            _log.warning(
+                "cisterna.cli: registry %r is empty; emitting empty bundle",
+                registry,
+            )
+
+        # Resolve bundle metadata.
+        resolved_name = name or "cisterna"
+        if version is not None:
+            resolved_version = version
+        else:
+            try:
+                resolved_version = importlib.metadata.version("cisterna")
+            except importlib.metadata.PackageNotFoundError:
+                resolved_version = "0.0.0"
+
+        metadata = BundleMetadata(
+            name=resolved_name,
+            version=resolved_version,
+            description="",
+        )
+        commands = tuple(
+            CommandAsset(name=spec.name, description=spec.description)
+            for spec in snapshot
+        )
+        bundle = AssetBundle(metadata=metadata, commands=commands)
 
     # Emit.
     from cisterna.export.claude import ClaudeEmitter  # noqa: PLC0415
     from cisterna.export.write import write_bundle  # noqa: PLC0415
 
-    files = ClaudeEmitter().emit(bundle)
+    files = ClaudeEmitter(emit_command_bodies=emit_command_bodies).emit(bundle)
     result = write_bundle(files, out, dry_run=dry_run)
 
     if dry_run:
@@ -292,12 +327,9 @@ def validate_assets(
     expected = golden_path.read_text(encoding="utf-8").strip()
 
     if use_native_cli:
-        if manifest is not None:
-            _log.warning(
-                "cisterna.cli: --use-native-cli ignores --manifest until export wiring (W5)"
-            )
         actual = _native_cli_surface_digest(
             registry=registry,
+            manifest=manifest,
             emit_command_bodies=emit_command_bodies,
         )
     else:
@@ -319,9 +351,10 @@ def validate_assets(
 def _native_cli_surface_digest(
     *,
     registry: str,
+    manifest: Path | None,
     emit_command_bodies: bool,
 ) -> str:
-    """Run ``cisterna assets export`` in a subprocess and hash plugin.json."""
+    """Run ``cisterna assets export`` in a subprocess and hash emitted files."""
     from cisterna.export._hash import bundle_sha256  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -337,12 +370,20 @@ def _native_cli_surface_digest(
             "--out",
             str(out),
         ]
+        if manifest is not None:
+            cmd.extend(["--manifest", str(manifest)])
         if emit_command_bodies:
             cmd.append("--emit-command-bodies")
         subprocess.run(cmd, check=True, capture_output=True)
-        plugin = out / ".claude-plugin" / "plugin.json"
-        if not plugin.is_file():
-            msg = "native export did not emit plugin.json"
+        files: dict[str, str] = {}
+        for path in out.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(out).as_posix()
+            if "cisterna-provenance.json" in rel:
+                continue
+            files[rel] = path.read_text(encoding="utf-8")
+        if not files:
+            msg = "native export did not emit any hashable files"
             raise RuntimeError(msg)
-        files = {".claude-plugin/plugin.json": plugin.read_text(encoding="utf-8")}
         return bundle_sha256(files)
