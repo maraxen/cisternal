@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — M9 epic audit VERIFY PASS
+# Updated 2026-06-24 — M9.2 myxcel cutover shipped
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,15 +7,15 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_epic-audit_m9"
+task_id = "260624_m9.2-myxcel-cutover"
 current_phase = "TRIAGE"
-last_subphase = "m9_epic_audit_verify"
-last_artifact_path = ".praxia/docs/research/260624_m9-epic-closeout-audit.md"
-iteration_count = 28
-last_activation = "2026-06-24T19:00:00Z"
+last_subphase = "m9.2_implement"
+last_artifact_path = "/home/marielle/projects/myxcel/src/myxcel/telemetry_bridge.py"
+iteration_count = 29
+last_activation = "2026-06-24T20:00:00Z"
 autonomy_level = "L2"
 selected_item_ids = [2146]
-selection_mode = "m9_epic_audit"
+selection_mode = "m9.2_cutover"
 brainstorm_needed = false
 next_phase = "TRIAGE"
 rubric_version = "1.0"
@@ -24,7 +24,8 @@ rubric_version = "1.0"
 closed_epic_id = 2146
 m8_xperiri_adapter_complete = true
 m9_myxcel_adapter_complete = true
-next_epic_candidate = "M9.2 myxcel repo cutover"
+m9_2_myxcel_cutover_complete = true
+next_epic_candidate = "M8.2 xperiri repo cutover"
 next_backlog_id = 0
 
 [loop.gates]
