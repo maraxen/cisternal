@@ -69,20 +69,32 @@ def _registry(name: str = "default") -> dict[str, ToolEntry]:
     return _REGISTRIES[name]
 
 
-def _snapshot(name: str = "default") -> dict[str, ToolEntry]:
-    """Return a SHALLOW COPY of the named partition at call time.
+def list_registries() -> tuple[str, ...]:
+    """Return sorted names of registry partitions that currently exist.
+
+    Does not create new partitions.  Partitions appear after the first tool
+    is registered to that name (or after ``snapshot()`` creates one).
+    """
+    return tuple(sorted(_REGISTRIES))
+
+
+def snapshot(name: str = "default") -> dict[str, ToolEntry]:
+    """Return a shallow copy of the named partition at call time.
 
     Snapshot semantics (C6): entries added after this call are NOT reflected
-    in the returned dict.  cisterna.wire() uses this so the wired tool set is
-    frozen at wire time.
+    in the returned dict.  ``cisterna.wire()`` uses this so the wired tool
+    set is frozen at wire time.
 
-    Args:
-        name: Registry partition name.  Defaults to ``"default"``.
-
-    Returns:
-        A new dict that is a copy of the partition at this moment.
+    Note: calling ``snapshot`` on a previously unseen *name* creates an
+    empty partition.  Prefer :func:`list_registries` before snapshot when
+    probing for existence (see ``registry_assets``).
     """
     return dict(_registry(name))
+
+
+def _snapshot(name: str = "default") -> dict[str, ToolEntry]:
+    """Alias for :func:`snapshot` (wire/tests compatibility)."""
+    return snapshot(name)
 
 
 # ---------------------------------------------------------------------------
