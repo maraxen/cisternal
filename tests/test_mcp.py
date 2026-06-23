@@ -190,6 +190,55 @@ class TestAcMcp2TracedToolDecorator:
 
         assert result == {"status": "ok"}
 
+    @pytest.mark.asyncio
+    async def test_traced_tool_async_emits_start_and_end(self, temp_log_dir):
+        """Given traced_tool(MyxcelAdapter()) wrapping an async fn;
+        When awaited with kwargs;
+        Then mcp.call_start + mcp.call_end appear with arg_keys = kwargs keys."""
+
+        import asyncio
+
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        @traced_tool(MyxcelAdapter())
+        async def mount_project(remote: str, project: str) -> dict:
+            await asyncio.sleep(0)
+            return {"remote": remote, "project": project, "mounted": True}
+
+        result = await mount_project(remote="hpc", project="demo")
+
+        time.sleep(0.1)
+
+        assert result == {"remote": "hpc", "project": "demo", "mounted": True}
+
+        start_records = [r for r in shadow.records if r.name == "mcp.call_start"]
+        end_records = [r for r in shadow.records if r.name == "mcp.call_end"]
+
+        assert len(start_records) == 1
+        assert len(end_records) == 1
+
+        start = start_records[0]
+        assert start.fields["tool"] == "mount_project"
+        assert start.fields["arg_keys"] == ["project", "remote"]
+
+        end = end_records[0]
+        assert end.fields["tool"] == "mount_project"
+        assert "duration_ms" in end.fields
+
+    @pytest.mark.asyncio
+    async def test_traced_tool_async_preserves_coroutine_function(self):
+        """Async wrapper remains a coroutine function for FastMCP await detection."""
+
+        import asyncio
+
+        @traced_tool(MyxcelAdapter())
+        async def mount_status(remote: str | None = None) -> list[dict]:
+            await asyncio.sleep(0)
+            return [{"remote": remote or "all"}]
+
+        assert asyncio.iscoroutinefunction(mount_status)
+
 
 class TestAcMcp3ErrorHandling:
     """AC-MCP-3, AC-MCP-3b: Error handling in v3 and v2."""
@@ -261,6 +310,27 @@ class TestAcMcp3ErrorHandling:
         error = error_records[0]
         assert error.fields["exc_type"] == "ValueError"
 
+    @pytest.mark.asyncio
+    async def test_v2_decorator_async_catches_exception(self, temp_log_dir):
+        """AC-MCP-3b async: traced_tool on async fn returns shaped error, no raise."""
+
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        @traced_tool(MyxcelAdapter())
+        async def failing_mount():
+            raise ValueError("profile missing")
+
+        result = await failing_mount()
+
+        time.sleep(0.1)
+
+        assert result == {"error": "ValueError", "message": "profile missing"}
+
+        error_records = [r for r in shadow.records if r.name == "mcp.tool_error"]
+        assert len(error_records) == 1
+        assert error_records[0].fields["exc_type"] == "ValueError"
+
 
 class TestAcMcp4TokenManagement:
     """AC-MCP-4: Token reset in different Context raises ValueError, wrapper swallows it.
@@ -319,8 +389,11 @@ class TestAcMcp4TokenManagement:
 
         v2_source = inspect.getsource(v2_decorator.traced_tool)
         assert "finally:" in v2_source
-        assert "mcp_request_id_var.reset" in v2_source
-        assert "except ValueError:" in v2_source
+        assert "_reset_request_token" in v2_source
+
+        reset_source = inspect.getsource(v2_decorator._reset_request_token)
+        assert "mcp_request_id_var.reset" in reset_source
+        assert "except ValueError:" in reset_source
 
     def test_cross_context_reset_actually_raises_value_error(self):
         """Demonstrate that copy_context().run() triggers real ValueError from reset().

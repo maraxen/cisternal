@@ -111,6 +111,25 @@ class TestAcShadow4:
         assert "mcp.call_end" in names
         assert names.index("mcp.call_start") < names.index("mcp.call_end")
 
+    @pytest.mark.asyncio
+    async def test_myxcel_async_traced_tool_mount_project(self, temp_log_dir: Path) -> None:
+        """Async traced_tool(MyxcelAdapter) matches myxcel MCP tool pattern."""
+        import asyncio
+
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)
+
+        @traced_tool(MyxcelAdapter())
+        async def mount_project(remote: str, project: str) -> dict:
+            await asyncio.sleep(0)
+            return {"remote": remote, "project": project, "mounted": True}
+
+        result = await mount_project(remote="hpc", project="demo")
+        _wait_for_records(shadow, "mount_project")
+
+        assert result["mounted"] is True
+        assert len(_wait_for_records(shadow, "mount_project", min_count=2)) >= 2
+
     def test_myxcel_traced_tool_in_band_error_shape(self, temp_log_dir: Path) -> None:
         """traced_tool(MyxcelAdapter) preserves dict error envelope from shape_ok."""
         shadow = ShadowExporter()
