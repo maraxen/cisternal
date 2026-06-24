@@ -1,0 +1,237 @@
+[sprint]
+sprint_id = "260624_m12-1-rust-bridge"
+sprint_num = 18
+name = "M12.1 Export Rust bridge — subprocess parity lane"
+description = "W0 praxia bundle-hash → W1 fixtures+bridge (parallel) → W2 wrapper+CLI+tests → W3 advisory CI (#2665)."
+context = '''
+Spec: .praxia/docs/specs/260624_m12-export-rust-bridge-buildable-spec-rev1.md
+Design: .praxia/docs/designs/260624_m12-export-rust-bridge_design.md
+Spike: .praxia/docs/research/260624_m12-hash-parity-spike.md
+Adversarial: ACCEPT_WITH_NITS (.praxia/docs/research/260624_m12-adversarial-review.md)
+Parent epic: #2665 M12 (M12.1 slice only — no emitter port, no golden_matrix changes)
+Baseline: 413 pytest passed, 2 skipped; golden_matrix + native-validate blocking
+Cross-repo: praxia-agent-assets bundle-hash required for integration tests + CI advisory job
+Pin: CISTERNA_PRAXIA_ASSETS_REV (git SHA) in rust-parity-advisory workflow
+Local dev: export CISTERNA_PRAXIA_ASSETS_BIN=../praxia/target/release/bundle-hash
+Stack: uv run pytest; uv run ruff check .; cargo build -p praxia-agent-assets --bin bundle-hash
+'''
+max_fix_retries = 1
+task_id = "260624_autonomous-loop"
+
+# ---------------------------------------------------------------------------
+# W0 — praxia (cross-repo; execute in praxia repo before CI advisory goes green)
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w0praxia"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.0 — praxia bundle-hash CLI"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+REPO: praxia (NOT cisterna)
+
+FILES OWNED: crates/praxia-agent-assets/src/bin/bundle_hash.rs,
+crates/praxia-agent-assets/Cargo.toml [[bin]] entry,
+crates/praxia-agent-assets/tests/bundle_hash_cli.rs (or unit in bin module)
+
+Implement bundle-hash per AC-M12-0a/b:
+- --surface claude|cursor|copilot|antigravity
+- read PraxiaBundle JSON from stdin OR --bundle PATH
+- stdout: lowercase hex digest + newline via surface_bundle_sha256
+- exit 2 unknown surface; exit 1 parse/emit errors (stderr)
+
+Commit in praxia: feat(agent-assets): bundle-hash CLI for surface digest (#2665)
+Record merged SHA for CISTERNA_PRAXIA_ASSETS_REV in cisterna sprint notes.
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-0a/b: cargo test bundle_hash; manual pipe manifest_minimal JSON from cisterna spike.
+PASS if digest matches spike claude f6a1f7c3… on hand-built bundle.
+'''
+
+# ---------------------------------------------------------------------------
+# W1 — conformance fixtures + Python bridge (parallel after W0 for parity tests)
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w1fixtures"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.1a — conformance fixtures"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: tests/conformance/** ONLY
+
+Add tests/conformance/manifest_minimal.bundle.json — PraxiaBundle JSON from hash spike
+(hand-built equivalent of manifest_minimal load: fixture-plugin 1.2.3, demo-skill, recon,
+foo command, PreToolUse/Bash hook).
+
+Add tests/conformance/expected/{claude,cursor,copilot,antigravity}.sha256 pinned at praxia pin:
+  claude: f6a1f7c3f7dbac6bc858125359d3ba5db25d4112e1d13d8458f8c7da54fc8cba
+  cursor: ca8d6a3e1a7cf9a2848494d170024ac1692738e220106e83f93b443ed3bca2cd
+  copilot: 40524672ad04b8c237694c3f9395e1a7a2db5981b9481070b631bf935e3bda5e
+  antigravity: 63768b088a09128f96948f63884d30ea7ee23c3ea95ab80c98d65b98acf26492
+
+Add tests/conformance/README.md one paragraph: Rust truth at pin; advisory until M12.4.
+
+Do NOT touch src/ or golden_matrix.
+
+Commit: test(m12): conformance fixtures for rust parity (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-1h/i files exist; README present. No src changes. PASS.
+'''
+
+[[tracks]]
+id = "w1bridge"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.1b — AssetBundle → PraxiaBundle bridge"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/assets/bridge.py, tests/test_rust_parity_bridge.py
+
+Implement asset_bundle_to_praxia_json(bundle) per AC-M12-1a/b:
+- metadata, commands, agents, skills, hook_specs, mcp_servers
+- workflows: [], pipelines: []
+- default description "" for skills/agents when unset
+
+Tests AC-M12-1c: load manifest_minimal via load_asset_report; bridge output matches
+conformance JSON structure (keys + representative values); round-trip serde-friendly.
+
+Do NOT touch cli.py or validate path yet.
+
+Commit: feat(assets): PraxiaBundle bridge for rust parity (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-1a/b/c. pytest tests/test_rust_parity_bridge.py green. PASS.
+'''
+
+# ---------------------------------------------------------------------------
+# W2 — subprocess wrapper, CLI flag, parity tests
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w2wrapper"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.1c — subprocess rust digest wrapper"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/assets/bridge.py (extend), tests/test_rust_parity.py (create if not exists)
+
+Add resolve_bundle_hash_bin() from CISTERNA_PRAXIA_ASSETS_BIN env (AC-M12-1e).
+Add _rust_surface_digest(bundle, surface, *, bin_path) subprocess wrapper (AC-M12-1d).
+
+tests/test_rust_parity.py AC-M12-1j:
+- parametrize 4 surfaces
+- skip gracefully if bin missing (pytest skip with reason)
+- load manifest_minimal bundle, assert digest == tests/conformance/expected/{surface}.sha256
+
+Requires local bundle-hash build for green run.
+
+Commit: feat(assets): subprocess rust surface digest (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-1d/e/j with CISTERNA_PRAXIA_ASSETS_BIN set. 4/4 surfaces match expected.
+pytest tests/test_rust_parity.py green when bin available. PASS.
+'''
+
+[[tracks]]
+id = "w2cli"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.1d — validate --rust-parity CLI"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/cli.py (validate_assets only), tests/test_cli_rust_parity.py
+
+Add --rust-parity flag to cisterna assets validate (AC-M12-1f/g):
+- After structural checks, call _rust_surface_digest
+- Compare returned digest to second subprocess call OR self-consistency (same digest twice)
+- Exit 1 mismatch / missing bin with stderr guidance
+- Does NOT read tests/golden legacy files
+- fastmcp-free imports preserved
+
+Tests: manifest_minimal claude --rust-parity exit 0 with bin; exit 1 without bin.
+
+Commit: feat(cli): validate --rust-parity subprocess lane (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-1f/g. golden_matrix unchanged. pytest new CLI tests green. PASS.
+'''
+
+# ---------------------------------------------------------------------------
+# W3 — advisory CI
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w3ci"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.1e — rust-parity-advisory CI"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: .github/workflows/export-dogfood.yml,
+tests/test_rust_parity.py (module docstring AC-M12-1m if not in conformance README)
+
+Add job rust-parity-advisory (AC-M12-1k/l):
+- continue-on-error: true
+- checkout cisterna + checkout praxia at CISTERNA_PRAXIA_ASSETS_REV (env or workflow var)
+- cargo build --release -p praxia-agent-assets --bin bundle-hash
+- CISTERNA_PRAXIA_ASSETS_BIN=... uv run pytest tests/test_rust_parity.py -q
+- Do NOT modify dogfood/golden_matrix/native-validate/otlp-collector jobs
+
+Commit: ci(m12.1): rust-parity advisory job (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-1k/l: workflow YAML valid; advisory job isolated; blocking jobs untouched.
+PASS if structure correct (job may be red on forks without praxia — accepted).
+'''
+
+# ---------------------------------------------------------------------------
+# W4 — epic audit (close M12.1)
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w4audit"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.1 — epic closeout audit"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: .praxia/docs/research/260624_m12-1-epic-closeout-audit.md, .praxia/loop_state.toml
+
+Run full pytest -q (≥413 passed). Verify golden_matrix unchanged.
+Document AC-M12-0..1m PASS/FAIL matrix in closeout audit.
+Update loop_state: closed M12.1, next M12.2 claude emitter wedge.
+
+Commit: docs(m12.1): epic closeout audit (#2665)
+'''
+reviewer_prompt = '''
+VERIFY audit doc covers all M12.1 ACs. pytest baseline met. PASS for APPROVE.
+'''
+
+[orchestration]
+sequential = ["w0praxia", "integrate_w1", "w2wrapper", "w2cli", "w3ci", "w4audit"]
+concurrent = ["w1fixtures", "w1bridge"]
