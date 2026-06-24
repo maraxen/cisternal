@@ -82,6 +82,16 @@ def telemetry_doctor(
             help="Treat warnings as failures for exit code (see CISTERNA_DOCTOR_STRICT).",
         ),
     ] = False,
+    consumer: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--consumer"],
+            help=(
+                "Scope telemetry_gate to one consumer "
+                "(bathos|contemplex|xperiri|myxcel; see CISTERNA_DOCTOR_CONSUMER)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Print effective telemetry configuration (read-only).
 
@@ -89,16 +99,24 @@ def telemetry_doctor(
 
     CI/cutover scripts should use ``--json --strict`` (or set
     ``CISTERNA_DOCTOR_STRICT=1``) so disabled telemetry fails the gate.
+    Sibling-repo cutover may add ``--consumer <name>`` to scope the gate.
     """
     from cisterna.probe.telemetry_doctor import (  # noqa: PLC0415
         build_doctor_report,
         compute_doctor_exit_code,
         format_doctor_json,
         format_doctor_report,
+        resolve_doctor_consumer,
         resolve_doctor_strict_mode,
     )
 
-    report = build_doctor_report()
+    try:
+        consumer_filter = resolve_doctor_consumer(cli_consumer=consumer)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    report = build_doctor_report(consumer_filter=consumer_filter)
     strict_mode = resolve_doctor_strict_mode(cli_strict=strict)
     if json_output:
         print(format_doctor_json(report, strict=strict_mode))

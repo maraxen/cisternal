@@ -1,4 +1,4 @@
-"""Telemetry operator diagnostic report (M10.1 / M10.2)."""
+"""Telemetry operator diagnostic report (M10.1 / M10.2 / M10.4)."""
 
 from __future__ import annotations
 
@@ -34,7 +34,23 @@ class DoctorReport:
 
     checks: tuple[DoctorCheck, ...]
     raw_telemetry: str
+    consumer_filter: str | None = None
     runbook_path: str = _RUNBOOK_PATH
+
+
+def resolve_doctor_consumer(*, cli_consumer: str | None = None) -> str | None:
+    """Resolve optional consumer filter from CLI flag or env."""
+    raw = (cli_consumer or "").strip()
+    if not raw:
+        raw = os.environ.get("CISTERNA_DOCTOR_CONSUMER", "").strip()
+    if not raw:
+        return None
+    name = raw.lower()
+    if name not in _KNOWN_CONSUMERS:
+        known = "|".join(_KNOWN_CONSUMERS)
+        msg = f"unknown consumer {raw!r}; known: {known}"
+        raise ValueError(msg)
+    return name
 
 
 def probe_log_dir_writable(log_dir: Path) -> bool:
@@ -72,7 +88,43 @@ def compute_doctor_exit_code(report: DoctorReport, *, strict: bool) -> int:
     return 0
 
 
-def build_doctor_report() -> DoctorReport:
+def _build_telemetry_gate_check(
+    raw_telemetry: str,
+    consumer_filter: str | None,
+) -> DoctorCheck:
+    """Build telemetry_gate check (any-consumer or scoped)."""
+    if consumer_filter is not None:
+        enabled = consumer_telemetry_enabled(consumer_filter)
+        gate_status: CheckStatus = "pass" if enabled else "warn"
+        raw_display = raw_telemetry or "(unset)"
+        state = "enabled" if enabled else "disabled"
+        gate_message = f"raw={raw_display}; target {consumer_filter}: {state}"
+        detail: dict[str, Any] = {
+            "raw": raw_telemetry or None,
+            "target_consumer": consumer_filter,
+        }
+    elif not raw_telemetry:
+        gate_status = "warn"
+        gate_message = "CISTERNA_TELEMETRY is unset"
+        detail = {"raw": None}
+    elif any(consumer_telemetry_enabled(c) for c in _KNOWN_CONSUMERS):
+        gate_status = "pass"
+        gate_message = "at least one consumer enabled"
+        detail = {"raw": raw_telemetry}
+    else:
+        gate_status = "warn"
+        gate_message = f"no known consumer enabled for raw={raw_telemetry!r}"
+        detail = {"raw": raw_telemetry}
+
+    return DoctorCheck(
+        id="telemetry_gate",
+        status=gate_status,
+        message=gate_message,
+        detail=detail,
+    )
+
+
+def build_doctor_report(consumer_filter: str | None = None) -> DoctorReport:
     """Collect structured telemetry doctor checks."""
     from cisterna.telemetry.otlp_exporter import (
         otlp_sdk_available,
@@ -83,33 +135,16 @@ def build_doctor_report() -> DoctorReport:
     checks: list[DoctorCheck] = []
     raw_telemetry = os.environ.get("CISTERNA_TELEMETRY", "").strip()
 
-    if not raw_telemetry:
-        gate_status: CheckStatus = "warn"
-        gate_message = "CISTERNA_TELEMETRY is unset"
-    elif any(consumer_telemetry_enabled(c) for c in _KNOWN_CONSUMERS):
-        gate_status = "pass"
-        gate_message = "at least one consumer enabled"
-    else:
-        gate_status = "warn"
-        gate_message = f"no known consumer enabled for raw={raw_telemetry!r}"
+    checks.append(_build_telemetry_gate_check(raw_telemetry, consumer_filter))
 
-    checks.append(
-        DoctorCheck(
-            id="telemetry_gate",
-            status=gate_status,
-            message=gate_message,
-            detail={"raw": raw_telemetry or None},
-        )
-    )
-
-    for consumer in _KNOWN_CONSUMERS:
-        enabled = consumer_telemetry_enabled(consumer)
+    for name in _KNOWN_CONSUMERS:
+        enabled = consumer_telemetry_enabled(name)
         checks.append(
             DoctorCheck(
-                id=f"consumers.{consumer}",
+                id=f"consumers.{name}",
                 status="pass",
-                message=f"{consumer}: {'enabled' if enabled else 'disabled'}",
-                detail={"consumer": consumer, "enabled": enabled},
+                message=f"{name}: {'enabled' if enabled else 'disabled'}",
+                detail={"consumer": name, "enabled": enabled},
             )
         )
 
@@ -193,7 +228,11 @@ def build_doctor_report() -> DoctorReport:
         )
     )
 
-    return DoctorReport(checks=tuple(checks), raw_telemetry=raw_telemetry)
+    return DoctorReport(
+        checks=tuple(checks),
+        raw_telemetry=raw_telemetry,
+        consumer_filter=consumer_filter,
+    )
 
 
 def format_doctor_report(report: DoctorReport | None = None) -> str:
@@ -208,6 +247,8 @@ def format_doctor_report(report: DoctorReport | None = None) -> str:
         "CISTERNA_TELEMETRY gate",
         f"  raw: {report.raw_telemetry or '(unset)'}",
     ]
+    if report.consumer_filter is not None:
+        lines.append(f"  target consumer: {report.consumer_filter}")
 
     for check in report.checks:
         if check.id.startswith("consumers."):
@@ -256,7 +297,13 @@ def format_doctor_report(report: DoctorReport | None = None) -> str:
 
 def format_doctor_json(report: DoctorReport, *, strict: bool) -> str:
     """Serialize *report* as JSON (schema_version 1)."""
-    summary = {"pass": 0, "warn": 0, "fail": 0, "strict": strict}
+    summary: dict[str, Any] = {
+        "pass": 0,
+        "warn": 0,
+        "fail": 0,
+        "strict": strict,
+        "consumer_filter": report.consumer_filter,
+    }
     checks_out: list[dict[str, Any]] = []
     for check in report.checks:
         summary[check.status] += 1

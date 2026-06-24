@@ -171,6 +171,13 @@ uv run cisterna telemetry doctor --json --strict
 
 Set `CISTERNA_TELEMETRY` to the target consumer (or `all`) before running in a sibling repo cutover script.
 
+**Sibling-repo cutover** (scope gate to one consumer):
+
+```bash
+CISTERNA_TELEMETRY=contemplex uv run cisterna telemetry doctor --consumer contemplex --json --strict
+# or: CISTERNA_DOCTOR_CONSUMER=contemplex uv run cisterna telemetry doctor --json --strict
+```
+
 **CI:** `export-dogfood.yml` runs the same command with `CISTERNA_TELEMETRY=all` on every push/PR (blocking).
 
 ### Shadow parity (required before cutover promotion)
@@ -302,10 +309,9 @@ Verify with the docker smoke section above before debugging production collector
 
 ---
 
-## Deferred (post-M10.2)
+## Deferred (post-M10.4)
 
-- `--consumer` filter for doctor output
-- Tiered exit codes (0/1/2)
+- Tiered exit codes beyond invalid-consumer (0/1/2) for other failure classes
 - Auto-strict when `CI=true`
 
 ---

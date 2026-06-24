@@ -1,4 +1,4 @@
-"""Tests for M10.1 / M10.2 ``cisterna telemetry doctor``."""
+"""Tests for M10.1 / M10.2 / M10.4 ``cisterna telemetry doctor``."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from cisterna.probe.telemetry_doctor import (
     effective_check_status,
     format_doctor_json,
     format_doctor_report,
+    resolve_doctor_consumer,
     resolve_doctor_strict_mode,
 )
 from cisterna.telemetry.pipeline import resolve_log_dir_from_env
@@ -275,3 +276,122 @@ def test_ci_preflight_env_passes_strict(
     monkeypatch.delenv("CISTERNA_DOCTOR_STRICT", raising=False)
     report = build_doctor_report()
     assert compute_doctor_exit_code(report, strict=True) == 0
+
+
+def test_resolve_doctor_consumer_cli_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M10.4: CLI --consumer wins over CISTERNA_DOCTOR_CONSUMER."""
+    monkeypatch.setenv("CISTERNA_DOCTOR_CONSUMER", "bathos")
+    assert resolve_doctor_consumer(cli_consumer="contemplex") == "contemplex"
+
+
+def test_resolve_doctor_consumer_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CISTERNA_DOCTOR_CONSUMER", "Xperiri")
+    assert resolve_doctor_consumer(cli_consumer=None) == "xperiri"
+
+
+def test_resolve_doctor_consumer_invalid_raises() -> None:
+    with pytest.raises(ValueError, match="unknown consumer"):
+        resolve_doctor_consumer(cli_consumer="bogus")
+
+
+def test_build_doctor_report_scoped_gate_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M10.4: scoped gate passes when target consumer enabled."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "contemplex")
+    report = build_doctor_report(consumer_filter="contemplex")
+    assert report.consumer_filter == "contemplex"
+    gate = _check(report, "telemetry_gate")
+    assert gate.status == "pass"
+    assert "target contemplex: enabled" in gate.message
+    assert gate.detail == {"raw": "contemplex", "target_consumer": "contemplex"}
+
+
+def test_build_doctor_report_scoped_gate_warn_when_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M10.4: scoped gate warns when target consumer disabled."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "bathos")
+    report = build_doctor_report(consumer_filter="contemplex")
+    gate = _check(report, "telemetry_gate")
+    assert gate.status == "warn"
+    assert "target contemplex: disabled" in gate.message
+
+
+def test_build_doctor_report_scoped_gate_all_enables_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "all")
+    report = build_doctor_report(consumer_filter="myxcel")
+    assert _check(report, "telemetry_gate").status == "pass"
+
+
+def test_format_doctor_report_shows_target_consumer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "contemplex")
+    report = build_doctor_report(consumer_filter="contemplex")
+    text = format_doctor_report(report)
+    assert "target consumer: contemplex" in text
+
+
+def test_format_doctor_json_consumer_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M10.4: JSON summary includes consumer_filter."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "contemplex")
+    report = build_doctor_report(consumer_filter="contemplex")
+    payload = json.loads(format_doctor_json(report, strict=False))
+    assert payload["summary"]["consumer_filter"] == "contemplex"
+
+
+def test_doctor_cli_invalid_consumer_exit_two(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AC-M10.4: invalid consumer exits 2 before report."""
+    from cisterna.cli import app
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["telemetry", "doctor", "--consumer", "bogus"])
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unknown consumer" in captured.err
+
+
+def test_doctor_cli_invalid_consumer_json_no_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cisterna.cli import app
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["telemetry", "doctor", "--consumer", "bogus", "--json"])
+    assert exc_info.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
+def test_doctor_cli_consumer_strict_contemplex_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M10.4: cutover gate scoped to one consumer."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "bathos")
+    from cisterna.cli import app
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["telemetry", "doctor", "--consumer", "contemplex", "--strict"])
+    assert exc_info.value.code == 1
+
+
+def test_doctor_cli_consumer_strict_pass_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "contemplex")
+    from cisterna.cli import app
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(["telemetry", "doctor", "--consumer", "contemplex", "--json", "--strict"])
+    assert exc_info.value.code == 0
