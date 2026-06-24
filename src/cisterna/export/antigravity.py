@@ -7,6 +7,7 @@ from collections import defaultdict
 
 from cisterna.assets.bundle import AssetBundle, HookSpecAsset
 from cisterna.export._markdown import format_agent_markdown, format_skill_markdown
+from cisterna.export.antigravity_rust import emit_antigravity_rust_parity
 from cisterna.export.base import Emitter
 from cisterna.export.hooks import hooks_for_surface
 
@@ -19,7 +20,13 @@ _CONTEXT_FILE_NAME = "GEMINI.md"
 class AntigravityEmitter(Emitter):
     """Emit an AssetBundle as an Antigravity gemini-extension (pure, never-raise)."""
 
+    def __init__(self, *, rust_parity: bool = False) -> None:
+        self._rust_parity = rust_parity
+
     def emit(self, bundle: AssetBundle) -> dict[str, str]:
+        if self._rust_parity:
+            return emit_antigravity_rust_parity(bundle)
+
         files: dict[str, str] = {}
         hook_specs = hooks_for_surface(bundle.hook_specs, "antigravity")
 

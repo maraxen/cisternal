@@ -37,14 +37,16 @@ def test_validate_rust_parity_missing_bin_exit_one(
     assert exc_info.value.code == 1
 
 
+@pytest.mark.parametrize("surface", ["claude", "cursor", "copilot", "antigravity"])
 @pytest.mark.skipif(
     not _bundle_hash_available(),
     reason="CISTERNA_PRAXIA_ASSETS_BIN unset",
 )
 def test_validate_rust_parity_manifest_minimal_exit_zero(
     monkeypatch: pytest.MonkeyPatch,
+    surface: str,
 ) -> None:
-    """AC-M12-1f: rust parity validate passes on conformance manifest."""
+    """AC-M12-1f / AC-M12-3f: rust parity validate passes on conformance manifest."""
     bin_path = os.environ.get("CISTERNA_PRAXIA_ASSETS_BIN", "")
     monkeypatch.setenv("CISTERNA_PRAXIA_ASSETS_BIN", bin_path)
     from cisterna.cli import app
@@ -58,8 +60,9 @@ def test_validate_rust_parity_manifest_minimal_exit_zero(
                 "--manifest",
                 str(manifest),
                 "--surface",
-                "claude",
+                surface,
                 "--rust-parity",
             ]
         )
     assert exc_info.value.code == 0
+

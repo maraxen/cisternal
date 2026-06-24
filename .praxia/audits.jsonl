@@ -30,3 +30,4 @@
 {"audit_id":"260623_m4-adversarial","verdict":"ACCEPT_WITH_NITS","summary":"Adversarial gate ACCEPT_WITH_NITS. Blockers C1/C2/C6 reconciled in buildable spec rev1. Parent M4 epic #2597.","task_id":"260623_m4-export-trust","_written_by":"audit-synthesis"}
 {"verdict":"APPROVE","audit_id":"260623_m4-epic-closeout","summary":"VERIFY APPROVE — M4 Export Trust 22/22 ACs. 307 pytest green. Uncommitted working tree noted.","task_id":"260623_epic-audit_m4","_written_by":"reviewer"}
 {"verdict":"APPROVE","audit_id":"260624_m5-epic-closeout","summary":"VERIFY APPROVE — M5 Telemetry Adoption 10/10 ACs. Flaky #238 noted.","task_id":"260623_epic-audit_m5","_written_by":"reviewer"}
+{"audit_id":"260623_m12-3-adversarial-review","summary":"M12.3 sprint ACCEPT_WITH_NITS — parallel tracks OK after w0; CLI subprocess-only; add hook-filter + CLI parametrized tests in w4","task_id":"260624_autonomous-loop","verdict":"ACCEPT_WITH_NITS"}

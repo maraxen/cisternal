@@ -8,21 +8,16 @@ human_available = true
 version = "1.0"
 task_id = "260624_autonomous-loop"
 current_phase = "IMPLEMENT"
-last_subphase = "m12_2_claude_emitter_wedge"
-last_artifact_path = "src/cisterna/export/claude_rust.py"
-iteration_count = 69
-last_activation = "2026-06-23T12:00:00Z"
-autonomy_level = "L2"
-selected_item_ids = [2665]
-selection_mode = "operator_polish"
-brainstorm_needed = false
+last_subphase = "m12_3_epic_closeout"
+last_artifact_path = ".praxia/docs/research/260623_m12-3-epic-closeout-audit.md"
+iteration_count = 73
 next_phase = "TRIAGE"
 rubric_version = "1.0"
 
 [loop.selected]
 closed_epic_id = 2665
-closed_epic_slice = "M12.2"
-next_epic_candidate = "M12.3 cursor/copilot/antigravity emitter port"
+closed_epic_slice = "M12.3"
+next_epic_candidate = "M12.4 promote rust-parity to blocking"
 next_backlog_id = 2665
 
 [loop.gates]
@@ -32,7 +27,7 @@ spec_path = ".praxia/docs/specs/260624_m12-export-rust-bridge-buildable-spec-rev
 design_path = ".praxia/docs/designs/260624_m12-export-rust-bridge_design.md"
 adversarial_verdict = "ACCEPT_WITH_NITS"
 sprint_approved = true
-sprint_plan_path = ".praxia/sprint_plans/260624_m12-1-rust-bridge.toml"
+sprint_plan_path = ".praxia/sprint_plans/260623_m12-3-emitter-ports.toml"
 epic_audit_verdict = "APPROVE"
 
 [loop.brainstorm]

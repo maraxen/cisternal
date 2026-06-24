@@ -1,0 +1,248 @@
+[sprint]
+sprint_id = "260623_m12-3-emitter-ports"
+sprint_num = 19
+name = "M12.3 Export rust-parity — cursor, copilot, antigravity"
+description = "W0 shared rust emit helpers → W1–W3 surface wedges (parallel) → W4 wire + CI → W5 closeout (#2665)."
+context = '''
+Spec: .praxia/docs/specs/260624_m12-export-rust-bridge-buildable-spec-rev1.md (AC-M12-3)
+Design: .praxia/docs/designs/260624_m12-export-rust-bridge_design.md
+Recon: .praxia/docs/research/260623_m12-3-recon.md
+Parent epic: #2665 M12 (M12.3 slice — emitter ports only; no M12.4 blocking promotion)
+Predecessor: M12.2 093a54d (claude wedge + bundle_sha256_rust)
+Baseline: 431 pytest passed, 2 skipped; golden_matrix unchanged; rust-parity-advisory continue-on-error
+Cross-repo: praxia pin unchanged (04bb683); CISTERNA_PRAXIA_ASSETS_BIN for integration tests
+Local dev: export CISTERNA_PRAXIA_ASSETS_BIN=../praxia/target/release/bundle-hash
+Stack: uv run pytest; uv run ruff check .
+
+LOCKED DECISIONS (from recon):
+- Rust-parity lane does NOT call hooks_for_surface() — all hook_specs pass through (match bridge→bundle-hash).
+- Cursor rust-parity omits agents/*.agent.md (praxia emit() agents_path_verified=false).
+- Antigravity hooks use Claude env wrapper (PRAXIA_HOOK_SURFACE=claude) per praxia build_claude_hooks.
+- Legacy default emit unchanged; dual-track via rust_parity=True on each Emitter.
+
+Conformance digests (manifest_minimal):
+  cursor: ca8d6a3e1a7cf9a2848494d170024ac1692738e220106e83f93b443ed3bca2cd
+  copilot: 40524672ad04b8c237694c3f9395e1a7a2db5981b9481070b631bf935e3bda5e
+  antigravity: 63768b088a09128f96948f63884d30ea7ee23c3ea95ab80c98d65b98acf26492
+'''
+max_fix_retries = 1
+task_id = "260624_autonomous-loop"
+
+# ---------------------------------------------------------------------------
+# W0 — shared rust emit helpers (refactor M12.2)
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w0shared"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.3a — extract _rust_emit shared helpers"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/export/_rust_emit.py, src/cisterna/export/claude_rust.py
+
+Extract from claude_rust.py into _rust_emit.py (public to sibling modules):
+- compact_json(obj) — was _compact_json
+- agent_markdown_rust(agent), skill_markdown_rust(skill)
+- build_claude_hooks_json(hook_specs) — env PRAXIA_HOOK_SURFACE=claude
+- append_hook_entry helper
+
+Refactor claude_rust.py to import from _rust_emit; behavior byte-identical.
+
+Run: uv run pytest tests/test_claude_rust_parity.py -q (must stay green).
+
+Commit: refactor(export): shared rust emit helpers for M12.3 (#2665)
+'''
+reviewer_prompt = '''
+VERIFY no digest change on claude rust parity tests. claude_rust.py thinner; _rust_emit.py new.
+PASS if test_claude_rust_parity.py green.
+'''
+
+# ---------------------------------------------------------------------------
+# W1–W3 — surface wedges (parallel after W0)
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w1cursor"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.3b — CursorEmitter rust parity"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/export/cursor_rust.py, src/cisterna/export/cursor.py,
+tests/test_cursor_rust_parity.py, tests/golden/rust_parity/legacy/cursor/digest.sha256
+
+Implement emit_cursor_rust_parity(bundle) per recon + bundle_cursor.rs:
+- .cursor-plugin/plugin.json: compact; always agents+skills name arrays when in bundle;
+  hooks nested when hook_specs non-empty; optional mcpServers
+- skills/{name}/SKILL.md for all skills (skill_markdown_rust)
+- .cursor/hooks.json: {"version":1,"hooks":{...}} — serialize SAME hooks_doc object as plugin.hooks (CH-309)
+- NO agents/*.agent.md (fail-closed — AC-M12-3a)
+- Hook commands: raw script path (no env wrapper)
+- Event dialect: PreToolUse→beforeShellExecution (reuse _cursor_event_name from cursor.py or shared)
+- Use ALL bundle.hook_specs (no hooks_for_surface)
+
+CursorEmitter(rust_parity=True) delegates to emit_cursor_rust_parity.
+
+Tests (mirror test_claude_rust_parity.py):
+- digest == tests/conformance/expected/cursor.sha256
+- golden tests/golden/rust_parity/legacy/cursor/digest.sha256
+- legacy CursorEmitter() still emits agents/recon.agent.md on manifest_minimal
+- subprocess match test (skip if bin missing)
+
+Golden digest: ca8d6a3e1a7cf9a2848494d170024ac1692738e220106e83f93b443ed3bca2cd
+
+Do NOT touch copilot/antigravity/validate_golden surface_digest yet.
+
+Commit: feat(export): Cursor rust-parity emit wedge (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-3a. test_export_cursor.py legacy tests green. test_cursor_rust_parity.py green with bin.
+PASS.
+'''
+
+[[tracks]]
+id = "w2copilot"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.3c — CopilotEmitter rust parity"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/export/copilot_rust.py, src/cisterna/export/copilot.py,
+tests/test_copilot_rust_parity.py, tests/golden/rust_parity/legacy/copilot/digest.sha256
+
+Implement emit_copilot_rust_parity(bundle) per bundle_copilot.rs:
+- plugin.json: compact; agents, skills, hooks inline (preToolUse dialect); optional mcpServers
+- agents/{name}.agent.md for ALL agents (not body-gated)
+- skills/{name}/SKILL.md for ALL skills
+- .mcp.json when mcp_servers non-empty
+- Hook command: raw script; matcher+hooks nested structure
+- ALL hook_specs (no surface filter)
+
+CopilotEmitter(rust_parity=True) delegates.
+
+Tests mirror claude pattern. Golden: 40524672ad04b8c237694c3f9395e1a7a2db5981b9481070b631bf935e3bda5e
+
+Commit: feat(export): Copilot rust-parity emit wedge (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-3b. test_export_copilot.py legacy green. test_copilot_rust_parity.py green with bin.
+PASS.
+'''
+
+[[tracks]]
+id = "w3antigravity"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.3d — AntigravityEmitter rust parity"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/export/antigravity_rust.py, src/cisterna/export/antigravity.py,
+tests/test_antigravity_rust_parity.py, tests/golden/rust_parity/legacy/antigravity/digest.sha256
+
+Implement emit_antigravity_rust_parity(bundle) per bundle_antigravity.rs:
+- gemini-extension.json: name, version, agents, skills, commands (all command names),
+  contextFileName GEMINI.md, settings {}, optional mcpServers — compact, fixed key order
+- agents/{name}.md (plain .md) for all agents
+- skills/{name}/SKILL.md for all skills
+- hooks/hooks.json: {"hooks": build_claude_hooks_json(...)} — Claude env wrapper
+- .mcp.json when mcp present
+- ALL hook_specs
+
+AntigravityEmitter(rust_parity=True) delegates.
+
+Tests mirror claude pattern. Golden: 63768b088a09128f96948f63884d30ea7ee23c3ea95ab80c98d65b98acf26492
+
+Commit: feat(export): Antigravity rust-parity emit wedge (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-3c. test_export_antigravity.py legacy green. test_antigravity_rust_parity.py green with bin.
+PASS.
+'''
+
+# ---------------------------------------------------------------------------
+# W4 — wire validate_golden + CI
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w4wire"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.3e — surface_digest_rust_parity + CI"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: src/cisterna/assets/validate_golden.py,
+.github/workflows/export-dogfood.yml,
+tests/conformance/README.md
+
+Extend surface_digest_rust_parity(bundle, surface) for cursor|copilot|antigravity (AC-M12-3e):
+- Explicit dispatch table: ClaudeEmitter/CursorEmitter/CopilotEmitter/AntigravityEmitter(rust_parity=True)
+- Remove claude-only ValueError guard
+- Do NOT rely on get_emitter(rust_parity=...) unless registry extended in this phase
+
+Add tests/test_rust_parity_hook_filter.py (AC-CH-303):
+- Hook with surfaces=("copilot",) only: legacy cursor export omits; surface_digest_rust_parity cursor includes hook
+
+Extend tests/test_cli_rust_parity.py (AC-CH-307):
+- Parametrize cursor/copilot/antigravity manifest_minimal --rust-parity exit 0 with bin
+
+CI rust-parity-advisory: add test_cursor/copilot/antigravity_rust_parity.py to pytest line.
+
+README: note rust-parity ignores hooks_for_surface; cursor omits agent files.
+
+Full pytest -q must pass (≥431).
+
+Commit: feat(assets): rust parity digest for all surfaces (#2665)
+'''
+reviewer_prompt = '''
+VERIFY AC-M12-3d/e/f:
+- 4 rust_parity golden digests exist under tests/golden/rust_parity/legacy/
+- validate --rust-parity exit 0 for cursor/copilot/antigravity on manifest_minimal with bin
+- golden_matrix untouched
+PASS.
+'''
+
+# ---------------------------------------------------------------------------
+# W5 — epic closeout
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w5audit"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.3 — epic closeout audit"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED: .praxia/docs/research/260623_m12-3-epic-closeout-audit.md, .praxia/loop_state.toml
+
+Run full uv run pytest -q. Document AC-M12-3a..f PASS matrix.
+Update loop_state: closed M12.3, next M12.4 blocking promotion.
+Note: rust-parity-advisory still continue-on-error until M12.4.
+
+Commit: docs(m12.3): epic closeout audit (#2665)
+'''
+reviewer_prompt = '''
+VERIFY audit covers all M12.3 ACs. pytest baseline met. PASS for APPROVE.
+'''
+
+[orchestration]
+sequential = ["w0shared", "integrate_surfaces", "w4wire", "w5audit"]
+concurrent = ["w1cursor", "w2copilot", "w3antigravity"]

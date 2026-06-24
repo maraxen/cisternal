@@ -6,8 +6,19 @@ from pathlib import Path
 
 from cisterna.assets.bundle import AssetBundle
 from cisterna.export._hash import bundle_sha256, bundle_sha256_rust
+from cisterna.export.antigravity import AntigravityEmitter
 from cisterna.export.claude import ClaudeEmitter
+from cisterna.export.copilot import CopilotEmitter
+from cisterna.export.cursor import CursorEmitter
+from cisterna.export.base import Emitter
 from cisterna.export.registry import get_emitter
+
+_RUST_PARITY_EMITTERS: dict[str, type[Emitter]] = {
+    "antigravity": AntigravityEmitter,
+    "claude": ClaudeEmitter,
+    "copilot": CopilotEmitter,
+    "cursor": CursorEmitter,
+}
 
 _PROVENANCE_FRAGMENT = "cisterna-provenance.json"
 _GOLDEN_ROOT = Path(__file__).resolve().parents[3] / "tests" / "golden"
@@ -53,7 +64,7 @@ def rust_parity_golden_digest_path(
     manifest: Path | None = None,
     golden_root: Path | None = None,
 ) -> Path:
-    """Return path to rust-parity golden digest (M12.2, claude-only in this milestone)."""
+    """Return path to rust-parity golden digest."""
     root = golden_root or _RUST_PARITY_GOLDEN_ROOT
     slug = resolve_golden_slug(manifest)
     if slug is None:
@@ -62,17 +73,26 @@ def rust_parity_golden_digest_path(
     return root / slug / surface / "digest.sha256"
 
 
+def emit_rust_parity_files(bundle: AssetBundle, surface: str) -> dict[str, str]:
+    """Emit surface files using praxia byte parity (M12.2+)."""
+    emitter_cls = _RUST_PARITY_EMITTERS.get(surface)
+    if emitter_cls is None:
+        msg = f"rust parity emit not implemented for surface: {surface!r}"
+        raise ValueError(msg)
+    return emitter_cls(rust_parity=True).emit(bundle)
+
+
 def emit_claude_rust_parity_files(bundle: AssetBundle) -> dict[str, str]:
     """Emit Claude files using praxia byte parity (M12.2)."""
-    return ClaudeEmitter(rust_parity=True).emit(bundle)
+    return emit_rust_parity_files(bundle, "claude")
 
 
 def surface_digest_rust_parity(bundle: AssetBundle, surface: str) -> str:
-    """Return rust-canonical digest for *surface* (claude only in M12.2)."""
-    if surface != "claude":
+    """Return rust-canonical digest for *surface*."""
+    if surface not in _RUST_PARITY_EMITTERS:
         msg = f"rust parity digest not implemented for surface: {surface!r}"
         raise ValueError(msg)
-    files = emit_claude_rust_parity_files(bundle)
+    files = emit_rust_parity_files(bundle, surface)
     return bundle_sha256_rust(files)
 
 
