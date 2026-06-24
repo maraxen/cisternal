@@ -1,5 +1,5 @@
 # Cisterna autonomous dev-loop state
-# Updated 2026-06-24 — post-M10.3 triage
+# Updated 2026-06-24 — M7.2 implemented
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -8,46 +8,35 @@ human_available = true
 [loop]
 version = "1.0"
 task_id = "260624_autonomous-loop"
-current_phase = "TRIAGE"
-last_subphase = "pm_triage_post_m103"
-last_artifact_path = ".praxia/loop_triage_cache.json"
-iteration_count = 57
-last_activation = "2026-06-24T34:00:00Z"
+current_phase = "CLOSE"
+last_subphase = "m7_2_epic_audit_approve"
+last_artifact_path = ".praxia/docs/research/260624_m7-2-epic-closeout-audit.md"
+iteration_count = 61
+epic_audit_verdict = "APPROVE"
+last_activation = "2026-06-24T37:00:00Z"
 autonomy_level = "L2"
-selected_item_ids = [2658]
-selection_mode = "ci_hardening"
-brainstorm_needed = true
-next_phase = "BRAINSTORM"
+selected_item_ids = []
+selection_mode = "triage"
+brainstorm_needed = false
+next_phase = "TRIAGE"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2663
-m7_otlp_egress_complete = true
-m7_1_otlp_http_complete = true
-m8_2_xperiri_cutover_complete = true
-m9_2_myxcel_cutover_complete = true
-m10_operator_runbook_complete = true
-m10_1_telemetry_doctor_complete = true
-m10_2_telemetry_doctor_json_complete = true
+closed_epic_id = 2658
+m7_2_otlp_collector_ci_complete = true
 m10_3_ci_doctor_preflight_complete = true
-m11_export_hardening_complete = true
-m11_1_native_validate_complete = true
-flaky_test_2657_complete = true
-redundant_sort_2662_complete = true
-next_epic_candidate = "M7.2 OTLP collector CI promotion"
-next_backlog_id = 2658
+next_epic_candidate = ""
+next_backlog_id = 0
 
 [loop.gates]
-spec_confirmed = false
-runbook_path = ".praxia/docs/runbooks/cisterna-telemetry.md"
-spec_path = ""
-design_path = ""
-adversarial_verdict = ""
-epic_audit_verdict = ""
-sprint_approved = false
-sprint_plan_path = ""
+spec_confirmed = true
+spec_path = ".praxia/docs/specs/260624_m7-2-otlp-collector-ci-promotion-promote.md"
+design_path = ".praxia/docs/designs/260624_m7-2-otlp-collector-ci-promotion_design.md"
+adversarial_verdict = "ACCEPT_WITH_NITS"
+epic_audit_verdict = "APPROVE"
+sprint_approved = true
 
 [loop.brainstorm]
-session_id = ""
-winner = ""
-runner_up = ""
+session_id = "bdc45ba0"
+winner = "M7.2-A+B+C+D+E"
+runner_up = "M7.2-G merge into dogfood"

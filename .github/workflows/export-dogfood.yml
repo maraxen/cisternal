@@ -47,9 +47,8 @@ jobs:
             --manifest .praxia/manifest.toml --surface claude \
             --emit-command-bodies --use-native-cli
 
-  otlp-collector-advisory:
+  otlp-collector:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -64,13 +63,13 @@ jobs:
             otel/opentelemetry-collector:0.109.0 \
             --config=/etc/otelcol/config.yaml
           for i in $(seq 1 30); do
-            if nc -z localhost 4317 2>/dev/null; then
-              echo "collector ready"
+            if nc -z localhost 4317 2>/dev/null && nc -z localhost 4318 2>/dev/null; then
+              echo "collector ready (gRPC 4317 + HTTP 4318)"
               exit 0
             fi
             sleep 1
           done
-          echo "collector did not become ready in time"
+          echo "collector did not become ready in time (need 4317 and 4318)"
           docker logs cisterna-otel || true
           exit 1
       - name: OTLP gRPC + HTTP integration smoke

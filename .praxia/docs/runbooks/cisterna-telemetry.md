@@ -219,7 +219,9 @@ uv run pytest tests/test_otlp_http.py -m integration -q
 docker rm -f cisterna-otel
 ```
 
-**CI:** `export-dogfood.yml` job `otlp-collector-advisory` runs the same integration smoke with `continue-on-error: true` (advisory, not a merge blocker).
+**CI:** `export-dogfood.yml` job `otlp-collector` runs the same integration smoke on every push/PR (**blocking**).
+
+Local docker smoke should wait for **both** ports **4317** (gRPC) and **4318** (HTTP) before pytest.
 
 ---
 
@@ -313,5 +315,5 @@ Verify with the docker smoke section above before debugging production collector
 | Job | Workflow | Blocking? |
 |-----|----------|-----------|
 | `dogfood` | `export-dogfood.yml` | Yes — doctor preflight, pytest, shadow, golden matrix |
-| `otlp-collector-advisory` | `export-dogfood.yml` | No (`continue-on-error: true`) |
+| `otlp-collector` | `export-dogfood.yml` | Yes — OTLP gRPC + HTTP integration smoke (docker collector) |
 | `native-validate` | `export-dogfood.yml` | Yes — subprocess export digest parity (`--use-native-cli`) |
