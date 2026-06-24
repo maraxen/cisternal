@@ -1,21 +1,51 @@
 {
   "task_id": "260624_autonomous-loop",
-  "triage_at": "2026-06-24T28:00:00Z",
+  "triage_at": "2026-06-24T32:00:00Z",
   "closed_epic": {
-    "id": 2662,
-    "title": "M3 tech-debt: redundant sort in ClaudeEmitter._build_manifest",
-    "commit": "be59852",
-    "note": "Pre-shipped; verified on main; comment added in follow-up"
+    "id": 2661,
+    "title": "M10.2 telemetry doctor JSON + exit codes",
+    "commit": "86f5e3f",
+    "follow_up": "2nd commit documents #2662 sort invariant"
+  },
+  "baseline": {
+    "tests": "398 passed, 2 skipped",
+    "lint": "ruff clean"
+  },
+  "pillar_status": {
+    "telemetry_operator": "complete (M10 → M10.1 → M10.2)",
+    "export_trust": "complete (M11 + M11.1 native-validate required)",
+    "telemetry_adoption": "complete (M5–M9.2 cutovers)",
+    "ci_gaps": ["doctor not in workflow", "otlp-collector-advisory continue-on-error"]
   },
   "prioritized_items": [
     {
-      "id": "2661",
-      "title": "M10.2 telemetry doctor JSON + exit codes",
-      "category": "research",
+      "id": "2663",
+      "title": "M10.3 CI telemetry doctor preflight job",
+      "category": "ci",
       "difficulty": "quick",
-      "source": "backlog",
+      "source": "m10.2_epic_audit",
+      "recommended_action": "go",
+      "rationale": "M10.2 shipped --json --strict; wire export-dogfood.yml step to exercise the gate on every PR. No brainstorm — AC obvious.",
+      "priority": "P2"
+    },
+    {
+      "id": "2658",
+      "title": "M7.2 OTLP collector CI promotion (advisory → required)",
+      "category": "ci",
+      "difficulty": "standard",
+      "source": "workflow_gap",
       "recommended_action": "brainstorm",
-      "rationale": "M10.1 runner-up; scriptable doctor for cutover automation.",
+      "rationale": "otlp-collector-advisory still continue-on-error; M7.1 shipped HTTP/grpc tests but lane is soft. Needs flake/docker policy brainstorm.",
+      "priority": "P2"
+    },
+    {
+      "id": "2664",
+      "title": "M10.4 doctor --consumer filter",
+      "category": "feature",
+      "difficulty": "quick",
+      "source": "m10.2_deferred",
+      "recommended_action": "brainstorm",
+      "rationale": "Sibling cutover scripts may want bathos-only strict gate without parsing JSON. Small but needs severity-table tweak.",
       "priority": "P3"
     },
     {
@@ -25,34 +55,42 @@
       "difficulty": "standard",
       "source": "backlog",
       "recommended_action": "defer",
-      "rationale": "Not epic-sized; defer until next pillar gap.",
+      "rationale": "Not epic-sized for cisterna repo; belongs in praxia PCW lane.",
       "priority": "P3"
     }
   ],
   "deferred": [
     {
       "id": "240",
-      "reason": "PCW template promotion — not epic-sized"
+      "reason": "PCW template promotion — out of cisterna epic scope"
     },
     {
       "id": "2660",
-      "reason": "Duplicate of shipped M3.1 work — close backlog item"
+      "reason": "Stale M3.1 duplicate — shipped M31–M4"
     }
   ],
   "discarded": [
     {
       "id": "2326",
-      "reason": "Parent M3.1 epic already delivered on main"
+      "reason": "M3.1 delivered on main"
     },
     {
       "id": "2662",
-      "reason": "Already fixed in be59852 (#2327); verified no redundant sorted()"
+      "reason": "Closed — be59852 + invariant comment"
+    },
+    {
+      "id": "238",
+      "reason": "Flaky test fixed in #2657 (3ac7db1)"
+    },
+    {
+      "id": "260623_m31_orphan_spec",
+      "reason": "Deleted stale brainstorm artifact during triage"
     }
   ],
   "recommendation": {
-    "next_epic": "M10.2 telemetry doctor JSON + exit codes (#2661)",
-    "next_backlog_id": 2661,
-    "brainstorm_needed": true,
-    "rationale": "Debt burn-down complete; next leverage is operator ergonomics on the doctor CLI."
+    "next_epic": "M10.3 CI telemetry doctor preflight (#2663)",
+    "next_backlog_id": 2663,
+    "brainstorm_needed": false,
+    "rationale": "Telemetry operator arc feature-complete; highest leverage is dogfooding M10.2 in CI. OTLP promotion is runner-up but needs docker/flake policy."
   }
 }
