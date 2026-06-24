@@ -1,4 +1,4 @@
-# Updated 2026-06-23 — #2713 native-validate expansion complete
+# Updated 2026-06-23 — M12.5 rust-parity slug expansion complete
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -6,17 +6,17 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_native-validate-2713"
+task_id = "260623_m12-5-rust-parity-slugs"
 current_phase = "TRIAGE"
-last_subphase = "2713_native_validate_closeout"
-last_artifact_path = ".praxia/docs/research/260623_2713-native-validate-closeout.md"
-iteration_count = 80
+last_subphase = "m12_5_closeout"
+last_artifact_path = ".praxia/docs/research/260623_m12-5-rust-parity-slugs-closeout.md"
+iteration_count = 81
 next_phase = "BRAINSTORM_OR_GO"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2713
-closed_epic_slice = "M11.2"
+closed_epic_id = 2665
+closed_epic_slice = "M12.5"
 next_epic_candidate = "operator choice"
 next_backlog_id = 0
 sprint_approved = false
@@ -24,9 +24,9 @@ sprint_approved = false
 [loop.gates]
 spec_confirmed = true
 runbook_path = ".praxia/docs/runbooks/cisterna-telemetry.md"
-spec_path = ".praxia/docs/specs/260623_ci-promotion-status.md"
-design_path = ""
+spec_path = ".praxia/docs/specs/260624_m12-export-rust-bridge-buildable-spec-rev1.md"
+design_path = ".praxia/docs/designs/260624_m12-export-rust-bridge_design.md"
 adversarial_verdict = "ACCEPT"
 sprint_approved = true
-sprint_plan_path = ".praxia/sprint_plans/260623_2713-native-validate.toml"
+sprint_plan_path = ".praxia/sprint_plans/260623_m12-5-rust-parity-slugs.toml"
 epic_audit_verdict = "APPROVE"

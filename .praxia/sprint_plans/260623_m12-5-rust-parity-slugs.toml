@@ -1,0 +1,32 @@
+# M12.5 rust-parity golden slug expansion
+
+task_id = "260623_m12-5-rust-parity-slugs"
+parent_epic = 2665
+
+[[tracks]]
+id = "w1"
+name = "goldens"
+agent = "fixer"
+prompt = """
+Generate tests/golden/rust_parity/{dogfood_praxia,self_manifest}/ × 4 surfaces.
+Add write_rust_parity_golden_digest helper.
+"""
+
+[[tracks]]
+id = "w2"
+name = "matrix-test"
+agent = "fixer"
+depends_on = ["w1"]
+prompt = """
+Add test_rust_parity_matrix.py (12 tuples).
+Wire into rust-parity CI job pytest line.
+Update conformance README + M12 spec AC-M12-5.
+"""
+
+[reviewer_prompt]
+checklist = [
+  "12 rust_parity matrix tuples pass",
+  "rust-parity CI includes test_rust_parity_matrix.py",
+  "golden_matrix unchanged",
+  "default_ci green",
+]

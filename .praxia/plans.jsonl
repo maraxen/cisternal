@@ -17,3 +17,4 @@
 {"plan_id":"260623_m12-epic-audit","sprint_plan_path":".praxia/sprint_plans/260623_m12-epic-audit.toml","summary":"M12 inter-epic audit: mechanical verify, ruff fix, backlog/loop hygiene, TRIAGE route","task_id":"260623_epic-audit_m12"}
 {"plan_id":"260623_2712-docs-hygiene","sprint_plan_path":".praxia/sprint_plans/260623_2712-docs-hygiene.toml","summary":"#2712: CI promotion status doc, advisory→blocking spec banners, runbook link","task_id":"260623_docs-hygiene-2712"}
 {"plan_id":"260623_2713-native-validate","sprint_plan_path":".praxia/sprint_plans/260623_2713-native-validate.toml","summary":"#2713: expand native-validate CI/tests to 4 surfaces on self-manifest","task_id":"260623_native-validate-2713"}
+{"plan_id":"260623_m12-5-rust-parity-slugs","sprint_plan_path":".praxia/sprint_plans/260623_m12-5-rust-parity-slugs.toml","summary":"M12.5: rust_parity goldens for dogfood_praxia + self_manifest slugs","task_id":"260623_m12-5-rust-parity-slugs"}

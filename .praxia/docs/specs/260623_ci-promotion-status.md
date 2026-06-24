@@ -31,7 +31,7 @@ No `continue-on-error` on any export-dogfood job (verified by `tests/test_workfl
 | Lane | Gate | Golden path |
 |------|------|-------------|
 | Python-canonical | `dogfood` → `golden_matrix` | `tests/golden/{slug}/` |
-| Rust byte parity | `rust-parity` job | `tests/golden/rust_parity/` + conformance fixtures |
+| Rust byte parity | `rust-parity` job | `tests/golden/rust_parity/{legacy,dogfood_praxia,self_manifest}/` + conformance fixtures |
 
 Default `cisterna assets validate` remains Python-canonical; `--rust-parity` uses praxia subprocess digest.
 

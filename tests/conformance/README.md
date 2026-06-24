@@ -4,7 +4,8 @@ Pinned `PraxiaBundle` JSON and expected `surface_bundle_sha256` digests from
 praxia-agent-assets at `CISTERNA_PRAXIA_ASSETS_REV=04bb683f11d6e879dcfc5dafbedfed426254985a`.
 cisterna legacy `tests/golden/` digests remain Python-canonical.
 `tests/golden/rust_parity/` uses in-process rust-parity emit + `bundle_sha256_rust`
-for all four surfaces on the `legacy` slug.
+for all four surfaces on the `legacy`, `dogfood_praxia`, and `self_manifest` slugs
+(M12.5). Subprocess integration uses `bundle-hash` (see pin above).
 
 Rust-parity emit ignores `hooks_for_surface()` (all `hook_specs` pass through, matching
 `bundle-hash`). Cursor rust-parity omits `agents/*.agent.md` (praxia fail-closed default).

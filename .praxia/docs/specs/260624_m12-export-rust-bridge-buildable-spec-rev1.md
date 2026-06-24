@@ -93,6 +93,8 @@ verdict: ACCEPT_WITH_NITS
 
 **AC-M12-4:** *(M12.4 — shipped)* Job `rust-parity` is **blocking** (no `continue-on-error`). Renamed from `rust-parity-advisory`. Conformance + `tests/golden/rust_parity/legacy/` green; `golden_matrix` Python tuples unchanged. Commit `5e05e87`.
 
+**AC-M12-5:** *(M12.5)* `tests/golden/rust_parity/{dogfood_praxia,self_manifest}/` populated for all four surfaces; `test_rust_parity_matrix.py` parametrizes 12 tuples (3 slugs × 4 surfaces); `rust-parity` CI job includes matrix test.
+
 ---
 
 ## Adversarial reconciliation

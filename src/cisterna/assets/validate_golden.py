@@ -166,3 +166,17 @@ def write_golden_digest(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(digest + "\n", encoding="utf-8")
     return path
+
+
+def write_rust_parity_golden_digest(
+    bundle: AssetBundle,
+    surface: str,
+    *,
+    manifest: Path,
+) -> Path:
+    """Write rust-parity golden digest for *bundle* (dev helper)."""
+    digest = surface_digest_rust_parity(bundle, surface)
+    path = rust_parity_golden_digest_path(surface, manifest=manifest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(digest + "\n", encoding="utf-8")
+    return path
