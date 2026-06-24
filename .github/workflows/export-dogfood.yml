@@ -29,9 +29,8 @@ jobs:
           uv pip install -e examples/minimal_emitter
           uv run pytest examples/minimal_emitter/tests/ -q
 
-  native-validate-advisory:
+  native-validate:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

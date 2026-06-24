@@ -1,4 +1,8 @@
-"""Tests for M4.3 subprocess validate (--use-native-cli) parity."""
+"""Tests for M4.3 / M11.1 subprocess validate (--use-native-cli) parity.
+
+``--use-native-cli`` runs ``cisterna assets export`` in a subprocess and compares
+the emitted file digest to goldens — not vendor IDE CLIs.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ import pytest
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
 )
+SELF_MANIFEST = Path(".praxia/manifest.toml")
 
 
 def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
@@ -44,6 +49,37 @@ def test_native_cli_validate_claude_with_bodies() -> None:
             "validate",
             "--manifest",
             str(FIXTURE_MANIFEST),
+            "--surface",
+            "claude",
+            "--emit-command-bodies",
+            "--use-native-cli",
+        ]
+    )
+
+
+def test_native_cli_validate_self_manifest_names_only() -> None:
+    """AC-M11.1-3: self-manifest claude names_only subprocess parity."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(SELF_MANIFEST),
+            "--surface",
+            "claude",
+            "--use-native-cli",
+        ]
+    )
+
+
+def test_native_cli_validate_self_manifest_with_bodies() -> None:
+    """AC-M11.1-3: self-manifest claude with_command_bodies subprocess parity."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(SELF_MANIFEST),
             "--surface",
             "claude",
             "--emit-command-bodies",

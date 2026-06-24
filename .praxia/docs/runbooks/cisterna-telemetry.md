@@ -293,4 +293,4 @@ Verify with the docker smoke section above before debugging production collector
 |-----|----------|-----------|
 | `dogfood` | `export-dogfood.yml` | Yes — full pytest + shadow |
 | `otlp-collector-advisory` | `export-dogfood.yml` | No (`continue-on-error: true`) |
-| `native-validate-advisory` | `export-dogfood.yml` | No |
+| `native-validate` | `export-dogfood.yml` | Yes — subprocess export digest parity (`--use-native-cli`) |
