@@ -13,7 +13,7 @@ Public API:
 """
 
 from cisterna.export.base import Emitter
-from cisterna.export._hash import bundle_sha256
+from cisterna.export._hash import bundle_sha256, bundle_sha256_rust
 from cisterna.export.antigravity import AntigravityEmitter
 from cisterna.export.claude import ClaudeEmitter
 from cisterna.export.copilot import CopilotEmitter
@@ -26,6 +26,7 @@ __all__ = [
     "Emitter",
     "AntigravityEmitter",
     "bundle_sha256",
+    "bundle_sha256_rust",
     "ClaudeEmitter",
     "CopilotEmitter",
     "CursorEmitter",

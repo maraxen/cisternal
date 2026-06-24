@@ -34,6 +34,7 @@ import json
 
 from cisterna.assets.bundle import AssetBundle
 from cisterna.export._hash import bundle_sha256
+from cisterna.export.claude_rust import emit_claude_rust_parity
 from cisterna.export.base import Emitter
 
 _PLUGIN_JSON_PATH = ".claude-plugin/plugin.json"
@@ -51,8 +52,14 @@ class ClaudeEmitter(Emitter):
     Pure, deterministic, never-raises.  See module docstring for full spec.
     """
 
-    def __init__(self, *, emit_command_bodies: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        emit_command_bodies: bool = False,
+        rust_parity: bool = False,
+    ) -> None:
         self._emit_command_bodies = emit_command_bodies
+        self._rust_parity = rust_parity
 
     def emit(self, bundle: AssetBundle) -> dict[str, str]:
         """Render *bundle* to the Claude plugin file dict.
@@ -61,9 +68,12 @@ class ClaudeEmitter(Emitter):
             bundle: The :class:`~cisterna.assets.bundle.AssetBundle` to render.
 
         Returns:
-            A two-key dict:
-            ``{".claude-plugin/plugin.json": <json>, ".claude-plugin/cisterna-provenance.json": <json>}``
+            Legacy mode: plugin.json + provenance sidecar (and optional command bodies).
+            Rust parity mode (M12.2): praxia-shaped file set without provenance sidecar.
         """
+        if self._rust_parity:
+            return emit_claude_rust_parity(bundle)
+
         manifest = _build_manifest(bundle)
         plugin_json = json.dumps(manifest, sort_keys=True, indent=2)
 

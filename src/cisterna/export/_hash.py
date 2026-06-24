@@ -42,3 +42,17 @@ def bundle_sha256(files: dict[str, str]) -> str:
         for path, contents in sorted(files.items())
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def bundle_sha256_rust(files: dict[str, str]) -> str:
+    """Return SHA-256 digest using praxia ``surface_bundle_sha256`` canonicalization.
+
+    Payload per path (sorted): ``path + \\0 + contents + \\n`` (see praxia bundle.rs).
+    """
+    hasher = hashlib.sha256()
+    for path, contents in sorted(files.items()):
+        hasher.update(path.encode())
+        hasher.update(b"\0")
+        hasher.update(contents.encode())
+        hasher.update(b"\n")
+    return hasher.hexdigest()

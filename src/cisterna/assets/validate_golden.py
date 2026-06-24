@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from cisterna.assets.bundle import AssetBundle
-from cisterna.export._hash import bundle_sha256
+from cisterna.export._hash import bundle_sha256, bundle_sha256_rust
+from cisterna.export.claude import ClaudeEmitter
 from cisterna.export.registry import get_emitter
 
 _PROVENANCE_FRAGMENT = "cisterna-provenance.json"
 _GOLDEN_ROOT = Path(__file__).resolve().parents[3] / "tests" / "golden"
+_RUST_PARITY_GOLDEN_ROOT = _GOLDEN_ROOT / "rust_parity"
 
 
 def resolve_golden_slug(manifest: Path | None) -> str | None:
@@ -43,6 +45,35 @@ def golden_digest_path(
     if slug == "legacy":
         return root / surface / mode / "digest.sha256"
     return root / slug / surface / mode / "digest.sha256"
+
+
+def rust_parity_golden_digest_path(
+    surface: str,
+    *,
+    manifest: Path | None = None,
+    golden_root: Path | None = None,
+) -> Path:
+    """Return path to rust-parity golden digest (M12.2, claude-only in this milestone)."""
+    root = golden_root or _RUST_PARITY_GOLDEN_ROOT
+    slug = resolve_golden_slug(manifest)
+    if slug is None:
+        msg = f"unknown manifest for golden resolution: {manifest}"
+        raise ValueError(msg)
+    return root / slug / surface / "digest.sha256"
+
+
+def emit_claude_rust_parity_files(bundle: AssetBundle) -> dict[str, str]:
+    """Emit Claude files using praxia byte parity (M12.2)."""
+    return ClaudeEmitter(rust_parity=True).emit(bundle)
+
+
+def surface_digest_rust_parity(bundle: AssetBundle, surface: str) -> str:
+    """Return rust-canonical digest for *surface* (claude only in M12.2)."""
+    if surface != "claude":
+        msg = f"rust parity digest not implemented for surface: {surface!r}"
+        raise ValueError(msg)
+    files = emit_claude_rust_parity_files(bundle)
+    return bundle_sha256_rust(files)
 
 
 def emit_claude_files(

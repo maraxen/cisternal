@@ -109,4 +109,4 @@ jobs:
       - name: Rust parity conformance (advisory)
         env:
           CISTERNA_PRAXIA_ASSETS_BIN: ${{ github.workspace }}/praxia/crates/praxia-agent-assets/target/release/bundle-hash
-        run: uv run pytest tests/test_rust_parity.py -q
+        run: uv run pytest tests/test_rust_parity.py tests/test_claude_rust_parity.py -q
