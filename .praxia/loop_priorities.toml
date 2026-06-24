@@ -9,7 +9,7 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2628
+closed = 2647
 active = 0
 active_title = ""
 m31_rev2_deferred_complete = true
@@ -22,3 +22,4 @@ m8_xperiri_adapter_complete = true
 m8_2_xperiri_cutover_complete = true
 m9_myxcel_adapter_complete = true
 m9_2_myxcel_cutover_complete = true
+m10_operator_runbook_complete = true
