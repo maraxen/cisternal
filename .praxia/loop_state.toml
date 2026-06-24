@@ -1,4 +1,4 @@
-# Updated 2026-06-23 — #2712 docs hygiene complete
+# Updated 2026-06-23 — #2713 native-validate expansion complete
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -6,19 +6,19 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_docs-hygiene-2712"
+task_id = "260623_native-validate-2713"
 current_phase = "TRIAGE"
-last_subphase = "2712_docs_hygiene_closeout"
-last_artifact_path = ".praxia/docs/research/260623_2712-docs-hygiene-closeout.md"
-iteration_count = 79
+last_subphase = "2713_native_validate_closeout"
+last_artifact_path = ".praxia/docs/research/260623_2713-native-validate-closeout.md"
+iteration_count = 80
 next_phase = "BRAINSTORM_OR_GO"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2712
-closed_epic_slice = "docs-hygiene"
-next_epic_candidate = "#2713 native-validate surface expansion"
-next_backlog_id = 2713
+closed_epic_id = 2713
+closed_epic_slice = "M11.2"
+next_epic_candidate = "operator choice"
+next_backlog_id = 0
 sprint_approved = false
 
 [loop.gates]
@@ -28,5 +28,5 @@ spec_path = ".praxia/docs/specs/260623_ci-promotion-status.md"
 design_path = ""
 adversarial_verdict = "ACCEPT"
 sprint_approved = true
-sprint_plan_path = ".praxia/sprint_plans/260623_2712-docs-hygiene.toml"
+sprint_plan_path = ".praxia/sprint_plans/260623_2713-native-validate.toml"
 epic_audit_verdict = "APPROVE"

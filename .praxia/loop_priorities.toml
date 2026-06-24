@@ -31,3 +31,4 @@ m11_export_hardening_complete = true
 m11_1_native_validate_complete = true
 m12_export_rust_bridge_complete = true
 docs_hygiene_2712_complete = true
+m11_2_native_validate_complete = true

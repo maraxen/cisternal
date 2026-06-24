@@ -322,7 +322,7 @@ Verify with the docker smoke section above before debugging production collector
 |-----|----------|-----------|
 | `dogfood` | `export-dogfood.yml` | Yes — doctor preflight, pytest, shadow, golden matrix |
 | `otlp-collector` | `export-dogfood.yml` | Yes — OTLP gRPC + HTTP integration smoke (docker collector) |
-| `native-validate` | `export-dogfood.yml` | Yes — subprocess export digest parity (`--use-native-cli`) |
+| `native-validate` | `export-dogfood.yml` | Yes — subprocess export digest parity (`--use-native-cli`) on self-manifest for claude, cursor, copilot, antigravity (+ claude command bodies) |
 | `rust-parity` | `export-dogfood.yml` | Yes — praxia `bundle-hash` + in-process rust-parity pytest (pin `CISTERNA_PRAXIA_ASSETS_REV`) |
 
 **Export trust lanes:** `golden_matrix` (in `dogfood`) checks Python-canonical digests under

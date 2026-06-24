@@ -45,3 +45,13 @@ def test_rust_parity_job_is_blocking() -> None:
     assert "continue-on-error" not in block
     assert "CISTERNA_PRAXIA_ASSETS_REV" in block
     assert "bundle-hash" in block
+
+
+def test_native_validate_job_covers_all_surfaces() -> None:
+    """AC-M11.2-1: native-validate runs self-manifest subprocess parity for 4 surfaces."""
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    block = _job_block(text, "native-validate")
+    assert "for surface in claude cursor copilot antigravity" in block
+    assert "--use-native-cli" in block
+    assert "--emit-command-bodies" in block
+    assert "continue-on-error" not in block

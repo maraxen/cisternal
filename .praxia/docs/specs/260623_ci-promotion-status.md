@@ -12,7 +12,7 @@ Canonical mapping from **advisory** (historical spec wording) to **blocking** (c
 | Job | Blocking | Introduced | Notes |
 |-----|----------|------------|-------|
 | `dogfood` | Yes | M4 | pytest, ruff, golden_matrix, shadow, dry-run export |
-| `native-validate` | Yes | M11.1 | claude `--use-native-cli` on self-manifest |
+| `native-validate` | Yes | M11.1 → M11.2 | self-manifest `--use-native-cli` × 4 surfaces + claude bodies |
 | `otlp-collector` | Yes | M7.2 | docker collector + OTLP integration smoke |
 | `rust-parity` | Yes | M12.4 | praxia `bundle-hash` pin + rust-parity pytest suite |
 

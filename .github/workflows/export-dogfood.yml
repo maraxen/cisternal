@@ -39,10 +39,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
-      - name: Native CLI parity (claude)
+      - name: Native CLI parity (self-manifest, all surfaces)
         run: |
-          uv run cisterna assets validate \
-            --manifest .praxia/manifest.toml --surface claude --use-native-cli
+          for surface in claude cursor copilot antigravity; do
+            uv run cisterna assets validate \
+              --manifest .praxia/manifest.toml --surface "$surface" --use-native-cli
+          done
           uv run cisterna assets validate \
             --manifest .praxia/manifest.toml --surface claude \
             --emit-command-bodies --use-native-cli

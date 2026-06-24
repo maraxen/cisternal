@@ -1,0 +1,32 @@
+# M11.2 native-validate surface expansion (#2713)
+
+task_id = "260623_native-validate-2713"
+backlog_id = 2713
+
+[[tracks]]
+id = "w1"
+name = "ci-expand"
+agent = "fixer"
+prompt = """
+Expand native-validate job to loop claude cursor copilot antigravity on self-manifest.
+Keep claude emit-command-bodies step.
+"""
+
+[[tracks]]
+id = "w2"
+name = "tests"
+agent = "fixer"
+depends_on = ["w1"]
+prompt = """
+Parametrize test_cli_native_validate.py for 4 surfaces.
+Add test_native_validate_job_covers_all_surfaces workflow contract test.
+Update runbook + ci-promotion-status.md.
+"""
+
+[reviewer_prompt]
+checklist = [
+  "native-validate CI loops 4 surfaces",
+  "pytest parametrized self_manifest + manifest_minimal",
+  "workflow contract test passes",
+  "default_ci green",
+]

@@ -1,4 +1,4 @@
-"""Tests for M4.3 / M11.1 subprocess validate (--use-native-cli) parity.
+"""Tests for M4.3 / M11.1 / M11.2 subprocess validate (--use-native-cli) parity.
 
 ``--use-native-cli`` runs ``cisterna assets export`` in a subprocess and compares
 the emitted file digest to goldens — not vendor IDE CLIs.
@@ -14,6 +14,7 @@ FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
 )
 SELF_MANIFEST = Path(".praxia/manifest.toml")
+_SURFACES = ("claude", "cursor", "copilot", "antigravity")
 
 
 def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
@@ -26,8 +27,9 @@ def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
     )
 
 
-def test_native_cli_validate_claude_names_only() -> None:
-    """AC-M4-3a: --use-native-cli matches golden for manifest_minimal."""
+@pytest.mark.parametrize("surface", _SURFACES)
+def test_native_cli_validate_manifest_minimal_names_only(surface: str) -> None:
+    """AC-M4-3a / M11.2: --use-native-cli matches golden for manifest_minimal."""
     _invoke_app(
         [
             "assets",
@@ -35,14 +37,14 @@ def test_native_cli_validate_claude_names_only() -> None:
             "--manifest",
             str(FIXTURE_MANIFEST),
             "--surface",
-            "claude",
+            surface,
             "--use-native-cli",
         ]
     )
 
 
 def test_native_cli_validate_claude_with_bodies() -> None:
-    """AC-M4-3c: subprocess path with emit_command_bodies."""
+    """AC-M4-3c: subprocess path with emit_command_bodies (claude only)."""
     _invoke_app(
         [
             "assets",
@@ -57,8 +59,9 @@ def test_native_cli_validate_claude_with_bodies() -> None:
     )
 
 
-def test_native_cli_validate_self_manifest_names_only() -> None:
-    """AC-M11.1-3: self-manifest claude names_only subprocess parity."""
+@pytest.mark.parametrize("surface", _SURFACES)
+def test_native_cli_validate_self_manifest_names_only(surface: str) -> None:
+    """AC-M11.1-3 / M11.2: self-manifest subprocess parity for each surface."""
     _invoke_app(
         [
             "assets",
@@ -66,13 +69,13 @@ def test_native_cli_validate_self_manifest_names_only() -> None:
             "--manifest",
             str(SELF_MANIFEST),
             "--surface",
-            "claude",
+            surface,
             "--use-native-cli",
         ]
     )
 
 
-def test_native_cli_validate_self_manifest_with_bodies() -> None:
+def test_native_cli_validate_self_manifest_claude_with_bodies() -> None:
     """AC-M11.1-3: self-manifest claude with_command_bodies subprocess parity."""
     _invoke_app(
         [
@@ -88,18 +91,19 @@ def test_native_cli_validate_self_manifest_with_bodies() -> None:
     )
 
 
-def test_native_cli_matches_in_process_digest() -> None:
-    """AC-M4-3b: in-process and native digests agree."""
+@pytest.mark.parametrize("surface", _SURFACES)
+def test_native_cli_matches_in_process_digest(surface: str) -> None:
+    """AC-M4-3b / M11.2: in-process and native digests agree per surface."""
     from cisterna.assets.load import load_asset_report
     from cisterna.assets.validate_golden import surface_digest
     from cisterna.cli import _native_cli_surface_digest
 
     report = load_asset_report(manifest=FIXTURE_MANIFEST)
-    in_proc = surface_digest(report.bundle, "claude")
+    in_proc = surface_digest(report.bundle, surface)
     native = _native_cli_surface_digest(
         registry="default",
         manifest=FIXTURE_MANIFEST,
-        surface="claude",
+        surface=surface,
         emit_command_bodies=False,
     )
     assert in_proc == native
