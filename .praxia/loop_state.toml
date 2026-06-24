@@ -1,4 +1,4 @@
-# Updated 2026-06-24 — M12 adversarial ACCEPT_WITH_NITS
+# Updated 2026-06-24 — M12.1 implement complete
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -7,22 +7,22 @@ human_available = true
 [loop]
 version = "1.0"
 task_id = "260624_autonomous-loop"
-current_phase = "SPRINT_COMPOSE"
-last_subphase = "m12_1_sprint_composed"
-last_artifact_path = ".praxia/sprint_plans/260624_m12-1-rust-bridge.toml"
-iteration_count = 67
-last_activation = "2026-06-24T45:00:00Z"
+current_phase = "IMPLEMENT"
+last_subphase = "m12_1_epic_closeout"
+last_artifact_path = ".praxia/docs/research/260624_m12-1-epic-closeout-audit.md"
+iteration_count = 68
+last_activation = "2026-06-24T48:00:00Z"
 autonomy_level = "L2"
 selected_item_ids = [2665]
 selection_mode = "operator_polish"
 brainstorm_needed = false
-next_phase = "IMPLEMENT"
+next_phase = "TRIAGE"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2664
-closed_epic_commit = "d4fcaf4"
-next_epic_candidate = "M12 export Rust bridge"
+closed_epic_id = 2665
+closed_epic_slice = "M12.1"
+next_epic_candidate = "M12.2 Claude emitter rust parity wedge"
 next_backlog_id = 2665
 
 [loop.gates]
@@ -33,8 +33,9 @@ design_path = ".praxia/docs/designs/260624_m12-export-rust-bridge_design.md"
 adversarial_verdict = "ACCEPT_WITH_NITS"
 sprint_approved = true
 sprint_plan_path = ".praxia/sprint_plans/260624_m12-1-rust-bridge.toml"
+epic_audit_verdict = "APPROVE"
 
 [loop.brainstorm]
 session_id = "a8b30dc1"
-winner = "M12 phased D+F subprocess bridge: bundle-hash CLI, conformance fixtures, --rust-parity advisory, claude-first emitter port"
-runner_up = "M12-C subprocess-only without emitter port"
+winner = "M12 phased D+F subprocess bridge"
+runner_up = "M12-C subprocess-only"

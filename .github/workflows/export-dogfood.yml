@@ -77,3 +77,36 @@ jobs:
       - name: Stop otel-collector
         if: always()
         run: docker rm -f cisterna-otel || true
+
+  rust-parity-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      CISTERNA_PRAXIA_ASSETS_REV: 04bb683f11d6e879dcfc5dafbedfed426254985a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: maraxen/praxia
+          ref: ${{ env.CISTERNA_PRAXIA_ASSETS_REV }}
+          path: praxia
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            praxia/target
+          key: praxia-cargo-${{ env.CISTERNA_PRAXIA_ASSETS_REV }}
+      - name: Build bundle-hash
+        working-directory: praxia/crates/praxia-agent-assets
+        run: cargo build --release --bin bundle-hash
+      - run: uv sync
+      - name: Rust parity conformance (advisory)
+        env:
+          CISTERNA_PRAXIA_ASSETS_BIN: ${{ github.workspace }}/praxia/crates/praxia-agent-assets/target/release/bundle-hash
+        run: uv run pytest tests/test_rust_parity.py -q

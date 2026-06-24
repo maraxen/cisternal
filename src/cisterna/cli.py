@@ -394,6 +394,16 @@ def validate_assets(
             help="Re-emit via subprocess export instead of in-process emitter.",
         ),
     ] = False,
+    rust_parity: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--rust-parity"],
+            help=(
+                "Compare digest to praxia-agent-assets bundle-hash "
+                "(requires CISTERNA_PRAXIA_ASSETS_BIN)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Validate loaded assets: structural checks + golden digest (exit 0/1)."""
     from cisterna.assets.load import load_asset_report  # noqa: PLC0415
@@ -417,6 +427,46 @@ def validate_assets(
     if report.warnings:
         _log.error("cisterna.cli: validate failed — warnings: %s", report.warnings)
         raise SystemExit(1)
+
+    if rust_parity:
+        from cisterna.assets.bridge import (  # noqa: PLC0415
+            conformance_expected_path,
+            conformance_manifest_path,
+            resolve_bundle_hash_bin,
+            rust_surface_digest,
+        )
+
+        if resolve_bundle_hash_bin() is None:
+            _log.error(
+                "cisterna.cli: validate failed — set CISTERNA_PRAXIA_ASSETS_BIN "
+                "to the praxia bundle-hash binary for --rust-parity"
+            )
+            raise SystemExit(1)
+        try:
+            actual = rust_surface_digest(report.bundle, surface)
+            repeat = rust_surface_digest(report.bundle, surface)
+        except RuntimeError as exc:
+            _log.error("cisterna.cli: validate failed — %s", exc)
+            raise SystemExit(1) from exc
+        if actual != repeat:
+            _log.error(
+                "cisterna.cli: validate failed — rust parity digest unstable "
+                "(got %s then %s)",
+                actual,
+                repeat,
+            )
+            raise SystemExit(1)
+        if manifest is not None and manifest.resolve() == conformance_manifest_path().resolve():
+            expected = conformance_expected_path(surface).read_text(encoding="utf-8").strip()
+            if actual != expected:
+                _log.error(
+                    "cisterna.cli: validate failed — rust parity mismatch "
+                    "(expected %s, got %s)",
+                    expected,
+                    actual,
+                )
+                raise SystemExit(1)
+        raise SystemExit(0)
 
     mode = "with_command_bodies" if emit_command_bodies else "names_only"
 

@@ -1,0 +1,41 @@
+{
+  "agents": [
+    {
+      "body": "# Recon agent\n\nAgent body for tests.\n",
+      "description": "",
+      "model": null,
+      "name": "recon",
+      "tools": ["read", "search"]
+    }
+  ],
+  "commands": [
+    {
+      "body": "# Foo command\n\nManifest command body.\n",
+      "name": "foo"
+    }
+  ],
+  "hook_specs": [
+    {
+      "event": "PreToolUse",
+      "matcher": "Bash",
+      "script": "hooks/pre.sh",
+      "surfaces": [],
+      "tier": "essential"
+    }
+  ],
+  "mcp_servers": [],
+  "metadata": {
+    "description": "Minimal manifest for M3.1a tests",
+    "name": "fixture-plugin",
+    "version": "1.2.3"
+  },
+  "pipelines": [],
+  "skills": [
+    {
+      "body": "# Demo skill body\n\nSkill content for tests.\n",
+      "description": "",
+      "name": "demo-skill"
+    }
+  ],
+  "workflows": []
+}
