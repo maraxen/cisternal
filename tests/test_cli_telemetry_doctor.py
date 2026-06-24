@@ -265,3 +265,13 @@ def test_doctor_cli_strict_env_exit_one(
     with pytest.raises(SystemExit) as exc_info:
         app(["telemetry", "doctor", "--json"])
     assert exc_info.value.code == 1
+
+
+def test_ci_preflight_env_passes_strict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-M10.3: export-dogfood doctor step env (CISTERNA_TELEMETRY=all + --strict)."""
+    monkeypatch.setenv("CISTERNA_TELEMETRY", "all")
+    monkeypatch.delenv("CISTERNA_DOCTOR_STRICT", raising=False)
+    report = build_doctor_report()
+    assert compute_doctor_exit_code(report, strict=True) == 0

@@ -14,6 +14,10 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync
+      - name: Telemetry doctor preflight (M10.3)
+        env:
+          CISTERNA_TELEMETRY: all
+        run: uv run cisterna telemetry doctor --json --strict
       - run: uv run ruff check .
       - run: uv run pytest -q
       - name: Shadow telemetry parity (bathos + contemplex patterns)

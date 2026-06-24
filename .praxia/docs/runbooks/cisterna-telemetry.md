@@ -171,6 +171,8 @@ uv run cisterna telemetry doctor --json --strict
 
 Set `CISTERNA_TELEMETRY` to the target consumer (or `all`) before running in a sibling repo cutover script.
 
+**CI:** `export-dogfood.yml` runs the same command with `CISTERNA_TELEMETRY=all` on every push/PR (blocking).
+
 ### Shadow parity (required before cutover promotion)
 
 ```bash
@@ -310,6 +312,6 @@ Verify with the docker smoke section above before debugging production collector
 
 | Job | Workflow | Blocking? |
 |-----|----------|-----------|
-| `dogfood` | `export-dogfood.yml` | Yes — full pytest + shadow |
+| `dogfood` | `export-dogfood.yml` | Yes — doctor preflight, pytest, shadow, golden matrix |
 | `otlp-collector-advisory` | `export-dogfood.yml` | No (`continue-on-error: true`) |
 | `native-validate` | `export-dogfood.yml` | Yes — subprocess export digest parity (`--use-native-cli`) |
