@@ -1,0 +1,24 @@
+# Docs hygiene — advisory → blocking CI wording (#2712)
+
+task_id = "260623_docs-hygiene-2712"
+backlog_id = 2712
+depends_on = [2709]
+
+[[tracks]]
+id = "w1"
+name = "promotion-status-doc"
+agent = "fixer"
+prompt = """
+Create 260623_ci-promotion-status.md mapping advisory→blocking job names.
+Add status banners to M7.1, M10, M11.1, M7.2, M12 buildable specs.
+Update M12 design diagram and work package table.
+Link from runbook CI section.
+"""
+
+[reviewer_prompt]
+checklist = [
+  "ci-promotion-status.md exists with all four jobs",
+  "M12 spec AC-M12-4 reflects rust-parity blocking",
+  "No continue-on-error references added to canonical specs",
+  "Runbook links promotion status doc",
+]

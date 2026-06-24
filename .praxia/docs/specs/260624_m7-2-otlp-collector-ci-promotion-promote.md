@@ -12,6 +12,9 @@ design: .praxia/docs/designs/260624_m7-2-otlp-collector-ci-promotion_design.md
 
 # Brainstorm: M7.2 OTLP collector CI promotion
 
+> **Shipped:** Job `otlp-collector` is blocking (`1ef43af`). See
+> [CI promotion status](260623_ci-promotion-status.md).
+
 ## Problem Frame
 
 Promote `otlp-collector-advisory` in `export-dogfood.yml` to a **required** blocking job — last soft CI lane after M10.3 doctor preflight and M11.1 native-validate.

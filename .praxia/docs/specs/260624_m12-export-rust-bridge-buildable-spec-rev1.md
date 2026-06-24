@@ -11,9 +11,13 @@ verdict: ACCEPT_WITH_NITS
 
 # M12 Export Rust bridge — buildable spec (rev1)
 
+> **Epic status (2026-06-23):** **COMPLETE** (#2665, `5e05e87`). All export-dogfood jobs blocking.
+> CI job `rust-parity` (was `rust-parity-advisory` in AC-M12-1k). See
+> [CI promotion status](260623_ci-promotion-status.md).
+
 **Goal:** Establish cross-repo export digest parity with praxia-agent-assets via subprocess bridge, shared conformance fixtures, and phased emitter alignment — without regressing M11 `golden_matrix` or export-dogfood blocking jobs.
 
-**Epic phasing:** M12.1 (bridge + advisory CI) → M12.2 (claude wedge) → M12.3 (remaining surfaces) → M12.4 (blocking promotion).
+**Epic phasing:** M12.1 (bridge + advisory CI) → M12.2 (claude wedge) → M12.3 (remaining surfaces) → M12.4 (blocking promotion) — **all slices shipped**.
 
 ---
 
@@ -69,13 +73,13 @@ verdict: ACCEPT_WITH_NITS
 
 ### CI
 
-**AC-M12-1k:** `export-dogfood.yml` job `rust-parity-advisory` with `continue-on-error: true`: checkout praxia @ `CISTERNA_PRAXIA_ASSETS_REV`, build `bundle-hash`, run `pytest tests/test_rust_parity.py -q`.
+**AC-M12-1k:** *(M12.1 — shipped advisory)* `export-dogfood.yml` job `rust-parity-advisory` with `continue-on-error: true`: checkout praxia @ `CISTERNA_PRAXIA_ASSETS_REV`, build `bundle-hash`, run `pytest tests/test_rust_parity.py -q`. **Superseded by AC-M12-4** — job is now blocking `rust-parity`.
 
 **AC-M12-1l:** Existing jobs (`dogfood`, `golden_matrix`, `native-validate`, `otlp-collector`) unchanged and blocking.
 
 ### Docs
 
-**AC-M12-1m:** `.praxia/docs/runbooks/cisterna-telemetry.md` export section OR `tests/test_rust_parity.py` module docstring: rust parity is advisory until M12.4; legacy goldens remain Python canonical.
+**AC-M12-1m:** `.praxia/docs/runbooks/cisterna-telemetry.md` export section documents dual-lane export trust (`golden_matrix` Python-canonical; `rust-parity` praxia byte parity). Legacy goldens remain Python canonical for default `validate`.
 
 ---
 
@@ -87,7 +91,7 @@ verdict: ACCEPT_WITH_NITS
 
 **AC-M12-3:** cursor, copilot, antigravity emitter ports + rust_parity goldens.
 
-**AC-M12-4:** `rust-parity-advisory` promoted to blocking (`continue-on-error: false`) when all conformance + matrix rust_parity tuples green.
+**AC-M12-4:** *(M12.4 — shipped)* Job `rust-parity` is **blocking** (no `continue-on-error`). Renamed from `rust-parity-advisory`. Conformance + `tests/golden/rust_parity/legacy/` green; `golden_matrix` Python tuples unchanged. Commit `5e05e87`.
 
 ---
 

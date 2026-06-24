@@ -35,7 +35,7 @@ flowchart TB
 
   subgraph CI["export-dogfood.yml"]
     GM["golden_matrix — legacy Python"]
-    RP["rust-parity-advisory — M12.1"]
+    RP["rust-parity — M12.4 blocking"]
   end
 
   LOAD --> MAP
@@ -63,7 +63,7 @@ Python `bundle_sha256` switches to Rust algorithm **per surface** only after emi
 | Mode | Path | Used by |
 |------|------|---------|
 | **legacy_python** | `tests/golden/{slug}/{surface}/{mode}/digest.sha256` | `golden_matrix`, default `validate` |
-| **rust_parity** | `tests/golden/rust_parity/{slug}/{surface}/digest.sha256` | `validate --rust-parity`, advisory CI |
+| **rust_parity** | `tests/golden/rust_parity/{slug}/{surface}/digest.sha256` | `validate --rust-parity`, `rust-parity` CI job |
 
 Claude `names_only` legacy tuple remains until M12.2 emitter port; rust_parity uses full 4-file Rust shape (no separate `with_command_bodies` for claude in rust lane).
 
@@ -88,12 +88,12 @@ Claude `names_only` legacy tuple remains until M12.2 emitter port; rust_parity u
 | **M12.1d** | cisterna | `_rust_surface_digest()` subprocess wrapper + env `CISTERNA_PRAXIA_ASSETS_BIN` | M12.1a, M12.1c | L1 |
 | **M12.1e** | cisterna | `validate --rust-parity` flag; compares subprocess digest (no golden file required for pass — compares live Rust) | M12.1d | L1 |
 | **M12.1f** | cisterna | `tests/test_rust_parity.py` — manifest_minimal × 4 surfaces vs pinned expected digests | M12.1b | L1 |
-| **M12.1g** | cisterna | `export-dogfood.yml` job `rust-parity-advisory`: checkout praxia @ pin, `cargo build -p praxia-agent-assets --bin bundle-hash`, run parity tests | M12.1f | L2 |
+| **M12.1g** | cisterna | `export-dogfood.yml` job `rust-parity` (blocking since M12.4; was `rust-parity-advisory` in M12.1): checkout praxia @ pin, `cargo build -p praxia-agent-assets --bin bundle-hash`, run parity tests | M12.1f | L2 |
 | **M12.2a** | cisterna | ClaudeEmitter byte-align: 4 files, compact JSON, hooks with Praxia env wrapper | M12.1 | L3 |
 | **M12.2b** | cisterna | `bundle_sha256_rust()` + switch claude `surface_digest` when `RUST_PARITY=1` or per-surface flag | M12.2a | L1 |
 | **M12.2c** | cisterna | Refresh claude `rust_parity` goldens; legacy goldens unchanged until flip | M12.2b | L1 |
 | **M12.3** | cisterna | cursor / copilot / antigravity emitter port + rust_parity goldens | M12.2 | L3×3 |
-| **M12.4** | cisterna | Promote `rust-parity-advisory` → blocking; optional flip default validate | M12.3 | L1 |
+| **M12.4** | cisterna | Promote `rust-parity-advisory` → blocking `rust-parity` (shipped `5e05e87`); optional flip default validate deferred | M12.3 | L1 |
 
 ### Parallelism
 

@@ -66,7 +66,7 @@ Confirm. Fixed: docs-only in cisterna repo; never-raise telemetry invariant; CIS
 | AC | Given | When | Then |
 |----|-------|------|------|
 | **AC-M10-7** | Verification block | Operator copies commands | Documents `uv run pytest tests/shadow/ -q` and per-consumer gate tests (`test_*_telemetry_cutover.py`) |
-| **AC-M10-8** | OTLP smoke | Advisory CI reference | Documents `tests/test_otlp_http.py -m integration` + `tests/fixtures/otel-collector-config.yaml`; notes advisory `otlp-collector-advisory` job |
+| **AC-M10-8** | OTLP smoke | CI reference | Documents `tests/test_otlp_http.py -m integration` + `tests/fixtures/otel-collector-config.yaml`; references blocking `otlp-collector` job (promoted M7.2; see [CI promotion status](260623_ci-promotion-status.md)) |
 | **AC-M10-9** | Troubleshooting | Common failures | ≥3 entries: OTLP SDK missing, wrong protocol/port, telemetry disabled (unset `CISTERNA_TELEMETRY`) |
 
 ### Deferred (M10.1)

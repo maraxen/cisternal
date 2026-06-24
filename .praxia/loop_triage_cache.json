@@ -1,47 +1,19 @@
 {
-  "task_id": "260623_epic-audit_m12",
-  "triage_at": "2026-06-23T22:00:00Z",
+  "task_id": "260623_docs-hygiene-2712",
+  "triage_at": "2026-06-23T23:00:00Z",
   "closed_epic": {
-    "id": 2665,
-    "slice": "M12.4",
-    "title": "M12 export Rust bridge — full epic",
-    "commits": ["c0eca94", "093a54d", "25e1b8c", "5e05e87"]
-  },
-  "audit": {
-    "id": 2709,
-    "verdict": "VERIFY_PASS",
-    "remediation": "ruff F401 in test_rust_parity.py"
+    "id": 2712,
+    "title": "Docs hygiene: advisory spec wording",
+    "artifact": ".praxia/docs/specs/260623_ci-promotion-status.md"
   },
   "baseline": {
     "tests": "450 passed, 2 skipped",
     "lint": "ruff clean"
   },
-  "pillar_status": {
-    "telemetry_adoption": "complete",
-    "telemetry_egress": "complete",
-    "telemetry_operator": "complete",
-    "export_trust_python": "complete",
-    "export_trust_rust_parity": "complete",
-    "ci_gaps": []
-  },
-  "prioritized_items": [
-    {
-      "id": 2712,
-      "title": "Docs hygiene: M7.1/M10/M12 advisory spec wording",
-      "priority": "P3",
-      "recommended_action": "go"
-    },
-    {
-      "id": 2713,
-      "title": "M11.2 native-validate surface expansion",
-      "priority": "P3",
-      "recommended_action": "defer"
-    }
-  ],
   "recommendation": {
-    "next_epic": "#2712 docs hygiene (quick) or #2713 native-validate (standard)",
-    "next_backlog_id": 2712,
-    "brainstorm_needed": false,
-    "rationale": "M12 audit VERIFY PASS. default_ci green. Doc drift is lowest-risk next shippable slice."
+    "next_epic": "#2713 M11.2 native-validate surface expansion",
+    "next_backlog_id": 2713,
+    "brainstorm_needed": true,
+    "rationale": "Doc drift closed. Next P3 epic expands native-validate beyond claude-only."
   }
 }

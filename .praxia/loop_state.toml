@@ -1,4 +1,4 @@
-# Updated 2026-06-23 — M12 inter-epic audit VERIFY PASS
+# Updated 2026-06-23 — #2712 docs hygiene complete
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -6,32 +6,27 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260623_epic-audit_m12"
+task_id = "260623_docs-hygiene-2712"
 current_phase = "TRIAGE"
-last_subphase = "m12_epic_audit_verify"
-last_artifact_path = ".praxia/docs/research/260623_m12-epic-audit.md"
-iteration_count = 78
+last_subphase = "2712_docs_hygiene_closeout"
+last_artifact_path = ".praxia/docs/research/260623_2712-docs-hygiene-closeout.md"
+iteration_count = 79
 next_phase = "BRAINSTORM_OR_GO"
 rubric_version = "1.0"
 
 [loop.selected]
-closed_epic_id = 2665
-closed_epic_slice = "M12.4"
-next_epic_candidate = "#2712 docs hygiene or #2713 native-validate expansion"
-next_backlog_id = 2712
+closed_epic_id = 2712
+closed_epic_slice = "docs-hygiene"
+next_epic_candidate = "#2713 native-validate surface expansion"
+next_backlog_id = 2713
 sprint_approved = false
 
 [loop.gates]
-spec_confirmed = false
+spec_confirmed = true
 runbook_path = ".praxia/docs/runbooks/cisterna-telemetry.md"
-spec_path = ".praxia/docs/specs/260623_m12-epic-audit_spec.md"
-design_path = ".praxia/docs/designs/260623_m12-epic-audit_design.md"
+spec_path = ".praxia/docs/specs/260623_ci-promotion-status.md"
+design_path = ""
 adversarial_verdict = "ACCEPT"
-sprint_approved = false
-sprint_plan_path = ".praxia/sprint_plans/260623_m12-epic-audit.toml"
+sprint_approved = true
+sprint_plan_path = ".praxia/sprint_plans/260623_2712-docs-hygiene.toml"
 epic_audit_verdict = "APPROVE"
-
-[loop.brainstorm]
-session_id = "7506e03e"
-winner = "Audit-B: verification + hygiene"
-runner_up = "Audit-C: verification + docs drift"

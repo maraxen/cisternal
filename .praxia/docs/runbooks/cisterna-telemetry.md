@@ -328,3 +328,5 @@ Verify with the docker smoke section above before debugging production collector
 **Export trust lanes:** `golden_matrix` (in `dogfood`) checks Python-canonical digests under
 `tests/golden/`. `rust-parity` checks praxia byte parity via `tests/golden/rust_parity/` and
 conformance fixtures — separate gate, same workflow.
+
+**Promotion history** (advisory → blocking job renames): `.praxia/docs/specs/260623_ci-promotion-status.md`.

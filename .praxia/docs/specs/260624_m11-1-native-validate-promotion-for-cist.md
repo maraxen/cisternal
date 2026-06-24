@@ -6,7 +6,10 @@ winner: M11.1-A+C+D: Promote native-validate-advisory to required (remove contin
 created_at: 2026-06-24T03:14:46.680794+00:00
 ---
 
-# Brainstorm: M11.1 native-validate promotion for cisterna — promote export-dogfood native-validate-advisory job to required; complete M4.3 subprocess parity lane for claude self-manifest. What should M11.1 optimize for: CI env requirements, surface coverage, failure modes, or bundling with flaky test #238 fix?
+# M11.1 native-validate promotion for cisterna
+
+> **Shipped:** Job `native-validate` is blocking (promoted from `native-validate-advisory`).
+> See [CI promotion status](260623_ci-promotion-status.md).
 
 ## Problem Frame
 confirmed — with recon amendment: --use-native-cli is subprocess cisterna export (not vendor Claude CLI), so CI has no external binary dependency. Frame stands.
