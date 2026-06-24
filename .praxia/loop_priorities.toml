@@ -9,10 +9,10 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2661
+closed = 2663
 active = 0
 active_title = ""
-m10_2_telemetry_doctor_json_complete = true
+m10_3_ci_doctor_preflight_complete = true
 m31_rev2_deferred_complete = true
 m4_export_trust_complete = true
 m5_telemetry_gate_complete = true
