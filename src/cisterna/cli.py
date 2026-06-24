@@ -7,6 +7,7 @@ Subcommand tree:
     cisterna assets export [OPTIONS]
     cisterna assets inspect [OPTIONS]
     cisterna assets validate [OPTIONS]
+    cisterna telemetry doctor
 
 This module is FASTMCP-FREE by design (spec M4): importing ``cisterna.cli``
 must succeed even when ``fastmcp`` is not installed.  All asset-export logic
@@ -52,7 +53,27 @@ _log = logging.getLogger("cisterna.cli")
 
 app = cyclopts.App(name="cisterna", help="Cisterna CLI.", version_flags=[])
 assets_app = cyclopts.App(name="assets", help="Agent-asset commands.", version_flags=[])
+telemetry_app = cyclopts.App(
+    name="telemetry",
+    help=(
+        "Telemetry operator commands. "
+        "Runbook: .praxia/docs/runbooks/cisterna-telemetry.md"
+    ),
+    version_flags=[],
+)
 app.command(assets_app)
+app.command(telemetry_app)
+
+
+@telemetry_app.command(name="doctor")
+def telemetry_doctor() -> None:
+    """Print effective telemetry configuration (read-only).
+
+    Operator runbook: .praxia/docs/runbooks/cisterna-telemetry.md
+    """
+    from cisterna.probe.telemetry_doctor import format_doctor_report  # noqa: PLC0415
+
+    print(format_doctor_report())
 
 
 # ---------------------------------------------------------------------------

@@ -154,6 +154,14 @@ Each consumer ships a `telemetry_bridge.py` that calls `init_server_telemetry()`
 
 Run from the **cisterna** repo root after `uv sync`.
 
+### Operator diagnostic
+
+```bash
+uv run cisterna telemetry doctor
+```
+
+Prints effective `CISTERNA_TELEMETRY`, log directory, OTLP settings, and pipeline status.
+
 ### Shadow parity (required before cutover promotion)
 
 ```bash

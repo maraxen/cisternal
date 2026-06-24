@@ -199,6 +199,23 @@ class EventPipeline:
         return self._listener._export_count
 
 
+def resolve_log_dir_from_env() -> Path:
+    """Resolve JSONL log directory from env precedence (spec §3.2).
+
+    ``CISTERNA_LOG_DIR`` > ``BTH_LOG_DIR`` > ``CTXP_LOG_DIR`` > ``~/.cisterna/logs``
+    """
+    import os
+
+    raw = (
+        os.getenv("CISTERNA_LOG_DIR")
+        or os.getenv("BTH_LOG_DIR")
+        or os.getenv("CTXP_LOG_DIR")
+    )
+    if raw is None:
+        return Path.home() / ".cisterna" / "logs"
+    return Path(raw)
+
+
 def init_pipeline(
     log_dir: Path | None = None,
     max_bytes: int = 10_485_760,
@@ -235,19 +252,7 @@ def init_pipeline(
 
         # Resolve log_dir: explicit > env vars > default
         if log_dir is None:
-            import os
-
-            log_dir = (
-                os.getenv("CISTERNA_LOG_DIR")
-                or os.getenv("BTH_LOG_DIR")
-                or os.getenv("CTXP_LOG_DIR")
-                or None
-            )
-            if log_dir is None:
-                # Default to ~/.cisterna/logs
-                log_dir = Path.home() / ".cisterna" / "logs"
-            else:
-                log_dir = Path(log_dir)
+            log_dir = resolve_log_dir_from_env()
         else:
             log_dir = Path(log_dir)
 
