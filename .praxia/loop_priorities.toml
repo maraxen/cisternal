@@ -9,7 +9,7 @@ enabled = true
 skill_path = "~/.cursor/skills/epic-audit/SKILL.md"
 
 [epics]
-closed = 2658
+closed = 2665
 active = 0
 active_title = ""
 m7_2_otlp_collector_ci_complete = true
@@ -29,3 +29,4 @@ m10_operator_runbook_complete = true
 m10_1_telemetry_doctor_complete = true
 m11_export_hardening_complete = true
 m11_1_native_validate_complete = true
+m12_export_rust_bridge_complete = true

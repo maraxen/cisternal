@@ -10,9 +10,6 @@ legacy digests; the ``rust-parity`` CI job gates praxia byte parity (M12.4 block
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 from cisterna.assets.bridge import (

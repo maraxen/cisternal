@@ -1,4 +1,4 @@
-# Updated 2026-06-24 — M12.1 implement complete
+# Updated 2026-06-23 — M12 inter-epic audit VERIFY PASS
 
 [run]
 mode = "hitl_semi_autonomous"
@@ -6,32 +6,32 @@ human_available = true
 
 [loop]
 version = "1.0"
-task_id = "260624_autonomous-loop"
-current_phase = "IMPLEMENT"
-last_subphase = "m12_4_epic_closeout"
-last_artifact_path = ".praxia/docs/research/260623_m12-4-epic-closeout-audit.md"
-iteration_count = 77
-next_phase = "TRIAGE"
+task_id = "260623_epic-audit_m12"
+current_phase = "TRIAGE"
+last_subphase = "m12_epic_audit_verify"
+last_artifact_path = ".praxia/docs/research/260623_m12-epic-audit.md"
+iteration_count = 78
+next_phase = "BRAINSTORM_OR_GO"
 rubric_version = "1.0"
 
 [loop.selected]
 closed_epic_id = 2665
 closed_epic_slice = "M12.4"
-next_epic_candidate = "#2667 docs hygiene or #2666 native-validate expansion"
-sprint_approved = true
-next_backlog_id = 2665
+next_epic_candidate = "#2712 docs hygiene or #2713 native-validate expansion"
+next_backlog_id = 2712
+sprint_approved = false
 
 [loop.gates]
-spec_confirmed = true
+spec_confirmed = false
 runbook_path = ".praxia/docs/runbooks/cisterna-telemetry.md"
-spec_path = ".praxia/docs/specs/260624_m12-export-rust-bridge-buildable-spec-rev1.md"
-design_path = ".praxia/docs/designs/260624_m12-export-rust-bridge_design.md"
-adversarial_verdict = "ACCEPT_WITH_NITS"
-sprint_approved = true
-sprint_plan_path = ".praxia/sprint_plans/260623_m12-4-blocking-promotion.toml"
+spec_path = ".praxia/docs/specs/260623_m12-epic-audit_spec.md"
+design_path = ".praxia/docs/designs/260623_m12-epic-audit_design.md"
+adversarial_verdict = "ACCEPT"
+sprint_approved = false
+sprint_plan_path = ".praxia/sprint_plans/260623_m12-epic-audit.toml"
 epic_audit_verdict = "APPROVE"
 
 [loop.brainstorm]
-session_id = "a8b30dc1"
-winner = "M12 phased D+F subprocess bridge"
-runner_up = "M12-C subprocess-only"
+session_id = "7506e03e"
+winner = "Audit-B: verification + hygiene"
+runner_up = "Audit-C: verification + docs drift"

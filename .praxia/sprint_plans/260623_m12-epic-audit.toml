@@ -1,0 +1,57 @@
+# M12 inter-epic audit sprint
+
+task_id = "260623_epic-audit_m12"
+parent_epic = 2665
+verdict_gate = "ACCEPT"
+
+[[tracks]]
+id = "a"
+name = "mechanical-verify"
+agent = "reviewer"
+depends_on = []
+prompt = """
+Run default_ci: uv run pytest -q && uv run ruff check .
+Grep .github for continue-on-error (expect zero).
+Confirm rust-parity job blocking per test_workflow_export_dogfood.py.
+"""
+
+[[tracks]]
+id = "c"
+name = "ruff-fix"
+agent = "fixer"
+depends_on = []
+prompt = """
+Remove unused os/Path imports from tests/test_rust_parity.py (F401).
+"""
+
+[[tracks]]
+id = "b"
+name = "backlog-hygiene"
+agent = "orchestrator"
+depends_on = ["a", "c"]
+prompt = """
+Add audit parent item if missing. Mark M12 #2665 completed (commits c0eca94..5e05e87).
+Register #2666 native-validate expansion and #2667 docs hygiene as open P3 children.
+Close/dedup orphan items 2661/2662 if stale.
+"""
+
+[[tracks]]
+id = "d"
+name = "loop-closeout"
+agent = "orchestrator"
+depends_on = ["b"]
+prompt = """
+Update loop_priorities.toml m12_export_rust_bridge_complete = true.
+Update loop_state.toml: current_phase=TRIAGE, epic_audit_verdict=APPROVE.
+Update triage cache commit hash to 5e05e87.
+Add lesson + debt followups.
+"""
+
+[reviewer_prompt]
+checklist = [
+  "AC-AUDIT-1 default_ci green",
+  "AC-AUDIT-2 research memo PASS rows cited",
+  "AC-AUDIT-3 backlog hygiene",
+  "AC-AUDIT-4 loop files updated",
+  "AC-AUDIT-5 no feature scope creep",
+]
