@@ -1,29 +1,58 @@
 {
+  "task_id": "260624_autonomous-loop",
+  "triage_at": "2026-06-24T28:00:00Z",
+  "closed_epic": {
+    "id": 2662,
+    "title": "M3 tech-debt: redundant sort in ClaudeEmitter._build_manifest",
+    "commit": "be59852",
+    "note": "Pre-shipped; verified on main; comment added in follow-up"
+  },
   "prioritized_items": [
     {
-      "id": "2327",
-      "title": "M3 tech-debt: redundant sort in ClaudeEmitter._build_manifest",
-      "category": "debt",
+      "id": "2661",
+      "title": "M10.2 telemetry doctor JSON + exit codes",
+      "category": "research",
       "difficulty": "quick",
       "source": "backlog",
-      "recommended_action": "promote",
-      "rationale": "One-liner cleanup; AssetBundle.commands already sorted at construction. Immediate executable value, zero design risk.",
+      "recommended_action": "brainstorm",
+      "rationale": "M10.1 runner-up; scriptable doctor for cutover automation.",
+      "priority": "P3"
+    },
+    {
+      "id": "240",
+      "title": "PCW template promotion",
+      "category": "debt",
+      "difficulty": "standard",
+      "source": "backlog",
+      "recommended_action": "defer",
+      "rationale": "Not epic-sized; defer until next pillar gap.",
       "priority": "P3"
     }
   ],
   "deferred": [
     {
-      "id": "2326",
-      "reason": "M3.1 epic — needs brainstorm → adversarial spec → build cycle (PI-gated)"
+      "id": "240",
+      "reason": "PCW template promotion — not epic-sized"
     },
     {
-      "id": "2145",
-      "reason": "Out of cisterna scope — belongs in xperiri repo"
-    },
-    {
-      "id": "2146",
-      "reason": "Out of cisterna scope — belongs in myxcel repo"
+      "id": "2660",
+      "reason": "Duplicate of shipped M3.1 work — close backlog item"
     }
   ],
-  "discarded": []
+  "discarded": [
+    {
+      "id": "2326",
+      "reason": "Parent M3.1 epic already delivered on main"
+    },
+    {
+      "id": "2662",
+      "reason": "Already fixed in be59852 (#2327); verified no redundant sorted()"
+    }
+  ],
+  "recommendation": {
+    "next_epic": "M10.2 telemetry doctor JSON + exit codes (#2661)",
+    "next_backlog_id": 2661,
+    "brainstorm_needed": true,
+    "rationale": "Debt burn-down complete; next leverage is operator ergonomics on the doctor CLI."
+  }
 }

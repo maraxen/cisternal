@@ -162,6 +162,15 @@ uv run cisterna telemetry doctor
 
 Prints effective `CISTERNA_TELEMETRY`, log directory, OTLP settings, and pipeline status.
 
+**CI / cutover preflight** (machine-readable, fail on warnings):
+
+```bash
+uv run cisterna telemetry doctor --json --strict
+# or: CISTERNA_DOCTOR_STRICT=1 uv run cisterna telemetry doctor --json
+```
+
+Set `CISTERNA_TELEMETRY` to the target consumer (or `all`) before running in a sibling repo cutover script.
+
 ### Shadow parity (required before cutover promotion)
 
 ```bash
@@ -289,9 +298,11 @@ Verify with the docker smoke section above before debugging production collector
 
 ---
 
-## Deferred (M10.1)
+## Deferred (post-M10.2)
 
-- `cisterna telemetry doctor` CLI — printable effective config (runner-up from M10 brainstorm).
+- `--consumer` filter for doctor output
+- Tiered exit codes (0/1/2)
+- Auto-strict when `CI=true`
 
 ---
 

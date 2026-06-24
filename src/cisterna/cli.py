@@ -66,14 +66,45 @@ app.command(telemetry_app)
 
 
 @telemetry_app.command(name="doctor")
-def telemetry_doctor() -> None:
+def telemetry_doctor(
+    *,
+    json_output: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--json"],
+            help="Emit machine-readable JSON report to stdout.",
+        ),
+    ] = False,
+    strict: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--strict"],
+            help="Treat warnings as failures for exit code (see CISTERNA_DOCTOR_STRICT).",
+        ),
+    ] = False,
+) -> None:
     """Print effective telemetry configuration (read-only).
 
     Operator runbook: .praxia/docs/runbooks/cisterna-telemetry.md
-    """
-    from cisterna.probe.telemetry_doctor import format_doctor_report  # noqa: PLC0415
 
-    print(format_doctor_report())
+    CI/cutover scripts should use ``--json --strict`` (or set
+    ``CISTERNA_DOCTOR_STRICT=1``) so disabled telemetry fails the gate.
+    """
+    from cisterna.probe.telemetry_doctor import (  # noqa: PLC0415
+        build_doctor_report,
+        compute_doctor_exit_code,
+        format_doctor_json,
+        format_doctor_report,
+        resolve_doctor_strict_mode,
+    )
+
+    report = build_doctor_report()
+    strict_mode = resolve_doctor_strict_mode(cli_strict=strict)
+    if json_output:
+        print(format_doctor_json(report, strict=strict_mode))
+    else:
+        print(format_doctor_report(report))
+    raise SystemExit(compute_doctor_exit_code(report, strict=strict_mode))
 
 
 # ---------------------------------------------------------------------------
