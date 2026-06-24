@@ -1,0 +1,120 @@
+[sprint]
+sprint_id = "260623_m12-4-blocking-promotion"
+sprint_num = 20
+name = "M12.4 Export rust-parity — CI blocking promotion + epic closeout"
+description = "W1+W2 atomic (CI + workflow tests + docs) → W3 epic closeout (#2665)."
+context = '''
+Spec: .praxia/docs/specs/260624_m12-export-rust-bridge-buildable-spec-rev1.md (AC-M12-4)
+Design: .praxia/docs/designs/260624_m12-export-rust-bridge_design.md
+Triage: .praxia/loop_triage_cache.json (2026-06-23 post-M12.3)
+Predecessor: M12.3 25e1b8c (all 4 surfaces in-process + subprocess green)
+Parent epic: #2665 M12 — FINAL SLICE
+Baseline: 450 pytest passed, 2 skipped; golden_matrix unchanged (Python-canonical)
+Cross-repo: praxia pin CISTERNA_PRAXIA_ASSETS_REV=04bb683 (optional bump to 81bff16 — tracing only)
+
+LOCKED DECISIONS (PM triage + M12.3 adversarial):
+- MINIMAL M12.4: promote CI job blocking; docs/runbook; epic closeout.
+- OUT OF SCOPE: default validate flip to rust parity (defer to future oracle decision).
+- OUT OF SCOPE: golden_matrix rust_parity tuples for dogfood_praxia/self_manifest (AC-M12-4
+  literal "matrix" deferred — conformance + legacy-slug rust_parity goldens are the gate).
+- golden_matrix (15 Python tuples) remains unchanged and blocking.
+- Job rename: rust-parity-advisory → rust-parity (blocking) for operator clarity.
+
+GATE FOR BLOCKING (pre-conditions — verify before merge):
+- tests/test_rust_parity.py + test_*_rust_parity.py green locally with CISTERNA_PRAXIA_ASSETS_BIN
+- tests/golden/rust_parity/legacy/{claude,cursor,copilot,antigravity}/digest.sha256 present
+'''
+max_fix_retries = 1
+task_id = "260624_autonomous-loop"
+
+# ---------------------------------------------------------------------------
+# W1+W2 — CI promotion + workflow tests + docs (ATOMIC — single PR)
+# CH-403: dogfood runs full pytest; workflow test must flip with YAML same commit.
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w1w2atomic"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.4a/b — rust-parity blocking CI + contract docs (atomic)"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED:
+- .github/workflows/export-dogfood.yml
+- tests/test_workflow_export_dogfood.py
+- tests/test_rust_parity.py (module docstring only)
+- tests/conformance/README.md
+- .praxia/docs/runbooks/cisterna-telemetry.md (Related CI jobs table)
+
+AC-M12-4a — workflow:
+1. Remove `continue-on-error: true`.
+2. Rename job `rust-parity-advisory` → `rust-parity`.
+3. Keep CISTERNA_PRAXIA_ASSETS_REV=04bb683 (NO pin bump in this slice).
+4. Keep full pytest line on rust-parity job.
+
+AC-M12-4b — contract + docs:
+1. Replace test_rust_parity_advisory_job_is_non_blocking with test_rust_parity_job_is_blocking
+   (job `rust-parity:`, NO continue-on-error in block).
+2. Update test_rust_parity.py docstring: blocking CI as of M12.4.
+3. conformance README + runbook dual-lane paragraph (golden_matrix vs rust-parity).
+
+Do NOT change default validate CLI. Do NOT touch golden_matrix digests.
+Do NOT split YAML and workflow test across separate commits.
+
+Commit: ci(m12.4): promote rust-parity to blocking (#2665)
+'''
+reviewer_prompt = '''
+VERIFY atomic: workflow + test_workflow_export_dogfood.py green together.
+uv run pytest tests/test_workflow_export_dogfood.py -q PASS.
+rust-parity job has no continue-on-error. PASS.
+'''
+
+# ---------------------------------------------------------------------------
+# W2 — workflow contract tests + docs  [MERGED INTO w1w2atomic — track removed]
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# W3 — epic closeout
+# ---------------------------------------------------------------------------
+
+[[tracks]]
+id = "w3closeout"
+is_research = false
+
+[[tracks.items]]
+backlog_id = "2665"
+phase_name = "M12.4 — M12 epic closeout (#2665)"
+fixer_prompt = '''
+task_id: 260624_autonomous-loop
+
+FILES OWNED:
+- .praxia/docs/research/260623_m12-4-epic-closeout-audit.md
+- .praxia/loop_state.toml
+- .praxia/loop_triage_cache.json
+
+Run full uv run pytest -q (≥450 passed).
+
+Write epic closeout audit AC-M12-0..M12-4 matrix:
+- Document AC-M12-4 minimal scope: conformance + legacy rust_parity (not full golden_matrix rust tuples)
+- Operator checklist: verify first green rust-parity job on GitHub Actions main after merge
+
+Update loop_state:
+- closed_epic_slice = M12.4
+- closed_epic_id = 2665 (epic complete)
+- next_epic_candidate = (operator choice — suggest M11.2 #2666 or docs #2667)
+- sprint_approved = false; current_phase = IMPLEMENT complete → TRIAGE
+
+Update triage cache: export_trust_rust_parity = complete; ci_gaps = []
+
+Commit: docs(m12): epic #2665 closeout audit (#2665)
+'''
+reviewer_prompt = '''
+VERIFY audit covers full M12 arc. pytest baseline met. loop_state reflects epic complete.
+PASS for APPROVE.
+'''
+
+[orchestration]
+sequential = ["w1w2atomic", "w3closeout"]

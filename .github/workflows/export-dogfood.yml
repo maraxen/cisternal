@@ -78,9 +78,8 @@ jobs:
         if: always()
         run: docker rm -f cisterna-otel || true
 
-  rust-parity-advisory:
+  rust-parity:
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
       CISTERNA_PRAXIA_ASSETS_REV: 04bb683f11d6e879dcfc5dafbedfed426254985a
     steps:
@@ -106,7 +105,7 @@ jobs:
         working-directory: praxia/crates/praxia-agent-assets
         run: cargo build --release --bin bundle-hash
       - run: uv sync
-      - name: Rust parity conformance (advisory)
+      - name: Rust parity conformance
         env:
           CISTERNA_PRAXIA_ASSETS_BIN: ${{ github.workspace }}/praxia/crates/praxia-agent-assets/target/release/bundle-hash
         run: uv run pytest tests/test_rust_parity.py tests/test_claude_rust_parity.py tests/test_cursor_rust_parity.py tests/test_copilot_rust_parity.py tests/test_antigravity_rust_parity.py tests/test_rust_parity_hook_filter.py -q

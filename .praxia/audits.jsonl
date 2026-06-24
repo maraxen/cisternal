@@ -31,3 +31,4 @@
 {"verdict":"APPROVE","audit_id":"260623_m4-epic-closeout","summary":"VERIFY APPROVE — M4 Export Trust 22/22 ACs. 307 pytest green. Uncommitted working tree noted.","task_id":"260623_epic-audit_m4","_written_by":"reviewer"}
 {"verdict":"APPROVE","audit_id":"260624_m5-epic-closeout","summary":"VERIFY APPROVE — M5 Telemetry Adoption 10/10 ACs. Flaky #238 noted.","task_id":"260623_epic-audit_m5","_written_by":"reviewer"}
 {"audit_id":"260623_m12-3-adversarial-review","summary":"M12.3 sprint ACCEPT_WITH_NITS — parallel tracks OK after w0; CLI subprocess-only; add hook-filter + CLI parametrized tests in w4","task_id":"260624_autonomous-loop","verdict":"ACCEPT_WITH_NITS"}
+{"audit_id":"260623_m12-4-adversarial-review","summary":"M12.4 ACCEPT_WITH_NITS — atomic w1+w2 required (CH-403); AC-M12-4 matrix scope carve-out; no pin bump in promotion slice","task_id":"260624_autonomous-loop","verdict":"ACCEPT_WITH_NITS"}

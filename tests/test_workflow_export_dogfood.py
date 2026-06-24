@@ -36,11 +36,12 @@ def test_otlp_collector_ready_loop_checks_both_ports() -> None:
     assert "nc -z localhost 4318" in otlp_block
 
 
-def test_rust_parity_advisory_job_is_non_blocking() -> None:
-    """AC-M12-1k: rust-parity-advisory exists with continue-on-error."""
+def test_rust_parity_job_is_blocking() -> None:
+    """AC-M12-4a: rust-parity job exists without continue-on-error."""
     text = _WORKFLOW.read_text(encoding="utf-8")
-    assert "  rust-parity-advisory:" in text
-    block = _job_block(text, "rust-parity-advisory")
-    assert "continue-on-error: true" in block
+    assert "  rust-parity-advisory:" not in text
+    assert "  rust-parity:" in text
+    block = _job_block(text, "rust-parity")
+    assert "continue-on-error" not in block
     assert "CISTERNA_PRAXIA_ASSETS_REV" in block
     assert "bundle-hash" in block

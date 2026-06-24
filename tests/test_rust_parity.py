@@ -1,10 +1,11 @@
 """Rust parity digest tests via praxia bundle-hash (M12.1).
 
 Requires ``CISTERNA_PRAXIA_ASSETS_BIN`` pointing at a built ``bundle-hash``
-binary (see ``tests/conformance/README.md``). Skipped when unset.
+binary (see ``tests/conformance/README.md``). Subprocess integration tests skip
+when unset; in-process emit parity tests always run.
 
-Legacy ``golden_matrix`` remains Python-canonical; rust parity is advisory
-until M12.4 blocking promotion.
+Dual-lane export trust: ``golden_matrix`` (pytest marker) gates Python-canonical
+legacy digests; the ``rust-parity`` CI job gates praxia byte parity (M12.4 blocking).
 """
 
 from __future__ import annotations

@@ -9,5 +9,8 @@ for all four surfaces on the `legacy` slug.
 Rust-parity emit ignores `hooks_for_surface()` (all `hook_specs` pass through, matching
 `bundle-hash`). Cursor rust-parity omits `agents/*.agent.md` (praxia fail-closed default).
 
-The `rust-parity-advisory` CI job runs subprocess and in-process parity tests.
-Advisory until M12.4 blocking promotion.
+The `rust-parity` CI job (blocking as of M12.4) runs subprocess and in-process
+parity tests against the praxia pin above.
+
+**Dual-lane export trust:** `golden_matrix` validates Python-canonical legacy export;
+`rust-parity` validates praxia byte parity via `tests/golden/rust_parity/`.
