@@ -57,4 +57,5 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
     "integration: requires external services (e.g. otel-collector on localhost)",
+    "golden_matrix: export trust digest matrix (M11)",
 ]

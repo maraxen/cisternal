@@ -1,28 +1,24 @@
-"""M3.2 regression: all golden digests unchanged after registry dispatch (AC-M32-7)."""
+"""M3.2 regression: registry dispatch smoke (AC-M32-7).
+
+Full manifest×surface×mode golden coverage lives in ``tests/test_golden_matrix.py`` (M11).
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.assets.validate_golden import golden_digest_path, surface_digest
+from cisterna.export.registry import get_emitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
 )
 
 
-def test_all_golden_digests_unchanged_after_m32() -> None:
-    """AC-M32-7: five golden modes still match manifest_minimal emission."""
+def test_registry_dispatch_claude_emits() -> None:
+    """AC-M32-7: get_emitter still dispatches claude after entry-point registry."""
     bundle = ManifestAssetSource(FIXTURE_MANIFEST).load().bundle
-    cases = [
-        ("claude", "names_only", False),
-        ("claude", "with_command_bodies", True),
-        ("cursor", "names_only", False),
-        ("copilot", "names_only", False),
-        ("antigravity", "names_only", False),
-    ]
-    for surface, mode, bodies in cases:
-        digest = surface_digest(bundle, surface, emit_command_bodies=bodies)
-        golden = golden_digest_path(surface, mode)
-        assert digest == golden.read_text(encoding="utf-8").strip(), surface
+    emitter = get_emitter("claude")
+    assert emitter is not None
+    files = emitter.emit(bundle)
+    assert files

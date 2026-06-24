@@ -18,22 +18,8 @@ jobs:
       - run: uv run pytest -q
       - name: Shadow telemetry parity (bathos + contemplex patterns)
         run: uv run pytest tests/shadow/ -q
-      - name: Validate self-manifest (built-in surfaces)
-        run: |
-          for s in antigravity claude copilot cursor; do
-            uv run cisterna assets validate \
-              --manifest .praxia/manifest.toml --surface "$s"
-          done
-      - name: Validate self-manifest (claude bodies)
-        run: |
-          uv run cisterna assets validate \
-            --manifest .praxia/manifest.toml --surface claude --emit-command-bodies
-      - name: Validate dogfood praxia fixture (built-in surfaces)
-        run: |
-          for s in antigravity claude copilot cursor; do
-            uv run cisterna assets validate \
-              --manifest tests/fixtures/manifest_dogfood_praxia/manifest.toml --surface "$s"
-          done
+      - name: Golden matrix (export trust)
+        run: uv run pytest -m golden_matrix -q
       - name: Dry-run export self-manifest
         run: |
           uv run cisterna assets export \
