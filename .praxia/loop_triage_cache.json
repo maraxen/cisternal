@@ -1,32 +1,23 @@
 {
   "task_id": "260624_autonomous-loop",
-  "triage_at": "2026-06-24T34:00:00Z",
+  "triage_at": "2026-06-24T38:00:00Z",
   "closed_epic": {
-    "id": 2663,
-    "title": "M10.3 CI telemetry doctor preflight",
-    "commit": "6b73804"
+    "id": 2658,
+    "title": "M7.2 OTLP collector CI promotion",
+    "commit": "1ef43af"
   },
   "baseline": {
-    "tests": "399 passed, 2 skipped",
+    "tests": "401 passed, 2 skipped",
     "lint": "ruff clean"
   },
   "pillar_status": {
-    "telemetry_operator": "complete (M10 → M10.3 CI dogfood)",
-    "export_trust": "complete (M11 + M11.1)",
-    "telemetry_adoption": "complete (M5–M9.2)",
-    "ci_gaps": ["otlp-collector-advisory continue-on-error only"]
+    "telemetry_adoption": "complete (M5–M9.2 cutovers)",
+    "telemetry_egress": "complete (M7 → M7.1 → M7.2 all blocking CI)",
+    "telemetry_operator": "complete (M10 → M10.3 doctor CI)",
+    "export_trust": "complete (M11 golden matrix + M11.1 native-validate)",
+    "ci_gaps": []
   },
   "prioritized_items": [
-    {
-      "id": "2658",
-      "title": "M7.2 OTLP collector CI promotion (advisory → required)",
-      "category": "ci",
-      "difficulty": "standard",
-      "source": "workflow_gap",
-      "recommended_action": "brainstorm",
-      "rationale": "Last soft CI lane: docker collector job still continue-on-error. M7.1 shipped grpc+HTTP integration tests; promotion needs flake/retry/docker policy.",
-      "priority": "P1"
-    },
     {
       "id": "2664",
       "title": "M10.4 doctor --consumer filter",
@@ -34,8 +25,8 @@
       "difficulty": "quick",
       "source": "m10.2_deferred",
       "recommended_action": "brainstorm",
-      "rationale": "Sibling cutover scripts may want consumer-scoped strict gate; CI can keep all.",
-      "priority": "P3"
+      "rationale": "Last open M10 deferred item; sibling cutover scripts need consumer-scoped strict gate without parsing JSON. CI keeps CISTERNA_TELEMETRY=all.",
+      "priority": "P2"
     },
     {
       "id": "2665",
@@ -43,9 +34,29 @@
       "category": "feature",
       "difficulty": "large",
       "source": "m11_deferred",
-      "recommended_action": "defer",
-      "rationale": "M11 brainstorm deferred Rust bridge; PI-gated cross-repo epic.",
+      "recommended_action": "brainstorm",
+      "rationale": "Main remaining export-trust gap from M11 brainstorm (M11-H); cross-repo PI required.",
       "priority": "P2"
+    },
+    {
+      "id": "2666",
+      "title": "M11.2 native-validate surface expansion",
+      "category": "ci",
+      "difficulty": "standard",
+      "source": "m11.1_deferred",
+      "recommended_action": "defer",
+      "rationale": "M11.1-H deferred; claude-only native validate sufficient while golden_matrix covers 4 surfaces.",
+      "priority": "P3"
+    },
+    {
+      "id": "2667",
+      "title": "Docs hygiene: M7.1/M10 advisory spec wording",
+      "category": "debt",
+      "difficulty": "quick",
+      "source": "epic_audit_nits",
+      "recommended_action": "go",
+      "rationale": "Historical specs still say otlp-collector-advisory; one-pass doc update, not epic-sized alone.",
+      "priority": "P3"
     },
     {
       "id": "240",
@@ -54,24 +65,28 @@
       "difficulty": "standard",
       "source": "backlog",
       "recommended_action": "defer",
-      "rationale": "Praxia PCW lane, not cisterna-sized.",
+      "rationale": "Praxia PCW lane, not cisterna epic scope.",
       "priority": "P3"
     }
   ],
   "deferred": [
     {"id": "240", "reason": "PCW — praxia scope"},
-    {"id": "2665", "reason": "Large cross-repo; needs PI"},
+    {"id": "2665", "reason": "PI-gated unless user selects as primary"},
+    {"id": "2666", "reason": "Golden matrix already gates 4 surfaces"},
     {"id": "2660", "reason": "Stale M3.1 duplicate"}
   ],
   "discarded": [
+    {"id": "2658", "reason": "Shipped 1ef43af"},
     {"id": "2663", "reason": "Shipped 6b73804"},
     {"id": "2661", "reason": "Shipped 86f5e3f"},
-    {"id": "2662", "reason": "Closed be59852 + f040da0"}
+    {"id": "2662", "reason": "Closed be59852 + f040da0"},
+    {"id": "2657", "reason": "Flaky test fix 3ac7db1"},
+    {"id": "238", "reason": "Same as #2657"}
   ],
   "recommendation": {
-    "next_epic": "M7.2 OTLP collector CI promotion (#2658)",
-    "next_backlog_id": 2658,
+    "next_epic": "M10.4 doctor --consumer filter (#2664)",
+    "next_backlog_id": 2664,
     "brainstorm_needed": true,
-    "rationale": "Telemetry operator + export-trust CI lanes are blocking; OTLP is the remaining advisory job. Closes the M7 egress verification loop."
+    "rationale": "All export-dogfood jobs blocking; pillar arcs closed. Highest shippable leverage is operator ergonomics for sibling-repo cutover (M10.2 deferral). M12 Rust bridge is the strategic export follow-on but needs PI brainstorm."
   }
 }
