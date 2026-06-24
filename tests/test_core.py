@@ -44,6 +44,16 @@ def cleanup_pipeline():
         self_obs_module._jsonl_path = None
 
 
+def _wait_for_events_exported(min_count: int = 1, timeout: float = 2.0) -> None:
+    """Wait until the pipeline consumer has exported at least *min_count* events."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if status().events_exported >= min_count:
+            return
+        time.sleep(0.001)
+    pytest.fail(f"events_exported did not reach {min_count} within {timeout}s")
+
+
 class TestACCore1:
     """AC-CORE-1: emit_event writes JSONL within 100ms."""
 
@@ -311,9 +321,7 @@ class TestNeverRaise:
         # Should not raise despite RaisingExporter raising
         emit_event("test.event", field="value")
 
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline and len(shadow.records) < 1:
-            time.sleep(0.01)
+        _wait_for_events_exported()
 
         # Shadow exporter should still have received it
         assert len(shadow.records) >= 1
