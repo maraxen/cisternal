@@ -1,6 +1,6 @@
 """Tests for M4.3 / M11.1 / M11.2 subprocess validate (--use-native-cli) parity.
 
-``--use-native-cli`` runs ``cisterna assets export`` in a subprocess and compares
+``--use-native-cli`` runs ``cisternal assets export`` in a subprocess and compares
 the emitted file digest to goldens — not vendor IDE CLIs.
 """
 
@@ -18,7 +18,7 @@ _SURFACES = ("claude", "cursor", "copilot", "antigravity")
 
 
 def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(args)
@@ -94,9 +94,9 @@ def test_native_cli_validate_self_manifest_claude_with_bodies() -> None:
 @pytest.mark.parametrize("surface", _SURFACES)
 def test_native_cli_matches_in_process_digest(surface: str) -> None:
     """AC-M4-3b / M11.2: in-process and native digests agree per surface."""
-    from cisterna.assets.load import load_asset_report
-    from cisterna.assets.validate_golden import surface_digest
-    from cisterna.cli import _native_cli_surface_digest
+    from cisternal.assets.load import load_asset_report
+    from cisternal.assets.validate_golden import surface_digest
+    from cisternal.cli import _native_cli_surface_digest
 
     report = load_asset_report(manifest=FIXTURE_MANIFEST)
     in_proc = surface_digest(report.bundle, surface)

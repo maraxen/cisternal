@@ -12,7 +12,7 @@ FIXTURE_MANIFEST = (
 
 
 def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(args)

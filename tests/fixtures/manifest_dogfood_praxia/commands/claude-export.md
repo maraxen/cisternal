@@ -1,3 +1,3 @@
 # Claude export command
 
-Export via `cisterna assets export --surface claude`.
+Export via `cisternal assets export --surface claude`.

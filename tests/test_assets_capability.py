@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cisterna.assets.capability import (
+from cisternal.assets.capability import (
     Capability,
     resolve_model_hint,
     resolve_tools,

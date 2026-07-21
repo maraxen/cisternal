@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cisterna.assets.bridge import (
+from cisternal.assets.bridge import (
     asset_bundle_to_praxia_json,
     load_conformance_bundle_json,
     normalize_praxia_json,
 )
-from cisterna.assets.load import load_asset_report
+from cisternal.assets.load import load_asset_report
 
 
 def test_bridge_matches_conformance_fixture() -> None:

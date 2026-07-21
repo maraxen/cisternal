@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.bridge import resolve_bundle_hash_bin
+from cisternal.assets.bridge import resolve_bundle_hash_bin
 
 
 def _bundle_hash_available() -> bool:
@@ -18,8 +18,8 @@ def test_validate_rust_parity_missing_bin_exit_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC-M12-1g: missing bundle-hash exits 1 with guidance."""
-    monkeypatch.delenv("CISTERNA_PRAXIA_ASSETS_BIN", raising=False)
-    from cisterna.cli import app
+    monkeypatch.delenv("CISTERNAL_PRAXIA_ASSETS_BIN", raising=False)
+    from cisternal.cli import app
 
     manifest = Path("tests/fixtures/manifest_minimal/manifest.toml")
     with pytest.raises(SystemExit) as exc_info:
@@ -40,16 +40,16 @@ def test_validate_rust_parity_missing_bin_exit_one(
 @pytest.mark.parametrize("surface", ["claude", "cursor", "copilot", "antigravity"])
 @pytest.mark.skipif(
     not _bundle_hash_available(),
-    reason="CISTERNA_PRAXIA_ASSETS_BIN unset",
+    reason="CISTERNAL_PRAXIA_ASSETS_BIN unset",
 )
 def test_validate_rust_parity_manifest_minimal_exit_zero(
     monkeypatch: pytest.MonkeyPatch,
     surface: str,
 ) -> None:
     """AC-M12-1f / AC-M12-3f: rust parity validate passes on conformance manifest."""
-    bin_path = os.environ.get("CISTERNA_PRAXIA_ASSETS_BIN", "")
-    monkeypatch.setenv("CISTERNA_PRAXIA_ASSETS_BIN", bin_path)
-    from cisterna.cli import app
+    bin_path = os.environ.get("CISTERNAL_PRAXIA_ASSETS_BIN", "")
+    monkeypatch.setenv("CISTERNAL_PRAXIA_ASSETS_BIN", bin_path)
+    from cisternal.cli import app
 
     manifest = Path("tests/fixtures/manifest_minimal/manifest.toml")
     with pytest.raises(SystemExit) as exc_info:

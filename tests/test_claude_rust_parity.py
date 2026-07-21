@@ -6,20 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.bridge import (
+from cisternal.assets.bridge import (
     conformance_expected_path,
     conformance_manifest_path,
     resolve_bundle_hash_bin,
     rust_surface_digest,
 )
-from cisterna.assets.load import load_asset_report
-from cisterna.assets.validate_golden import (
+from cisternal.assets.load import load_asset_report
+from cisternal.assets.validate_golden import (
     emit_claude_rust_parity_files,
     rust_parity_golden_digest_path,
     surface_digest_rust_parity,
 )
-from cisterna.export._hash import bundle_sha256, bundle_sha256_rust
-from cisterna.export.claude import ClaudeEmitter
+from cisternal.export._hash import bundle_sha256, bundle_sha256_rust
+from cisternal.export.claude import ClaudeEmitter
 
 _MANIFEST = conformance_manifest_path()
 
@@ -52,14 +52,14 @@ def test_claude_legacy_emit_still_has_provenance_sidecar() -> None:
     M13 note: prior to M13 this test also asserted ``agents/recon.md`` was
     absent from the legacy emit path — that was the M3.1b-frozen, non-standard
     plugin.json-only shape. M13 intentionally reverses that freeze (see
-    ``cisterna.export.claude`` module docstring): the legacy path now emits
+    ``cisternal.export.claude`` module docstring): the legacy path now emits
     ``agents/<name>.md``/``skills/<name>/SKILL.md``/``hooks/hooks.json``/
     ``.mcp.json`` just like the rust-parity path does, modulo the provenance
     sidecar (which rust-parity omits and legacy keeps).
     """
     bundle = load_asset_report(manifest=_MANIFEST).bundle
     files = ClaudeEmitter().emit(bundle)
-    assert ".claude-plugin/cisterna-provenance.json" in files
+    assert ".claude-plugin/cisternal-provenance.json" in files
     assert "agents/recon.md" in files
 
 
@@ -73,12 +73,12 @@ def test_claude_rust_parity_emit_file_set() -> None:
         "skills/demo-skill/SKILL.md",
         "hooks/hooks.json",
     }
-    assert "cisterna-provenance" not in "".join(files)
+    assert "cisternal-provenance" not in "".join(files)
 
 
 @pytest.mark.skipif(
     resolve_bundle_hash_bin() is None,
-    reason="CISTERNA_PRAXIA_ASSETS_BIN unset",
+    reason="CISTERNAL_PRAXIA_ASSETS_BIN unset",
 )
 def test_claude_rust_parity_matches_subprocess() -> None:
     """AC-M12-2b: Python rust-parity digest matches bundle-hash subprocess."""

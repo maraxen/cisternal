@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cisterna.assets.manifest import ManifestAssetSource
+from cisternal.assets.manifest import ManifestAssetSource
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "manifest_vendor_commands"
 MANIFEST = FIXTURE_ROOT / "manifest.toml"

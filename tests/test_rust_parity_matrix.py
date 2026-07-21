@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.load import load_asset_report
-from cisterna.assets.validate_golden import (
+from cisternal.assets.load import load_asset_report
+from cisternal.assets.validate_golden import (
     resolve_golden_slug,
     rust_parity_golden_digest_path,
     surface_digest_rust_parity,

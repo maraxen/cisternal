@@ -1,7 +1,7 @@
 """Performance benchmarks: AC-PERF-1a, AC-PERF-1b, AC-PERF-1c (spec §8).
 
 AC-PERF-1a: emit_event x1000 with 2 exporters; median per-call < 1ms (enqueue only).
-AC-PERF-1b: CisternaMiddleware x500; median overhead < 1ms.
+AC-PERF-1b: CisternalMiddleware x500; median overhead < 1ms.
 AC-PERF-1c: queue capacity 10, 100 events before drain; drop_count >= 90.
 """
 
@@ -13,11 +13,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from cisterna import emit_event, init
-from cisterna.adapters.v3_middleware import CisternaMiddleware
-from cisterna.telemetry.context import _build_record
-from cisterna.telemetry.exporter import ShadowExporter
-from cisterna.telemetry.pipeline import EventPipeline
+from cisternal import emit_event, init
+from cisternal.adapters.v3_middleware import CisternalMiddleware
+from cisternal.telemetry.context import _build_record
+from cisternal.telemetry.exporter import ShadowExporter
+from cisternal.telemetry.pipeline import EventPipeline
 
 
 @pytest.fixture
@@ -31,8 +31,8 @@ def temp_log_dir():
 def cleanup():
     """Clean up pipeline between tests."""
     yield
-    from cisterna.telemetry import pipeline as pm
-    import cisterna.telemetry.self_obs as so_mod
+    from cisternal.telemetry import pipeline as pm
+    import cisternal.telemetry.self_obs as so_mod
 
     if pm._global_pipeline:
         pm._global_pipeline.shutdown()
@@ -75,18 +75,18 @@ class TestAcPerf1a:
 
 
 class TestAcPerf1b:
-    """AC-PERF-1b: CisternaMiddleware on_call_tool x500; median overhead < 1ms."""
+    """AC-PERF-1b: CisternalMiddleware on_call_tool x500; median overhead < 1ms."""
 
     @pytest.mark.asyncio
     async def test_middleware_overhead_median_under_1ms(self, temp_log_dir):
-        """Given CisternaMiddleware with ShadowExporter;
+        """Given CisternalMiddleware with ShadowExporter;
         When on_call_tool awaited 500 times (mock call_next returns immediately);
         Then median overhead < 1ms."""
 
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)
 
-        middleware = CisternaMiddleware()
+        middleware = CisternalMiddleware()
         ctx = Mock()
         ctx.message = Mock()
         ctx.message.name = "bench_tool"

@@ -13,7 +13,7 @@ DOGFOOD_MANIFEST = (
 
 def test_dogfood_praxia_fixture_richness() -> None:
     """AC-M4-1c: fixture has skills, agents, hooks, vendors, L14 extensions."""
-    from cisterna.assets.load import load_asset_report
+    from cisternal.assets.load import load_asset_report
 
     report = load_asset_report(manifest=DOGFOOD_MANIFEST)
     assert report.warnings == ()
@@ -43,7 +43,7 @@ path = "workflows/missing.toml"
         encoding="utf-8",
     )
 
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(

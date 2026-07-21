@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
-from cisterna.assets.validate_golden import surface_digest_rust_parity
-from cisterna.export.cursor import CursorEmitter
+from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+from cisternal.assets.validate_golden import surface_digest_rust_parity
+from cisternal.export.cursor import CursorEmitter
 
 
 def test_rust_parity_includes_copilot_only_hook_on_cursor() -> None:

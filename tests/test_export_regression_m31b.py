@@ -28,9 +28,9 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.assets.validate_golden import golden_digest_path, surface_digest
-from cisterna.export.claude import ClaudeEmitter
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.assets.validate_golden import golden_digest_path, surface_digest
+from cisternal.export.claude import ClaudeEmitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
@@ -55,7 +55,7 @@ def test_claude_golden_names_only_reflects_m13_real_plugin_format() -> None:
 
 def test_validate_cli_claude_golden(tmp_path: Path) -> None:
     """CLI validate --surface claude still exits 0 for manifest_minimal."""
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(

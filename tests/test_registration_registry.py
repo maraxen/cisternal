@@ -1,4 +1,4 @@
-"""Tests for cisterna.registration — registry.py + decorator.py.
+"""Tests for cisternal.registration — registry.py + decorator.py.
 
 Acceptance criteria covered:
   AC-M2-1   — @tool is a pure marker: decorated_fn is fn, iscoroutinefunction unchanged.
@@ -17,12 +17,12 @@ from typing import Any
 
 import pytest
 
-from cisterna.registration.registry import (
+from cisternal.registration.registry import (
     _registry,
     _snapshot,
     clear_registry,
 )
-from cisterna.registration.decorator import tool
+from cisternal.registration.decorator import tool
 
 
 # ---------------------------------------------------------------------------

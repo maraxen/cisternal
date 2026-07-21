@@ -1,12 +1,12 @@
-"""Tests for cisterna.registration — wire() + WiredRegistry (M2-WIRE, item 2143).
+"""Tests for cisternal.registration — wire() + WiredRegistry (M2-WIRE, item 2143).
 
 Acceptance criteria covered:
   AC-M2-8   — wire(server, registry="contemplex") registers ONLY contemplex tools
                (not tools from other partitions such as "default").
   AC-M2-9   — wire(server, expected=["tool_a", "tool_b"]) with only "tool_b"
-               registered raises CisternaWireError; err.missing == ["tool_a"].
+               registered raises CisternalWireError; err.missing == ["tool_a"].
   AC-M2-10  — same setup with validate=False -> NO raise; WARNING is logged to
-               "cisterna.registration" (verified via caplog).
+               "cisternal.registration" (verified via caplog).
   AC-M2-11  — post-wire decoration excluded from snapshot: tool decorated AFTER
                wire() is NOT on the wired server (tool list unchanged).
   AC-M2-12  — after wire(), clear_registry() empties the metadata partition.
@@ -24,10 +24,10 @@ import fastmcp
 import pytest
 from cyclopts import App
 
-from cisterna.registration.decorator import tool
-from cisterna.registration.errors import CisternaWireError
-from cisterna.registration.registry import clear_registry
-from cisterna.registration.wired import WiredRegistry, wire
+from cisternal.registration.decorator import tool
+from cisternal.registration.errors import CisternalWireError
+from cisternal.registration.registry import clear_registry
+from cisternal.registration.wired import WiredRegistry, wire
 
 
 # ---------------------------------------------------------------------------
@@ -119,21 +119,21 @@ class TestNamedPartitionIsolation:
 
 
 # ---------------------------------------------------------------------------
-# AC-M2-9: CisternaWireError on missing expected tools (validate=True)
+# AC-M2-9: CisternalWireError on missing expected tools (validate=True)
 # ---------------------------------------------------------------------------
 
 class TestExpectedValidationRaises:
     """wire(server, expected=[...], validate=True) raises on missing tools."""
 
     def test_missing_expected_tool_raises(self):
-        """AC-M2-9: only tool_b decorated — missing tool_a raises CisternaWireError."""
+        """AC-M2-9: only tool_b decorated — missing tool_a raises CisternalWireError."""
 
         @tool
         def tool_b(x: int) -> int:
             return x
 
         server = fastmcp.FastMCP("test-expected-raises")
-        with pytest.raises(CisternaWireError) as exc_info:
+        with pytest.raises(CisternalWireError) as exc_info:
             wire(server, expected=["tool_a", "tool_b"])
 
         err = exc_info.value
@@ -148,7 +148,7 @@ class TestExpectedValidationRaises:
         """AC-M2-9: err.missing contains exactly the absent names."""
 
         server = fastmcp.FastMCP("test-missing-exact")
-        with pytest.raises(CisternaWireError) as exc_info:
+        with pytest.raises(CisternalWireError) as exc_info:
             wire(server, expected=["tool_x", "tool_y", "tool_z"])
 
         err = exc_info.value
@@ -186,29 +186,29 @@ class TestExpectedValidationWarns:
             return x
 
         server = fastmcp.FastMCP("test-validate-false-no-raise")
-        with caplog.at_level(logging.WARNING, logger="cisterna.registration"):
+        with caplog.at_level(logging.WARNING, logger="cisternal.registration"):
             result = wire(server, expected=["tool_a", "tool_b"], validate=False)
 
         # No exception — must return WiredRegistry
         assert isinstance(result, WiredRegistry)
 
     def test_validate_false_warning_logged(self, caplog):
-        """AC-M2-10: a WARNING is logged to 'cisterna.registration'."""
+        """AC-M2-10: a WARNING is logged to 'cisternal.registration'."""
 
         @tool
         def tool_b(x: int) -> int:
             return x
 
         server = fastmcp.FastMCP("test-validate-false-warning")
-        with caplog.at_level(logging.WARNING, logger="cisterna.registration"):
+        with caplog.at_level(logging.WARNING, logger="cisternal.registration"):
             wire(server, expected=["tool_a", "tool_b"], validate=False)
 
         warning_records = [
             r for r in caplog.records
-            if r.name == "cisterna.registration" and r.levelno == logging.WARNING
+            if r.name == "cisternal.registration" and r.levelno == logging.WARNING
         ]
         assert warning_records, (
-            "Expected a WARNING record from 'cisterna.registration', "
+            "Expected a WARNING record from 'cisternal.registration', "
             f"got records: {caplog.records}"
         )
         # The warning message should mention the missing tool name
@@ -225,7 +225,7 @@ class TestExpectedValidationWarns:
             return x
 
         server = fastmcp.FastMCP("test-validate-false-partial-wire")
-        with caplog.at_level(logging.WARNING, logger="cisterna.registration"):
+        with caplog.at_level(logging.WARNING, logger="cisternal.registration"):
             result = wire(server, expected=["tool_a", "tool_b"], validate=False)
 
         assert "tool_b" in result.mcp_tools
@@ -305,7 +305,7 @@ class TestClearRegistryAfterWire:
     @pytest.mark.asyncio
     async def test_clear_registry_empties_partition(self):
         """AC-M2-12: clear_registry() empties the metadata partition."""
-        from cisterna.registration.registry import _snapshot
+        from cisternal.registration.registry import _snapshot
 
         @tool
         def my_tool(x: int) -> int:
@@ -353,7 +353,7 @@ class TestClearRegistryAfterWire:
     @pytest.mark.asyncio
     async def test_clear_does_not_affect_other_partitions(self):
         """AC-M2-12: clearing 'default' does not touch 'contemplex' partition."""
-        from cisterna.registration.registry import _snapshot
+        from cisternal.registration.registry import _snapshot
 
         @tool
         def default_tool(x: int) -> int:

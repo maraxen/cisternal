@@ -15,17 +15,17 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.bundle import (
+from cisternal.assets.bundle import (
     AgentAsset,
     AssetBundle,
     BundleMetadata,
     CommandAsset,
     McpAsset,
 )
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.export._hash import bundle_sha256
-from cisterna.export.base import Emitter
-from cisterna.export.claude import ClaudeEmitter
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.export._hash import bundle_sha256
+from cisternal.export.base import Emitter
+from cisternal.export.claude import ClaudeEmitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
@@ -56,7 +56,7 @@ def _bundle(
 
 
 _PLUGIN_JSON_PATH = ".claude-plugin/plugin.json"
-_PROVENANCE_PATH = ".claude-plugin/cisterna-provenance.json"
+_PROVENANCE_PATH = ".claude-plugin/cisternal-provenance.json"
 
 
 # ---------------------------------------------------------------------------

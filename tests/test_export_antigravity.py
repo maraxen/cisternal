@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.export.antigravity import AntigravityEmitter
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.export.antigravity import AntigravityEmitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
@@ -45,7 +45,7 @@ def test_antigravity_emit_manifest_minimal_fixture() -> None:
 
 def test_antigravity_agents_never_emitted() -> None:
     """Antigravity has no file-based agent registration — agents must never appear."""
-    from cisterna.assets.bundle import AgentAsset, AssetBundle, BundleMetadata
+    from cisternal.assets.bundle import AgentAsset, AssetBundle, BundleMetadata
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),
@@ -61,7 +61,7 @@ def test_antigravity_agents_never_emitted() -> None:
 
 def test_antigravity_mcp_command_args_split() -> None:
     """M13.1: mcp_config.json splits command into a bare string + args array."""
-    from cisterna.assets.bundle import AssetBundle, BundleMetadata, McpAsset
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, McpAsset
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),
@@ -81,7 +81,7 @@ def test_antigravity_mcp_command_args_split() -> None:
 
 def test_antigravity_unsupported_hook_events_dropped() -> None:
     """M13.1: only PreToolUse/PostToolUse survive; other events are silently dropped."""
-    from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),
@@ -100,7 +100,7 @@ def test_antigravity_unsupported_hook_events_dropped() -> None:
 
 def test_antigravity_mcp_env_passthrough() -> None:
     """M13.2: mcp_config.json carries env vars through when present."""
-    from cisterna.assets.bundle import AssetBundle, BundleMetadata, McpAsset
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, McpAsset
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),
@@ -121,7 +121,7 @@ def test_antigravity_mcp_env_passthrough() -> None:
 
 def test_antigravity_mcp_no_env_key_when_empty() -> None:
     """M13.2: no env key at all when the server has no env vars (unchanged from M13.1)."""
-    from cisterna.assets.bundle import AssetBundle, BundleMetadata, McpAsset
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, McpAsset
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),
@@ -136,7 +136,7 @@ def test_antigravity_mcp_no_env_key_when_empty() -> None:
 
 def test_antigravity_hook_content_bundles_script_file() -> None:
     """M13.2: a hook spec with content writes scripts/<script> and references it."""
-    from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),
@@ -160,7 +160,7 @@ def test_antigravity_hook_content_bundles_script_file() -> None:
 
 def test_antigravity_hook_without_content_no_script_file() -> None:
     """M13.2: a hook spec without content emits no scripts/ file (back-compat)."""
-    from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),

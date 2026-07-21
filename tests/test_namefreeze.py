@@ -3,7 +3,7 @@
 AC-NAMEFREEZE-1: AST lint asserts every emit_event name in v3_middleware.py
 is in BathosAdapter.ALLOWED_NAMES.
 AC-NAMEFREEZE-2: Adding a forbidden name like "mcp.call_begin" makes lint fail.
-AC-NAMEFREEZE-3: Lint covers cisterna's own adapters only (not consumer code).
+AC-NAMEFREEZE-3: Lint covers cisternal's own adapters only (not consumer code).
 AC-NAMEFREEZE-4: Runtime guard via _swallow_name_error raises when monkeypatched.
 """
 
@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.adapters.base import (
+from cisternal.adapters.base import (
     AdapterBase,
     BathosAdapter,
     ContemplexAdapter,
 )
-from cisterna.adapters.cli import CliAdapter
+from cisternal.adapters.cli import CliAdapter
 
 
 def _emit_event_names_in_file(path: Path) -> list[str]:
@@ -66,7 +66,7 @@ class TestAcNamefreeze1:
 
     def test_v3_middleware_names_are_allowed(self):
         """All emit_event names in v3_middleware.py must be in BathosAdapter.ALLOWED_NAMES."""
-        middleware_path = Path("src/cisterna/adapters/v3_middleware.py")
+        middleware_path = Path("src/cisternal/adapters/v3_middleware.py")
         assert middleware_path.exists(), f"File not found: {middleware_path}"
 
         names = _emit_event_names_in_file(middleware_path)
@@ -79,7 +79,7 @@ class TestAcNamefreeze1:
 
     def test_v2_decorator_names_are_allowed(self):
         """All emit_event names in v2_decorator.py must be in ALLOWED_NAMES."""
-        decorator_path = Path("src/cisterna/adapters/v2_decorator.py")
+        decorator_path = Path("src/cisternal/adapters/v2_decorator.py")
         assert decorator_path.exists(), f"File not found: {decorator_path}"
 
         names = _emit_event_names_in_file(decorator_path)
@@ -92,7 +92,7 @@ class TestAcNamefreeze1:
 
     def test_cli_adapter_names_are_allowed(self):
         """All emit_event names in cli.py must be in CliAdapter.ALLOWED_NAMES (spec §4.3)."""
-        cli_path = Path("src/cisterna/adapters/cli.py")
+        cli_path = Path("src/cisternal/adapters/cli.py")
         assert cli_path.exists(), f"File not found: {cli_path}"
 
         names = _emit_event_names_in_file(cli_path)
@@ -126,17 +126,17 @@ class TestAcNamefreeze2:
 
 
 class TestAcNamefreeze3:
-    """AC-NAMEFREEZE-3: Lint covers cisterna's own adapters only."""
+    """AC-NAMEFREEZE-3: Lint covers cisternal's own adapters only."""
 
     def test_adapters_directory_exists(self):
-        """Verify cisterna/adapters directory is in scope."""
-        adapters_dir = Path("src/cisterna/adapters")
+        """Verify cisternal/adapters directory is in scope."""
+        adapters_dir = Path("src/cisternal/adapters")
         assert adapters_dir.exists()
         assert adapters_dir.is_dir()
 
     def test_all_adapter_files_are_covered(self):
         """All .py files in adapters/ should be validated."""
-        adapters_dir = Path("src/cisterna/adapters")
+        adapters_dir = Path("src/cisternal/adapters")
         adapter_files = sorted(adapters_dir.glob("*.py"))
 
         # Should have base.py, v3_middleware.py, v2_decorator.py at minimum
@@ -180,8 +180,8 @@ class TestAcNamefreeze4:
 
     def test_allowed_names_in_emit_passes_without_swallow(self):
         """When name is in ALLOWED_NAMES, _swallow_name_error is not called."""
-        from cisterna.telemetry.exporter import ShadowExporter
-        from cisterna import init
+        from cisternal.telemetry.exporter import ShadowExporter
+        from cisternal import init
 
         shadow = ShadowExporter()
         init(exporters=[shadow], heartbeat_interval=0.05)

@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cisterna"
+name = "cisternal"
 version = "0.1.0a1"
 description = "Shared telemetry substrate and agent-asset export toolkit for the Praxia tool family"
 readme = "README.md"
@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/maraxen/cisterna"
-Repository = "https://github.com/maraxen/cisterna"
+Homepage = "https://github.com/maraxen/cisternal"
+Repository = "https://github.com/maraxen/cisternal"
 
 [project.optional-dependencies]
 otlp = [
@@ -51,13 +51,13 @@ dev = [
 ]
 
 [project.scripts]
-cisterna = "cisterna.cli:app"
+cisternal = "cisternal.cli:app"
 
-[project.entry-points."cisterna.emitters"]
-claude = "cisterna.export.registry:claude_factory"
-cursor = "cisterna.export.registry:cursor_factory"
-copilot = "cisterna.export.registry:copilot_factory"
-antigravity = "cisterna.export.registry:antigravity_factory"
+[project.entry-points."cisternal.emitters"]
+claude = "cisternal.export.registry:claude_factory"
+cursor = "cisternal.export.registry:cursor_factory"
+copilot = "cisternal.export.registry:copilot_factory"
+antigravity = "cisternal.export.registry:antigravity_factory"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -66,7 +66,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"cisterna.assets" = ["data/*.toml"]
+"cisternal.assets" = ["data/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

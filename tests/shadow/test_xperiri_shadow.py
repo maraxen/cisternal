@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import init
-from cisterna.adapters.base import XpeririAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import init
+from cisternal.adapters.base import XpeririAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.telemetry.exporter import ShadowExporter
 
 from .harness import assert_parity, capture_legacy
 
@@ -34,8 +34,8 @@ def temp_log_dir():
 @pytest.fixture(autouse=True)
 def cleanup():
     yield
-    from cisterna.telemetry import pipeline as pm
-    import cisterna.telemetry.self_obs as so_mod
+    from cisternal.telemetry import pipeline as pm
+    import cisternal.telemetry.self_obs as so_mod
 
     if pm._global_pipeline:
         pm._global_pipeline.shutdown()
@@ -65,10 +65,10 @@ def _wait_for_records(shadow: ShadowExporter, tool: str, min_count: int = 1) -> 
 
 
 class TestAcShadow3:
-    """AC-SHADOW-3: Xperiri stub pattern with legacy and cisterna parity."""
+    """AC-SHADOW-3: Xperiri stub pattern with legacy and cisternal parity."""
 
     def test_xperiri_shadow_parity(self, temp_log_dir: Path) -> None:
-        """Given xperiri legacy logger + cisterna shadow;
+        """Given xperiri legacy logger + cisternal shadow;
         When expert_list_tool called;
         Then parity passes on tool name overlap.
         """
@@ -96,7 +96,7 @@ class TestAcShadow3:
     def test_xperiri_shadow_start_end_ordering(self, temp_log_dir: Path) -> None:
         """Given xperiri traced tool;
         When called;
-        Then mcp.call_start precedes mcp.call_end in cisterna records.
+        Then mcp.call_start precedes mcp.call_end in cisternal records.
         """
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)

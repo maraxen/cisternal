@@ -6,9 +6,9 @@ from pathlib import Path
 
 from importlib.metadata import entry_points
 
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.export.claude import ClaudeEmitter
-from cisterna.export.registry import get_emitter, list_emitter_surfaces
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.export.claude import ClaudeEmitter
+from cisternal.export.registry import get_emitter, list_emitter_surfaces
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
@@ -16,8 +16,8 @@ FIXTURE_MANIFEST = (
 
 
 def test_entry_points_register_four_builtins() -> None:
-    """AC-M32-1: editable install exposes four cisterna.emitters entry points."""
-    names = {ep.name for ep in entry_points(group="cisterna.emitters")}
+    """AC-M32-1: editable install exposes four cisternal.emitters entry points."""
+    names = {ep.name for ep in entry_points(group="cisternal.emitters")}
     assert names == {"antigravity", "claude", "copilot", "cursor"}
 
 
@@ -52,7 +52,7 @@ def test_get_emitter_broken_factory_returns_none(monkeypatch) -> None:
         raise RuntimeError("broken factory")
 
     monkeypatch.setattr(
-        "cisterna.export.registry._load_entry_point_factories",
+        "cisternal.export.registry._load_entry_point_factories",
         lambda: {"cursor": _boom},
     )
     assert get_emitter("cursor") is None

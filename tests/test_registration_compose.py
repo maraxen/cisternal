@@ -1,4 +1,4 @@
-"""Tests for cisterna.registration — shim.py + compose.py (M2-COMPOSE, item 2141).
+"""Tests for cisternal.registration — shim.py + compose.py (M2-COMPOSE, item 2141).
 
 Acceptance criteria covered:
   AC-M2-2   — async original -> iscoroutinefunction(compose_mcp_callable(fn)) is True.
@@ -21,9 +21,9 @@ from typing import Annotated, Any
 import pytest
 from pydantic import Field
 
-from cisterna.registration.compose import compose_mcp_callable
-from cisterna.registration.registry import clear_registry
-from cisterna.telemetry import ShadowExporter, EventPipeline
+from cisternal.registration.compose import compose_mcp_callable
+from cisternal.registration.registry import clear_registry
+from cisternal.telemetry import ShadowExporter, EventPipeline
 
 
 # ---------------------------------------------------------------------------
@@ -320,13 +320,13 @@ class TestPassthroughNoTelemetry:
          here; we verify that compose_mcp_callable does not touch any telemetry
          mechanism directly).
 
-    Note: cisterna's telemetry pipeline is initialized separately (via
+    Note: cisternal's telemetry pipeline is initialized separately (via
     init_pipeline or EventPipeline constructor).  The spy pipeline created
     here is isolated and not registered as the global pipeline.  If the
     generated callable were to call any telemetry function that went through
     a different pipeline, those events would not appear in the spy.  The
     stronger guarantee (C5) is structural: the generated callable's code
-    references no adapter, no CisternaMiddleware, and no telemetry function
+    references no adapter, no CisternalMiddleware, and no telemetry function
     at all.  Both structural and behavioural checks are performed below.
     """
 
@@ -393,7 +393,7 @@ class TestPassthroughNoTelemetry:
         """AC-M2-6: structural check — generated callable's closure references no adapter.
 
         Inspects the closures and global references of the generated callable
-        to confirm that no adapter, CisternaMiddleware, or telemetry emit
+        to confirm that no adapter, CisternalMiddleware, or telemetry emit
         function is captured.
         """
         def my_fn(x: int) -> int:
@@ -406,7 +406,7 @@ class TestPassthroughNoTelemetry:
         # 'dispatch' from shim.py — no adapters.
         fn_globals = getattr(generated, "__globals__", {})
         forbidden_names = {
-            "CisternaMiddleware",
+            "CisternalMiddleware",
             "AdapterBase",
             "emit_start",
             "emit_end",
@@ -444,7 +444,7 @@ class TestShimDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_async_fn(self):
         """shim.dispatch awaits async originals."""
-        from cisterna.registration.shim import dispatch
+        from cisternal.registration.shim import dispatch
 
         async def my_async(x: int) -> int:
             return x + 1
@@ -455,7 +455,7 @@ class TestShimDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_sync_fn(self):
         """shim.dispatch calls sync originals directly."""
-        from cisterna.registration.shim import dispatch
+        from cisternal.registration.shim import dispatch
 
         def my_sync(x: int) -> int:
             return x * 3
@@ -465,7 +465,7 @@ class TestShimDispatch:
 
     def test_is_async_true_for_async_fn(self):
         """shim.is_async returns True for async def."""
-        from cisterna.registration.shim import is_async
+        from cisternal.registration.shim import is_async
 
         async def fn() -> None:
             pass
@@ -474,7 +474,7 @@ class TestShimDispatch:
 
     def test_is_async_false_for_sync_fn(self):
         """shim.is_async returns False for plain def."""
-        from cisterna.registration.shim import is_async
+        from cisternal.registration.shim import is_async
 
         def fn() -> None:
             pass
@@ -483,7 +483,7 @@ class TestShimDispatch:
 
     def test_cli_dispatch_sync_fn(self):
         """cli_dispatch calls a sync fn directly and returns its value."""
-        from cisterna.registration.shim import cli_dispatch
+        from cisternal.registration.shim import cli_dispatch
 
         def add(a: int, b: int) -> int:
             return a + b
@@ -493,13 +493,13 @@ class TestShimDispatch:
 
     @pytest.mark.asyncio
     async def test_cli_dispatch_async_fn_running_loop_raises(self):
-        """TBD-M2-3: cli_dispatch raises CisternaWireError when loop already running."""
-        from cisterna.registration.shim import cli_dispatch
-        from cisterna.registration.errors import CisternaWireError
+        """TBD-M2-3: cli_dispatch raises CisternalWireError when loop already running."""
+        from cisternal.registration.shim import cli_dispatch
+        from cisternal.registration.errors import CisternalWireError
 
         async def my_async_fn(x: int) -> int:
             return x
 
         # Inside this async test a loop IS running, so cli_dispatch must raise.
-        with pytest.raises(CisternaWireError, match="event loop is already running"):
+        with pytest.raises(CisternalWireError, match="event loop is already running"):
             cli_dispatch(my_async_fn, 1)

@@ -1,6 +1,6 @@
 """AC-SHADOW-1: Bathos shadow test for parity verification.
 
-Tests that bathos legacy telemetry and cisterna shadow capture the same
+Tests that bathos legacy telemetry and cisternal shadow capture the same
 tool invocations with matching event names and field parity.
 
 Schema notes:
@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import init
-from cisterna.adapters.base import BathosAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import init
+from cisternal.adapters.base import BathosAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.telemetry.exporter import ShadowExporter
 from .harness import assert_parity, capture_legacy
 
 _bathos_logger = logging.getLogger("bathos")
@@ -35,8 +35,8 @@ def temp_log_dir():
 def cleanup():
     """Clean up pipeline and self-observability state between tests."""
     yield
-    from cisterna.telemetry import pipeline as pm
-    import cisterna.telemetry.self_obs as so_mod
+    from cisternal.telemetry import pipeline as pm
+    import cisternal.telemetry.self_obs as so_mod
 
     if pm._global_pipeline:
         pm._global_pipeline.shutdown()
@@ -56,12 +56,12 @@ def cleanup():
 
 
 class TestAcShadow1:
-    """AC-SHADOW-1: Bathos stub pattern with legacy and cisterna parity."""
+    """AC-SHADOW-1: Bathos stub pattern with legacy and cisternal parity."""
 
     def test_bathos_shadow_parity(self, temp_log_dir):
-        """Given bathos legacy telemetry + cisterna shadow active;
+        """Given bathos legacy telemetry + cisternal shadow active;
         When list_runs_tool called;
-        Then capture_legacy("bathos") and capture_cisterna each captured >=1 matching record;
+        Then capture_legacy("bathos") and capture_cisternal each captured >=1 matching record;
         parity passes.
         """
         shadow = ShadowExporter()
@@ -80,19 +80,19 @@ class TestAcShadow1:
             list_runs_tool()
             time.sleep(0.05)  # Allow events to export
 
-        # Get cisterna records for this tool
+        # Get cisternal records for this tool
         mcp_records = [
             r for r in shadow.records if r.fields.get("tool") == "list_runs_tool"
         ]
 
         assert len(legacy) >= 1, "Legacy stream must have >= 1 record"
-        assert len(mcp_records) >= 1, "Cisterna stream must have >= 1 record"
+        assert len(mcp_records) >= 1, "Cisternal stream must have >= 1 record"
         assert_parity(legacy, mcp_records)
 
     def test_bathos_shadow_start_end_ordering(self, temp_log_dir):
         """Given bathos legacy telemetry;
         When list_runs_tool called;
-        Then mcp.call_start appears before mcp.call_end in cisterna records.
+        Then mcp.call_start appears before mcp.call_end in cisternal records.
         """
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)

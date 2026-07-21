@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-import cisterna
-from cisterna.adapters.base import ContemplexAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.telemetry.exporter import ExporterBase, ShadowExporter
-from cisterna.telemetry.otlp_exporter import OtlpExporter, otlp_sdk_available
-from cisterna.telemetry.pipeline import get_pipeline, shutdown_pipeline
-from cisterna.telemetry.record import Record
+import cisternal
+from cisternal.adapters.base import ContemplexAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.telemetry.exporter import ExporterBase, ShadowExporter
+from cisternal.telemetry.otlp_exporter import OtlpExporter, otlp_sdk_available
+from cisternal.telemetry.pipeline import get_pipeline, shutdown_pipeline
+from cisternal.telemetry.record import Record
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +37,8 @@ def test_jsonl_only_when_otlp_endpoint_unset(
     tmp_path: Path,
 ) -> None:
     """AC-M7-1a: unset endpoint → JsonlExporter only."""
-    monkeypatch.delenv("CISTERNA_OTLP_ENDPOINT", raising=False)
-    cisterna.init(log_dir=tmp_path, heartbeat_interval=30.0)
+    monkeypatch.delenv("CISTERNAL_OTLP_ENDPOINT", raising=False)
+    cisternal.init(log_dir=tmp_path, heartbeat_interval=30.0)
     types = _exporter_types()
     assert "JsonlExporter" in types
     assert "OtlpExporter" not in types
@@ -50,8 +50,8 @@ def test_dual_export_when_otlp_endpoint_set(
     tmp_path: Path,
 ) -> None:
     """AC-M7-1b: endpoint set → JsonlExporter + OtlpExporter."""
-    monkeypatch.setenv("CISTERNA_OTLP_ENDPOINT", "http://localhost:4317")
-    cisterna.init(log_dir=tmp_path, heartbeat_interval=30.0)
+    monkeypatch.setenv("CISTERNAL_OTLP_ENDPOINT", "http://localhost:4317")
+    cisternal.init(log_dir=tmp_path, heartbeat_interval=30.0)
     types = _exporter_types()
     assert "JsonlExporter" in types
     assert "OtlpExporter" in types
@@ -74,12 +74,12 @@ def test_raising_otlp_exporter_does_not_break_jsonl(
             pass
 
     shadow = ShadowExporter()
-    cisterna.init(
+    cisternal.init(
         log_dir=tmp_path,
         exporters=[RaisingOtlp(), shadow],
         heartbeat_interval=30.0,
     )
-    cisterna.emit_event("test.event", field="value")
+    cisternal.emit_event("test.event", field="value")
 
     deadline = time.monotonic() + 1.0
     while time.monotonic() < deadline and len(shadow.records) < 1:
@@ -99,7 +99,7 @@ def test_call_pair_exports_span_with_tool_attribute(tmp_path: Path) -> None:
     memory = InMemorySpanExporter()
     otlp = OtlpExporter(span_exporter=memory)
     shadow = ShadowExporter()
-    cisterna.init(
+    cisternal.init(
         log_dir=tmp_path,
         exporters=[otlp, shadow],
         heartbeat_interval=30.0,
@@ -132,20 +132,20 @@ def test_heartbeat_dropped_from_otlp(tmp_path: Path) -> None:
 
     memory = InMemorySpanExporter()
     otlp = OtlpExporter(span_exporter=memory)
-    cisterna.init(
+    cisternal.init(
         log_dir=tmp_path,
         exporters=[otlp],
         heartbeat_interval=30.0,
     )
 
-    cisterna.emit_event("telemetry.heartbeat", pipeline_alive=True)
+    cisternal.emit_event("telemetry.heartbeat", pipeline_alive=True)
     otlp.flush()
 
     assert len(memory.get_finished_spans()) == 0
 
 
 def test_sdk_lazy_until_otlp_init(tmp_path: Path) -> None:
-    """AC-M7-0b: importing cisterna does not load opentelemetry.sdk until OTLP init."""
+    """AC-M7-0b: importing cisternal does not load opentelemetry.sdk until OTLP init."""
     if not otlp_sdk_available():
         pytest.skip("opentelemetry-sdk not installed")
 
@@ -155,15 +155,15 @@ import sys
 from pathlib import Path
 
 for name in list(sys.modules):
-    if name.startswith("cisterna") or name.startswith("opentelemetry.sdk"):
+    if name.startswith("cisternal") or name.startswith("opentelemetry.sdk"):
         del sys.modules[name]
 
-importlib.import_module("cisterna")
+importlib.import_module("cisternal")
 assert "opentelemetry.sdk.trace" not in sys.modules
 
 import os
-os.environ["CISTERNA_OTLP_ENDPOINT"] = "http://localhost:4317"
-mod = importlib.import_module("cisterna")
+os.environ["CISTERNAL_OTLP_ENDPOINT"] = "http://localhost:4317"
+mod = importlib.import_module("cisternal")
 mod.init(log_dir={str(tmp_path)!r}, heartbeat_interval=30.0)
 assert "opentelemetry.sdk.trace" in sys.modules
 mod.get_pipeline().shutdown()

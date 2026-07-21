@@ -1,4 +1,4 @@
-"""Tests for cisterna core: AC-CORE acceptance criteria."""
+"""Tests for cisternal core: AC-CORE acceptance criteria."""
 
 import asyncio
 import json
@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import emit_event, init, span, aspan, status
-from cisterna.telemetry.context import run_uuid_var
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import emit_event, init, span, aspan, status
+from cisternal.telemetry.context import run_uuid_var
+from cisternal.telemetry.exporter import ShadowExporter
 
 
 @pytest.fixture
@@ -25,8 +25,8 @@ def cleanup_pipeline():
     """Clean up pipeline between tests."""
     yield
     # Shutdown any existing pipeline
-    from cisterna.telemetry import pipeline as pipeline_module
-    from cisterna.telemetry import self_obs as self_obs_module
+    from cisternal.telemetry import pipeline as pipeline_module
+    from cisternal.telemetry import self_obs as self_obs_module
 
     if pipeline_module._global_pipeline is not None:
         pipeline_module._global_pipeline.shutdown()
@@ -198,7 +198,7 @@ class TestACCore5:
 
     def test_idempotent_init(self, temp_log_dir):
         """Given init() called twice; When status(); Then exactly one QueueListener thread."""
-        from cisterna.telemetry import pipeline as pipeline_module
+        from cisternal.telemetry import pipeline as pipeline_module
 
         init(log_dir=temp_log_dir)
         first_pipeline = pipeline_module._global_pipeline

@@ -5,8 +5,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from cisterna.telemetry.exporter import JsonlExporter
-from cisterna.telemetry.record import Record
+from cisternal.telemetry.exporter import JsonlExporter
+from cisternal.telemetry.record import Record
 
 
 class TestJsonlExporter:
@@ -87,7 +87,7 @@ class TestJsonlExporterDrops:
     def test_drop_on_full_queue(self):
         """Given bounded queue; When capacity exceeded; Then drop_count incremented."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            from cisterna.telemetry.pipeline import EventPipeline
+            from cisternal.telemetry.pipeline import EventPipeline
 
             path = Path(tmpdir) / "test.jsonl"
             exporter = JsonlExporter(path, max_bytes=10_485_760, backup_count=5)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cisterna.adapters.base import MyxcelAdapter
+from cisternal.adapters.base import MyxcelAdapter
 
 
 class TestMyxcelAdapterShape:

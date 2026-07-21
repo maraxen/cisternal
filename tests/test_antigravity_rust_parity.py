@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from cisterna.assets.bridge import (
+from cisternal.assets.bridge import (
     conformance_expected_path,
     conformance_manifest_path,
     resolve_bundle_hash_bin,
     rust_surface_digest,
 )
-from cisterna.assets.load import load_asset_report
-from cisterna.assets.validate_golden import (
+from cisternal.assets.load import load_asset_report
+from cisternal.assets.validate_golden import (
     emit_rust_parity_files,
     rust_parity_golden_digest_path,
     surface_digest_rust_parity,
 )
-from cisterna.export.antigravity import AntigravityEmitter
+from cisternal.export.antigravity import AntigravityEmitter
 
 _MANIFEST = conformance_manifest_path()
 
@@ -65,7 +65,7 @@ def test_antigravity_rust_parity_emit_file_set() -> None:
 
 @pytest.mark.skipif(
     resolve_bundle_hash_bin() is None,
-    reason="CISTERNA_PRAXIA_ASSETS_BIN unset",
+    reason="CISTERNAL_PRAXIA_ASSETS_BIN unset",
 )
 def test_antigravity_rust_parity_matches_subprocess() -> None:
     bundle = load_asset_report(manifest=_MANIFEST).bundle

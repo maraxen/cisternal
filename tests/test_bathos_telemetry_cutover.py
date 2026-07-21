@@ -6,12 +6,12 @@ import time
 
 import pytest
 
-import cisterna
-from cisterna.adapters.base import BathosAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.probe.telemetry_env import consumer_telemetry_enabled
-from cisterna.telemetry.exporter import ShadowExporter
-from cisterna.telemetry.pipeline import shutdown_pipeline
+import cisternal
+from cisternal.adapters.base import BathosAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.probe.telemetry_env import consumer_telemetry_enabled
+from cisternal.telemetry.exporter import ShadowExporter
+from cisternal.telemetry.pipeline import shutdown_pipeline
 
 
 @pytest.fixture(autouse=True)
@@ -22,8 +22,8 @@ def _reset_pipeline() -> None:
 
 
 def test_consumer_telemetry_enabled_bathos_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC-M6-2a: CISTERNA_TELEMETRY=bathos enables bathos."""
-    monkeypatch.setenv("CISTERNA_TELEMETRY", "bathos")
+    """AC-M6-2a: CISTERNAL_TELEMETRY=bathos enables bathos."""
+    monkeypatch.setenv("CISTERNAL_TELEMETRY", "bathos")
     assert consumer_telemetry_enabled("bathos") is True
 
 
@@ -31,7 +31,7 @@ def test_consumer_telemetry_disabled_when_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC-M6-2b: unset env → disabled."""
-    monkeypatch.delenv("CISTERNA_TELEMETRY", raising=False)
+    monkeypatch.delenv("CISTERNAL_TELEMETRY", raising=False)
     assert consumer_telemetry_enabled("bathos") is False
 
 
@@ -40,11 +40,11 @@ def test_traced_tool_emits_when_cutover_enabled(
     tmp_path,
 ) -> None:
     """AC-M6-2c: traced_tool + BathosAdapter emits mcp.call_start."""
-    monkeypatch.setenv("CISTERNA_TELEMETRY", "bathos")
+    monkeypatch.setenv("CISTERNAL_TELEMETRY", "bathos")
     assert consumer_telemetry_enabled("bathos")
 
     shadow = ShadowExporter()
-    cisterna.init(log_dir=tmp_path, exporters=[shadow], heartbeat_interval=30.0)
+    cisternal.init(log_dir=tmp_path, exporters=[shadow], heartbeat_interval=30.0)
 
     @traced_tool(BathosAdapter())
     def demo_tool(msg: str) -> dict:

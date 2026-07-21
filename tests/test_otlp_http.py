@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-import cisterna
-from cisterna.adapters.base import ContemplexAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.telemetry.otlp_exporter import (
+import cisternal
+from cisternal.adapters.base import ContemplexAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.telemetry.otlp_exporter import (
     OtlpExporter,
     create_otlp_span_exporter,
     otlp_sdk_available,
     resolve_otlp_protocol,
 )
-from cisterna.telemetry.pipeline import get_pipeline, shutdown_pipeline
+from cisternal.telemetry.pipeline import get_pipeline, shutdown_pipeline
 
 
 @pytest.fixture(autouse=True)
@@ -51,9 +51,9 @@ def test_resolve_otlp_protocol(
     expected: str,
 ) -> None:
     if env_value:
-        monkeypatch.setenv("CISTERNA_OTLP_PROTOCOL", env_value)
+        monkeypatch.setenv("CISTERNAL_OTLP_PROTOCOL", env_value)
     else:
-        monkeypatch.delenv("CISTERNA_OTLP_PROTOCOL", raising=False)
+        monkeypatch.delenv("CISTERNAL_OTLP_PROTOCOL", raising=False)
     assert resolve_otlp_protocol() == expected
 
 
@@ -82,10 +82,10 @@ def test_dual_export_when_http_protocol_set(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """AC-M7.1-1b: CISTERNA_OTLP_PROTOCOL=http still attaches OtlpExporter."""
-    monkeypatch.setenv("CISTERNA_OTLP_ENDPOINT", "http://localhost:4318")
-    monkeypatch.setenv("CISTERNA_OTLP_PROTOCOL", "http")
-    cisterna.init(log_dir=tmp_path, heartbeat_interval=30.0)
+    """AC-M7.1-1b: CISTERNAL_OTLP_PROTOCOL=http still attaches OtlpExporter."""
+    monkeypatch.setenv("CISTERNAL_OTLP_ENDPOINT", "http://localhost:4318")
+    monkeypatch.setenv("CISTERNAL_OTLP_PROTOCOL", "http")
+    cisternal.init(log_dir=tmp_path, heartbeat_interval=30.0)
     pipeline = get_pipeline()
     assert pipeline is not None
     types = [type(e).__name__ for e in pipeline._exporters]
@@ -99,9 +99,9 @@ def test_grpc_collector_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     if not _collector_port_open("127.0.0.1", 4317):
         pytest.skip("otel-collector gRPC not listening on 4317")
 
-    monkeypatch.setenv("CISTERNA_OTLP_ENDPOINT", "http://localhost:4317")
-    monkeypatch.delenv("CISTERNA_OTLP_PROTOCOL", raising=False)
-    cisterna.init(log_dir=tmp_path, heartbeat_interval=30.0)
+    monkeypatch.setenv("CISTERNAL_OTLP_ENDPOINT", "http://localhost:4317")
+    monkeypatch.delenv("CISTERNAL_OTLP_PROTOCOL", raising=False)
+    cisternal.init(log_dir=tmp_path, heartbeat_interval=30.0)
 
     @traced_tool(ContemplexAdapter())
     def smoke_tool(msg: str) -> str:
@@ -125,9 +125,9 @@ def test_http_collector_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     if not _collector_port_open("127.0.0.1", 4318):
         pytest.skip("otel-collector HTTP not listening on 4318")
 
-    monkeypatch.setenv("CISTERNA_OTLP_ENDPOINT", "http://localhost:4318")
-    monkeypatch.setenv("CISTERNA_OTLP_PROTOCOL", "http")
-    cisterna.init(log_dir=tmp_path, heartbeat_interval=30.0)
+    monkeypatch.setenv("CISTERNAL_OTLP_ENDPOINT", "http://localhost:4318")
+    monkeypatch.setenv("CISTERNAL_OTLP_PROTOCOL", "http")
+    cisternal.init(log_dir=tmp_path, heartbeat_interval=30.0)
 
     @traced_tool(ContemplexAdapter())
     def smoke_tool(msg: str) -> str:
