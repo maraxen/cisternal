@@ -25,6 +25,10 @@ dependencies = [
     "opentelemetry-api>=1.42.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/maraxen/cisterna"
+Repository = "https://github.com/maraxen/cisterna"
+
 [project.optional-dependencies]
 otlp = [
     "opentelemetry-sdk>=1.42.1",
