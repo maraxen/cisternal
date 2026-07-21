@@ -43,7 +43,7 @@ def test_export_surface_cursor_writes_layout(tmp_path: Path) -> None:
 
 
 def test_export_surface_antigravity_writes_layout(tmp_path: Path) -> None:
-    """AC-M31c-5: export --surface antigravity writes gemini-extension layout."""
+    """M13.1: export --surface antigravity writes the real plugin layout (no agents)."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
@@ -60,8 +60,11 @@ def test_export_surface_antigravity_writes_layout(tmp_path: Path) -> None:
         ]
     )
 
-    assert (out_dir / "gemini-extension.json").is_file()
-    assert (out_dir / "agents" / "recon.md").is_file()
+    assert (out_dir / "plugin.json").is_file()
+    assert (out_dir / "skills" / "demo-skill" / "SKILL.md").is_file()
+    assert (out_dir / "hooks.json").is_file()
+    assert not (out_dir / "agents").exists()
+    assert not (out_dir / "gemini-extension.json").exists()
 
 
 def test_export_unknown_surface_exits_two(tmp_path: Path) -> None:

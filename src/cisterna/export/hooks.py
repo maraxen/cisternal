@@ -57,3 +57,52 @@ def build_claude_style_hooks(
     if post_tool:
         root["PostToolUse"] = post_tool
     return root
+
+
+_ANTIGRAVITY_MATCHER_REMAP = {"Bash": "run_command"}
+
+
+def build_antigravity_hooks(
+    hook_specs: tuple[HookSpecAsset, ...],
+    plugin_name: str,
+) -> dict[str, dict[str, list[dict[str, object]]]]:
+    """Antigravity-shaped hooks (mirrors praxia bundle_antigravity.rs, M13.1).
+
+    Schema differs from Claude/Cursor/Copilot's ``build_claude_style_hooks``:
+    - Only ``PreToolUse``/``PostToolUse`` are supported; every other event is
+      silently dropped (Antigravity has no other hook events).
+    - Entries aggregate by matcher: multiple hooks sharing a matcher within
+      the same event append into one entry's ``hooks`` list, rather than one
+      entry per hook.
+    - The ``Bash`` matcher remaps to ``run_command``; all other matchers
+      pass through unchanged.
+    - The whole object nests one level deeper than Claude's shape, under an
+      arbitrary top-level key — *plugin_name* is used here (praxia's own
+      in-progress adapter hardcodes ``"praxia"`` since it exports itself;
+      cisterna is a generic exporter, so the bundle's own name is the
+      sensible general default).
+    """
+    pre_tool: list[dict[str, object]] = []
+    post_tool: list[dict[str, object]] = []
+
+    for spec in hook_specs:
+        if spec.event not in ("PreToolUse", "PostToolUse"):
+            continue
+
+        matcher = _ANTIGRAVITY_MATCHER_REMAP.get(spec.matcher, spec.matcher)
+        hook_cmd: dict[str, str] = {"type": "command", "command": spec.script}
+        bucket = pre_tool if spec.event == "PreToolUse" else post_tool
+
+        existing = next((e for e in bucket if e["matcher"] == matcher), None)
+        if existing is not None:
+            existing["hooks"].append(hook_cmd)  # type: ignore[union-attr]
+        else:
+            bucket.append({"matcher": matcher, "hooks": [hook_cmd]})
+
+    events: dict[str, list[dict[str, object]]] = {}
+    if pre_tool:
+        events["PreToolUse"] = pre_tool
+    if post_tool:
+        events["PostToolUse"] = post_tool
+
+    return {plugin_name: events}

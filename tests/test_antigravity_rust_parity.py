@@ -35,11 +35,21 @@ def test_antigravity_rust_parity_golden_tree() -> None:
     assert golden.read_text(encoding="utf-8").strip() == digest
 
 
-def test_antigravity_legacy_emit_unchanged() -> None:
+def test_antigravity_legacy_emit_reflects_m13_1_real_plugin_format() -> None:
+    """M13.1 intentionally diverges legacy (non-rust-parity) mode from the
+    frozen rust-parity shape below: real Antigravity plugins have no
+    file-based agent registration and use a root ``hooks.json``, not
+    ``hooks/hooks.json``. The rust-parity path (exercised by the other tests
+    in this file) is untouched — it stays pinned to praxia's last-committed
+    Antigravity adapter until that side lands its own M13.1-equivalent
+    rewrite and conformance goldens are regenerated.
+    """
     bundle = load_asset_report(manifest=_MANIFEST).bundle
     files = AntigravityEmitter().emit(bundle)
-    assert "agents/recon.md" in files
-    assert "hooks/hooks.json" in files
+    assert "agents/recon.md" not in files
+    assert not any(path.startswith("agents/") for path in files)
+    assert "hooks.json" in files
+    assert "hooks/hooks.json" not in files
 
 
 def test_antigravity_rust_parity_emit_file_set() -> None:

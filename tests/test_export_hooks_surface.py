@@ -67,7 +67,7 @@ def test_antigravity_only_hook_not_on_cursor_export() -> None:
     anti_files = AntigravityEmitter().emit(bundle)
     cursor_files = CursorEmitter().emit(bundle)
 
-    assert "hooks/hooks.json" in anti_files
+    assert "hooks.json" in anti_files
     assert "hooks/hooks.json" not in cursor_files
 
 
