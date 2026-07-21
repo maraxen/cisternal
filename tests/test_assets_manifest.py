@@ -108,3 +108,65 @@ claude_code = ["commands/missing.md"]
     assert report.bundle.commands[0].name == "missing"
     assert report.bundle.commands[0].body == ""
     assert any("missing" in w for w in report.warnings)
+
+
+def test_manifest_hook_spec_path_loads_content(tmp_path: Path) -> None:
+    """M13.2: hook_specs entry with a path key populates HookSpecAsset.content."""
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "hooks").mkdir()
+    (manifest_dir / "hooks" / "pre.sh").write_text(
+        "#!/bin/bash\necho pre\n", encoding="utf-8"
+    )
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "pre.sh"
+path = "hooks/pre.sh"
+""".strip(),
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.script == "pre.sh"
+    assert spec.content == "#!/bin/bash\necho pre\n"
+    assert report.warnings == ()
+
+
+def test_manifest_hook_spec_no_path_leaves_content_empty() -> None:
+    """M13.2: hook_specs entries without a path key are unaffected (back-compat)."""
+    report = ManifestAssetSource(MANIFEST).load()
+    assert report.bundle.hook_specs[0].content == ""
+
+
+def test_manifest_hook_spec_missing_path_warns_never_raises(tmp_path: Path) -> None:
+    """M13.2: a path pointing at a missing file warns, doesn't raise; content stays empty."""
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "pre.sh"
+path = "hooks/missing.sh"
+""".strip(),
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    assert report.bundle.hook_specs[0].content == ""
+    assert any("pre.sh" in w for w in report.warnings)

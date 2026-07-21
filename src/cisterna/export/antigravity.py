@@ -30,11 +30,19 @@ Output files (non-rust-parity mode):
         remaps to ``run_command``. Built via
         ``cisterna.export.hooks.build_antigravity_hooks``.
 
+    ``scripts/<script>``
+        One per hook spec (filtered for "antigravity") with non-empty
+        ``content`` — the manifest populates this only when the hook_specs
+        entry sets a ``path`` key (mirrors how skills/agents load a body
+        from a ``path``). Specs without a ``path`` emit no script file, same
+        as before M13.2.
+
     ``mcp_config.json`` (plugin root, NOT ``.mcp.json``)
         Present only when ``bundle.mcp_servers`` is non-empty:
-        ``{"mcpServers": {name: {"command": <first token>, "args": [...rest]}}}``
+        ``{"mcpServers": {name: {"command": <first token>, "args": [...rest], "env": {...}}}}``
         — command is split into a bare string plus an args array, unlike
-        Claude's ``{"command": [...]}`` array-only shape.
+        Claude's ``{"command": [...]}`` array-only shape. ``env`` is present
+        only when non-empty.
 
 NOT emitted, intentionally:
     - ``agents/`` — Antigravity has no file-based agent/subagent registration.
@@ -42,19 +50,23 @@ NOT emitted, intentionally:
       never written even when the bundle has them) and by direct testing.
     - A rules directory — Antigravity rules live outside the plugin system.
 
-Known open gaps vs. the praxia reference (flagged, not silently resolved):
-    - MCP server ``env`` vars are not carried through, matching praxia's
-      current WIP adapter — which also drops them. Unclear whether that's
-      deliberate or an oversight upstream; worth reconciling once praxia's
-      change lands and this module can be re-checked against it.
-    - Praxia's adapter also bundles hook script *bodies* into
-      ``scripts/<script>`` files (referenced as ``./scripts/<script>`` in
-      hooks.json), because its ``HookSpecAsset`` carries a ``content``
-      field. Cisterna's ``HookSpecAsset`` has no equivalent field yet, so
-      ``spec.script`` is used as-is in the ``command`` field here — the same
-      external-reference convention the other three surfaces already use.
-      Self-contained script bundling is a follow-up once cisterna's asset
-      model grows a content field, not something to smuggle in here.
+M13.2 resolved two gaps left open by M13.1, deliberately diverging from
+praxia's current WIP reference rather than copying it as-is — flagging both
+since they're judgment calls, not confirmed against a live Antigravity test:
+    - MCP ``env`` vars now pass through. Praxia's WIP adapter drops them
+      entirely; there's no evidence Antigravity's mcp_config.json schema
+      rejects an ``env`` key (every other MCP client config here supports
+      one), so silently matching what looks more like an upstream oversight
+      than a deliberate omission seemed worse than the alternative. Worth
+      confirming empirically, and reconciling with praxia's side once it
+      lands.
+    - Hook script bodies now bundle into ``scripts/<script>`` when the
+      manifest gives the hook_specs entry a ``path`` (new: ``HookSpecAsset.
+      content``, populated the same way skill/agent bodies already are).
+      Specs without a ``path`` still reference ``spec.script`` as a literal
+      command, same as Claude/Cursor/Copilot — switching to a ``./scripts/``
+      reference without a bundled file would just dangle, so that path is
+      deliberately NOT unconditional the way praxia's adapter is.
 
 The rust-parity codepath (``antigravity_rust.py``) is untouched — it is
 pinned to praxia's last-*committed* Antigravity shape (still the old
@@ -115,6 +127,10 @@ class AntigravityEmitter(Emitter):
 
         hook_specs = hooks_for_surface(bundle.hook_specs, "antigravity")
         if hook_specs:
+            for spec in hook_specs:
+                if spec.content:
+                    files[f"scripts/{spec.script}"] = spec.content
+
             hooks_root = build_antigravity_hooks(hook_specs, bundle.metadata.name)
             files[_HOOKS_JSON_PATH] = json.dumps(hooks_root, sort_keys=True, indent=2)
 
@@ -127,6 +143,8 @@ class AntigravityEmitter(Emitter):
                 }
                 if len(command) > 1:
                     server_obj["args"] = command[1:]
+                if srv.env:
+                    server_obj["env"] = dict(srv.env)
                 mcp_servers[srv.name] = server_obj
             files[_MCP_JSON_PATH] = json.dumps(
                 {"mcpServers": mcp_servers},

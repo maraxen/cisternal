@@ -96,3 +96,83 @@ def test_antigravity_unsupported_hook_events_dropped() -> None:
     hooks = json.loads(files["hooks.json"])
 
     assert set(hooks["p"]) == {"PreToolUse"}
+
+
+def test_antigravity_mcp_env_passthrough() -> None:
+    """M13.2: mcp_config.json carries env vars through when present."""
+    from cisterna.assets.bundle import AssetBundle, BundleMetadata, McpAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        mcp_servers=(
+            McpAsset(
+                name="test-mcp",
+                command=("uv", "run", "python", "server.py"),
+                env=(("FOO", "bar"), ("BAZ", "qux")),
+            ),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+    server = json.loads(files["mcp_config.json"])["mcpServers"]["test-mcp"]
+
+    assert server["env"] == {"FOO": "bar", "BAZ": "qux"}
+
+
+def test_antigravity_mcp_no_env_key_when_empty() -> None:
+    """M13.2: no env key at all when the server has no env vars (unchanged from M13.1)."""
+    from cisterna.assets.bundle import AssetBundle, BundleMetadata, McpAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        mcp_servers=(McpAsset(name="test-mcp", command=("uv", "run", "server.py")),),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+    server = json.loads(files["mcp_config.json"])["mcpServers"]["test-mcp"]
+
+    assert "env" not in server
+
+
+def test_antigravity_hook_content_bundles_script_file() -> None:
+    """M13.2: a hook spec with content writes scripts/<script> and references it."""
+    from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(
+            HookSpecAsset(
+                event="PreToolUse",
+                matcher="Bash",
+                script="pre.sh",
+                content="#!/bin/bash\necho pre\n",
+            ),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+
+    assert files["scripts/pre.sh"] == "#!/bin/bash\necho pre\n"
+    hooks = json.loads(files["hooks.json"])
+    entry = hooks["p"]["PreToolUse"][0]
+    assert entry["hooks"] == [{"type": "command", "command": "./scripts/pre.sh"}]
+
+
+def test_antigravity_hook_without_content_no_script_file() -> None:
+    """M13.2: a hook spec without content emits no scripts/ file (back-compat)."""
+    from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(
+            HookSpecAsset(event="PreToolUse", matcher="Bash", script="pre.sh"),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+
+    assert "scripts/pre.sh" not in files
+    assert not any(path.startswith("scripts/") for path in files)
+    hooks = json.loads(files["hooks.json"])
+    entry = hooks["p"]["PreToolUse"][0]
+    assert entry["hooks"] == [{"type": "command", "command": "pre.sh"}]

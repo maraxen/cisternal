@@ -50,7 +50,7 @@ class ManifestAssetSource:
 
         skills = _load_skills(plugin, self._root, warnings)
         agents = _load_agents(plugin, self._root, warnings)
-        hook_specs = _load_hook_specs(plugin)
+        hook_specs = _load_hook_specs(plugin, self._root, warnings)
         mcp_servers = _load_mcp(plugin, name)
         commands = load_export_commands(plugin, self._root, warnings)
         warnings.extend(validate_extension_sections(plugin, self._root))
@@ -143,7 +143,11 @@ def _load_agents(
     return tuple(agents)
 
 
-def _load_hook_specs(plugin: dict[str, object]) -> tuple[HookSpecAsset, ...]:
+def _load_hook_specs(
+    plugin: dict[str, object],
+    root: Path,
+    warnings: list[str],
+) -> tuple[HookSpecAsset, ...]:
     entries = plugin.get("hook_specs")
     if not isinstance(entries, list):
         return ()
@@ -161,6 +165,13 @@ def _load_hook_specs(plugin: dict[str, object]) -> tuple[HookSpecAsset, ...]:
         surfaces: tuple[str, ...] = ()
         if isinstance(surfaces_raw, list):
             surfaces = tuple(str(s) for s in surfaces_raw)
+
+        content = ""
+        rel = str(entry.get("path") or "")
+        if rel:
+            text = _read_text(root / rel, warnings, f"hook script {script!r}")
+            content = text if text is not None else ""
+
         specs.append(
             HookSpecAsset(
                 event=event,
@@ -168,6 +179,7 @@ def _load_hook_specs(plugin: dict[str, object]) -> tuple[HookSpecAsset, ...]:
                 script=script,
                 tier=tier,
                 surfaces=surfaces,
+                content=content,
             )
         )
     return tuple(specs)

@@ -104,13 +104,23 @@ class AgentAsset:
 
 @dataclass(frozen=True, slots=True)
 class HookSpecAsset:
-    """A hook specification asset entry."""
+    """A hook specification asset entry.
+
+    ``content`` (M13.2) is the hook script's body, populated only when the
+    manifest entry sets a ``path`` key (mirrors ``SkillAsset``/``AgentAsset``
+    loading). Empty by default — most surfaces (claude/cursor/copilot)
+    ignore it and treat ``script`` as a literal command string, matching
+    prior behavior exactly. Antigravity is the one surface that uses
+    ``content`` when present, to bundle a self-contained ``scripts/<script>``
+    file rather than referencing an external path.
+    """
 
     event: str
     matcher: str
     script: str
     tier: str = ""
     surfaces: tuple[str, ...] = ()
+    content: str = ""
 
 
 @dataclass(frozen=True, slots=True)

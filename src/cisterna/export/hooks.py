@@ -81,6 +81,13 @@ def build_antigravity_hooks(
       in-progress adapter hardcodes ``"praxia"`` since it exports itself;
       cisterna is a generic exporter, so the bundle's own name is the
       sensible general default).
+    - When a spec carries ``content`` (M13.2: the manifest gave it a
+      ``path``), the command references the bundled ``./scripts/<script>``
+      file the caller writes alongside this JSON — matching praxia's
+      self-contained convention. Specs without content keep referencing
+      ``spec.script`` as a literal command, same as Claude/Cursor/Copilot —
+      deliberately NOT switching to a ``./scripts/`` reference in that case,
+      since no such file gets bundled and that would just dangle.
     """
     pre_tool: list[dict[str, object]] = []
     post_tool: list[dict[str, object]] = []
@@ -90,7 +97,8 @@ def build_antigravity_hooks(
             continue
 
         matcher = _ANTIGRAVITY_MATCHER_REMAP.get(spec.matcher, spec.matcher)
-        hook_cmd: dict[str, str] = {"type": "command", "command": spec.script}
+        command = f"./scripts/{spec.script}" if spec.content else spec.script
+        hook_cmd: dict[str, str] = {"type": "command", "command": command}
         bucket = pre_tool if spec.event == "PreToolUse" else post_tool
 
         existing = next((e for e in bucket if e["matcher"] == matcher), None)
