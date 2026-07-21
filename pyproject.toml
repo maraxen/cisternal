@@ -4,9 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cisterna"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.0a1"
+description = "Shared telemetry substrate and agent-asset export toolkit for the Praxia tool family"
 readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Marielle Russo" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 requires-python = ">=3.13"
 dependencies = [
     "cyclopts>=4.18.0",
