@@ -60,8 +60,21 @@ def _invoke_app(args: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_export_import_populates_registry_and_emits_files(tmp_path: Path) -> None:
-    """--import <module> side-effects fire and result in tool export."""
+def test_export_import_populates_registry_and_emits_files(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """--import <module> side-effects fire and result in tool export.
+
+    M13 note: the real Claude Code plugin.json schema has no ``commands``
+    key (see ``cisterna.export.claude`` module docstring) — registry-derived
+    commands never carry a body (``registry_bundle`` in
+    ``cisterna.assets.source`` always sets ``body=""``), so they leave no
+    trace in Claude's emitted files either. The "registry got populated"
+    signal this test can still check is the absence of the empty-registry
+    WARNING (contrast ``test_export_empty_registry_emits_warning_and_exits_zero``)
+    plus a valid plugin.json with the new (commands-free) shape.
+    """
     module_name = "test_tools_for_cli_ac8a"
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -71,10 +84,17 @@ def test_export_import_populates_registry_and_emits_files(tmp_path: Path) -> Non
     sys.path.insert(0, str(tmp_path))
     try:
         sys.modules.pop(module_name, None)
-        _invoke_app(["assets", "export", "--import", module_name, "--out", str(out_dir)])
+        with caplog.at_level(logging.WARNING, logger="cisterna.cli"):
+            _invoke_app(["assets", "export", "--import", module_name, "--out", str(out_dir)])
     finally:
         sys.path.remove(str(tmp_path))
         sys.modules.pop(module_name, None)
+
+    warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert not any(
+        "empty" in str(m).lower() or "registry" in str(m).lower()
+        for m in warning_messages
+    ), f"Unexpected empty-registry WARNING with tools registered: {warning_messages}"
 
     plugin_file = out_dir / ".claude-plugin" / "plugin.json"
     assert plugin_file.exists(), "plugin.json must be written to out dir"
@@ -82,38 +102,7 @@ def test_export_import_populates_registry_and_emits_files(tmp_path: Path) -> Non
     import json
 
     manifest = json.loads(plugin_file.read_text(encoding="utf-8"))
-    assert "commands" in manifest, "commands key must be present when tools were registered"
-    assert "my_cli_tool" in manifest["commands"]
-    assert "another_cli_tool" in manifest["commands"]
-
-
-def test_export_import_commands_are_sorted(tmp_path: Path) -> None:
-    """Commands in the emitted plugin.json must be sorted by name."""
-    module_name = "test_tools_for_cli_sorted"
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-
-    _write_tool_module(
-        tmp_path,
-        module_name,
-        tool_names=["zebra_tool", "alpha_tool", "mango_tool"],
-    )
-
-    sys.path.insert(0, str(tmp_path))
-    try:
-        sys.modules.pop(module_name, None)
-        _invoke_app(["assets", "export", "--import", module_name, "--out", str(out_dir)])
-    finally:
-        sys.path.remove(str(tmp_path))
-        sys.modules.pop(module_name, None)
-
-    import json
-
-    manifest = json.loads(
-        (out_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
-    )
-    commands = manifest["commands"]
-    assert commands == sorted(commands), f"Commands not sorted: {commands}"
+    assert "commands" not in manifest, "real plugin.json schema has no commands key"
 
 
 # ---------------------------------------------------------------------------

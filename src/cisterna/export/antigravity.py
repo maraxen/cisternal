@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 
-from cisterna.assets.bundle import AssetBundle, HookSpecAsset
+from cisterna.assets.bundle import AssetBundle
 from cisterna.export._markdown import format_agent_markdown, format_skill_markdown
 from cisterna.export.antigravity_rust import emit_antigravity_rust_parity
 from cisterna.export.base import Emitter
-from cisterna.export.hooks import hooks_for_surface
+from cisterna.export.hooks import build_claude_style_hooks, hooks_for_surface
 
 _EXTENSION_JSON_PATH = "gemini-extension.json"
 _MCP_JSON_PATH = ".mcp.json"
@@ -78,7 +77,7 @@ class AntigravityEmitter(Emitter):
             files[_MCP_JSON_PATH] = json.dumps(mcp_obj, sort_keys=True, indent=2)
 
         if hook_specs:
-            hooks_root = _build_antigravity_hooks(hook_specs)
+            hooks_root = build_claude_style_hooks(hook_specs)
             files[_HOOKS_JSON_PATH] = json.dumps(
                 {"hooks": hooks_root},
                 sort_keys=True,
@@ -86,35 +85,3 @@ class AntigravityEmitter(Emitter):
             )
 
         return files
-
-
-def _build_antigravity_hooks(
-    hook_specs: tuple[HookSpecAsset, ...],
-) -> dict[str, list[dict[str, object]]]:
-    """Claude-shaped nested hooks (praxia build_claude_hooks bundle adapter)."""
-    events: dict[str, list[dict[str, object]]] = defaultdict(list)
-    pre_tool: list[dict[str, object]] = []
-    post_tool: list[dict[str, object]] = []
-
-    for spec in hook_specs:
-        hook_cmd: dict[str, str] = {"type": "command", "command": spec.script}
-        entry: dict[str, object] = {
-            "matcher": spec.matcher,
-            "hooks": [hook_cmd],
-        }
-
-        if spec.event == "PreToolUse":
-            pre_tool.append(entry)
-            continue
-        if spec.event == "PostToolUse":
-            post_tool.append(entry)
-            continue
-
-        events[spec.event].append(entry)
-
-    root: dict[str, list[dict[str, object]]] = dict(sorted(events.items()))
-    if pre_tool:
-        root["PreToolUse"] = pre_tool
-    if post_tool:
-        root["PostToolUse"] = post_tool
-    return root

@@ -43,7 +43,8 @@ def test_default_emitter_matches_names_only_mode() -> None:
 
     assert default_files == explicit_files
     assert not any(path.startswith("commands/") for path in default_files)
-    assert json.loads(default_files[_PLUGIN_JSON])["commands"] == ["alpha", "beta"]
+    manifest = json.loads(default_files[_PLUGIN_JSON])
+    assert set(manifest.keys()) == {"name", "version", "description"}
 
 
 def test_emit_command_bodies_writes_md_and_name_strings() -> None:
@@ -58,7 +59,7 @@ def test_emit_command_bodies_writes_md_and_name_strings() -> None:
     files = ClaudeEmitter(emit_command_bodies=True).emit(bundle)
     manifest = json.loads(files[_PLUGIN_JSON])
 
-    assert manifest["commands"] == ["empty", "foo"]
+    assert "commands" not in manifest
     assert files["commands/foo.md"] == "# Foo\n\nBody text.\n"
     assert "commands/empty.md" not in files
 
@@ -105,7 +106,7 @@ def test_export_manifest_writes_fixture_plugin(tmp_path: Path) -> None:
         (out_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
     )
     assert manifest["name"] == "fixture-plugin"
-    assert manifest["commands"] == ["foo"]
+    assert "commands" not in manifest
 
 
 def test_export_manifest_emit_command_bodies(tmp_path: Path) -> None:

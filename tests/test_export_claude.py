@@ -1,8 +1,9 @@
-"""Tests for AC-M3-4, AC-M3-5, AC-M3-6 — ClaudeEmitter purity + schema + determinism.
+"""Tests for AC-M3-4, AC-M3-6 — ClaudeEmitter purity + determinism (M13 real plugin format).
 
 AC-M3-4: Emitter cannot be instantiated (abstract); ClaudeEmitter.emit does zero I/O.
-AC-M3-5: plugin.json has name/version/description always; commands present-sorted iff
-          non-empty, omitted iff empty; mcpServers omitted when empty; empty bundle OK.
+M13: plugin.json has name/version/description always, and never commands/mcpServers
+     (real Claude Code plugin schema has no such keys — those concepts are
+     represented by agents/skills/hooks/.mcp.json files instead); empty bundle OK.
 AC-M3-6: emit twice → byte-identical dict including sidecar; sidecar sha256 ==
           bundle_sha256 of the non-provenance file set.
 """
@@ -10,13 +11,25 @@ AC-M3-6: emit twice → byte-identical dict including sidecar; sidecar sha256 ==
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from cisterna.assets.bundle import AssetBundle, BundleMetadata, CommandAsset, McpAsset
+from cisterna.assets.bundle import (
+    AgentAsset,
+    AssetBundle,
+    BundleMetadata,
+    CommandAsset,
+    McpAsset,
+)
+from cisterna.assets.manifest import ManifestAssetSource
 from cisterna.export._hash import bundle_sha256
 from cisterna.export.base import Emitter
 from cisterna.export.claude import ClaudeEmitter
+
+FIXTURE_MANIFEST = (
+    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +143,8 @@ def test_plugin_json_description_defaults_to_empty_string() -> None:
     assert manifest["description"] == ""
 
 
-def test_plugin_json_commands_present_sorted_when_non_empty() -> None:
-    """commands key is present and sorted when bundle has commands."""
+def test_plugin_json_commands_key_never_present() -> None:
+    """plugin.json never has a 'commands' key — real schema has no such field."""
     bundle = _bundle(
         commands=(
             CommandAsset(name="zebra", description=None),
@@ -142,12 +155,11 @@ def test_plugin_json_commands_present_sorted_when_non_empty() -> None:
     files = ClaudeEmitter().emit(bundle)
     manifest = json.loads(files[_PLUGIN_JSON_PATH])
 
-    assert "commands" in manifest
-    assert manifest["commands"] == ["alpha", "mango", "zebra"]
+    assert "commands" not in manifest
 
 
 def test_plugin_json_commands_omitted_when_empty() -> None:
-    """commands key is omitted entirely when the bundle has no commands."""
+    """commands key remains absent when the bundle has no commands."""
     bundle = _bundle(commands=())
     files = ClaudeEmitter().emit(bundle)
     manifest = json.loads(files[_PLUGIN_JSON_PATH])
@@ -155,8 +167,8 @@ def test_plugin_json_commands_omitted_when_empty() -> None:
     assert "commands" not in manifest
 
 
-def test_plugin_json_mcp_servers_omitted_when_empty() -> None:
-    """mcpServers is omitted when mcp_servers is empty (always in M3)."""
+def test_plugin_json_mcp_servers_key_never_present() -> None:
+    """mcpServers is never a plugin.json key — represented by root .mcp.json instead."""
     bundle = _bundle(mcp_servers=())
     files = ClaudeEmitter().emit(bundle)
     manifest = json.loads(files[_PLUGIN_JSON_PATH])
@@ -164,8 +176,15 @@ def test_plugin_json_mcp_servers_omitted_when_empty() -> None:
     assert "mcpServers" not in manifest
 
 
-def test_plugin_json_mcp_servers_present_when_non_empty() -> None:
-    """mcpServers is present and correct when mcp_servers is non-empty."""
+def test_mcp_json_omitted_when_empty() -> None:
+    """.mcp.json is omitted entirely when mcp_servers is empty."""
+    bundle = _bundle(mcp_servers=())
+    files = ClaudeEmitter().emit(bundle)
+    assert ".mcp.json" not in files
+
+
+def test_mcp_json_present_when_non_empty() -> None:
+    """.mcp.json (root, not under .claude-plugin/) is emitted when mcp_servers is non-empty."""
     bundle = _bundle(
         mcp_servers=(
             McpAsset(
@@ -177,9 +196,11 @@ def test_plugin_json_mcp_servers_present_when_non_empty() -> None:
     )
     files = ClaudeEmitter().emit(bundle)
     manifest = json.loads(files[_PLUGIN_JSON_PATH])
+    assert "mcpServers" not in manifest
 
-    assert "mcpServers" in manifest
-    srv = manifest["mcpServers"]["my_server"]
+    assert ".mcp.json" in files
+    mcp_doc = json.loads(files[".mcp.json"])
+    srv = mcp_doc["mcpServers"]["my_server"]
     assert srv["command"] == ["python", "-m", "server"]
     assert srv["env"] == {"API_KEY": "secret", "DEBUG": "1"}
 
@@ -279,3 +300,49 @@ def test_empty_bundle_provenance_sha256_integrity() -> None:
 
     provenance = json.loads(files[_PROVENANCE_PATH])
     assert provenance["sha256"] == expected_digest
+
+
+# ---------------------------------------------------------------------------
+# M13: real plugin format — agents/, skills/, hooks/, .mcp.json (mirrors
+# tests/test_export_cursor.py's fixture test pattern).
+# ---------------------------------------------------------------------------
+
+
+def test_claude_emit_manifest_minimal_fixture() -> None:
+    """M13: manifest_minimal emits plugin.json, agents/, skills/, hooks/hooks.json."""
+    report = ManifestAssetSource(FIXTURE_MANIFEST).load()
+    files = ClaudeEmitter().emit(report.bundle)
+
+    assert _PLUGIN_JSON_PATH in files
+    assert "agents/recon.md" in files
+    assert "skills/demo-skill/SKILL.md" in files
+    assert "hooks/hooks.json" in files
+
+    manifest = json.loads(files[_PLUGIN_JSON_PATH])
+    assert manifest["name"] == "fixture-plugin"
+    assert manifest["version"] == "1.2.3"
+    assert "commands" not in manifest
+    assert "mcpServers" not in manifest
+
+    hooks_doc = json.loads(files["hooks/hooks.json"])
+    pre_tool = hooks_doc["hooks"]["PreToolUse"]
+    assert pre_tool[0]["matcher"] == "Bash"
+
+    assert "Agent body for tests" in files["agents/recon.md"]
+    assert "Skill content" in files["skills/demo-skill/SKILL.md"]
+
+
+def test_claude_fail_closed_omits_agent_file_without_body() -> None:
+    """M13: agent with an empty body is not emitted as agents/<name>.md."""
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        agents=(
+            AgentAsset(name="ghost", description="Ghost", body=""),
+            AgentAsset(name="present", description="Here", body="Agent body\n"),
+        ),
+    )
+
+    files = ClaudeEmitter().emit(bundle)
+
+    assert "agents/present.md" in files
+    assert "agents/ghost.md" not in files

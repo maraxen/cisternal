@@ -46,12 +46,21 @@ def test_claude_rust_parity_golden_tree() -> None:
     assert golden.read_text(encoding="utf-8").strip() == digest
 
 
-def test_claude_legacy_emit_unchanged() -> None:
-    """Default ClaudeEmitter remains legacy M3 shape (provenance sidecar present)."""
+def test_claude_legacy_emit_still_has_provenance_sidecar() -> None:
+    """Default (non-rust-parity) ClaudeEmitter still emits the provenance sidecar.
+
+    M13 note: prior to M13 this test also asserted ``agents/recon.md`` was
+    absent from the legacy emit path — that was the M3.1b-frozen, non-standard
+    plugin.json-only shape. M13 intentionally reverses that freeze (see
+    ``cisterna.export.claude`` module docstring): the legacy path now emits
+    ``agents/<name>.md``/``skills/<name>/SKILL.md``/``hooks/hooks.json``/
+    ``.mcp.json`` just like the rust-parity path does, modulo the provenance
+    sidecar (which rust-parity omits and legacy keeps).
+    """
     bundle = load_asset_report(manifest=_MANIFEST).bundle
     files = ClaudeEmitter().emit(bundle)
     assert ".claude-plugin/cisterna-provenance.json" in files
-    assert "agents/recon.md" not in files
+    assert "agents/recon.md" in files
 
 
 def test_claude_rust_parity_emit_file_set() -> None:
