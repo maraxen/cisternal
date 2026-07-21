@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cisterna
+import cisternal
 import pytest
 
 
@@ -28,11 +28,11 @@ claude_code = ["commands/foo.md"]
         encoding="utf-8",
     )
 
-    @cisterna.tool
+    @cisternal.tool
     def foo() -> None:
         """Registry foo."""
 
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(

@@ -7,17 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.bundle import AssetBundle, BundleMetadata, CommandAsset
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.assets.validate_golden import surface_digest
-from cisterna.export._hash import bundle_sha256
-from cisterna.export.claude import ClaudeEmitter
+from cisternal.assets.bundle import AssetBundle, BundleMetadata, CommandAsset
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.assets.validate_golden import surface_digest
+from cisternal.export._hash import bundle_sha256
+from cisternal.export.claude import ClaudeEmitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
 )
 _PLUGIN_JSON = ".claude-plugin/plugin.json"
-_PROVENANCE = ".claude-plugin/cisterna-provenance.json"
+_PROVENANCE = ".claude-plugin/cisternal-provenance.json"
 
 
 def _bundle(
@@ -87,7 +87,7 @@ def test_export_manifest_writes_fixture_plugin(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(
@@ -114,7 +114,7 @@ def test_export_manifest_emit_command_bodies(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(

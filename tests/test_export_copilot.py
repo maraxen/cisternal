@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.export.copilot import CopilotEmitter
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.export.copilot import CopilotEmitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"

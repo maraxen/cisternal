@@ -1,3 +1,3 @@
 # Cursor sync command
 
-Export via `cisterna assets export --surface cursor`.
+Export via `cisternal assets export --surface cursor`.

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cisterna
-from cisterna.assets.composite import CompositeAssetSource
+import cisternal
+from cisternal.assets.composite import CompositeAssetSource
 
 
 def test_composite_fills_registry_only_commands(tmp_path: Path) -> None:
@@ -23,7 +23,7 @@ requires_praxia = "0.0.0"
         encoding="utf-8",
     )
 
-    @cisterna.tool
+    @cisternal.tool
     def only_registry() -> None:
         """From registry."""
 

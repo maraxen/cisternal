@@ -1,5 +1,5 @@
 [plugin]
-name = "cisterna"
+name = "cisternal"
 version = "0.1.0"
 description = "Agent-asset export CLI — dogfood manifest for M4 Export Trust"
 requires_praxia = "0.0.0"

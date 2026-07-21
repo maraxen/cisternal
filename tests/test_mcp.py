@@ -1,6 +1,6 @@
 """Tests for MCP adapter layer: AC-MCP-1..4 acceptance criteria (spec §8).
 
-AC-MCP-1: CisternaMiddleware on v3 server emits mcp.call_start/end with correct fields.
+AC-MCP-1: CisternalMiddleware on v3 server emits mcp.call_start/end with correct fields.
 AC-MCP-2: traced_tool(ContemplexAdapter) on sync tool emits start/end and shapes result.
 AC-MCP-3: v3 tool raises RuntimeError → mcp.tool_error emitted, error envelope returned.
 AC-MCP-3b: v2 sync tool raises ValueError → mcp.tool_error emitted, no exception escapes.
@@ -14,17 +14,17 @@ from unittest.mock import Mock
 
 import pytest
 
-from cisterna import init
-from cisterna.adapters.base import (
+from cisternal import init
+from cisternal.adapters.base import (
     AdapterBase,
     BathosAdapter,
     ContemplexAdapter,
     XpeririAdapter,
     MyxcelAdapter,
 )
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.adapters.v3_middleware import CisternaMiddleware
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.adapters.v3_middleware import CisternalMiddleware
+from cisternal.telemetry.exporter import ShadowExporter
 
 
 @pytest.fixture
@@ -38,8 +38,8 @@ def temp_log_dir():
 def cleanup():
     """Clean up pipeline between tests."""
     yield
-    from cisterna.telemetry import pipeline as pipeline_module
-    from cisterna.telemetry import self_obs as self_obs_module
+    from cisternal.telemetry import pipeline as pipeline_module
+    from cisternal.telemetry import self_obs as self_obs_module
 
     if pipeline_module._global_pipeline is not None:
         pipeline_module._global_pipeline.shutdown()
@@ -56,12 +56,12 @@ def cleanup():
         self_obs_module._jsonl_path = None
 
 
-class TestAcMcp1CisternaMiddleware:
-    """AC-MCP-1: CisternaMiddleware emits mcp.call_start+mcp.call_end."""
+class TestAcMcp1CisternalMiddleware:
+    """AC-MCP-1: CisternalMiddleware emits mcp.call_start+mcp.call_end."""
 
     @pytest.mark.asyncio
     async def test_v3_middleware_emits_start_and_end(self, temp_log_dir):
-        """Given CisternaMiddleware on a v3 server;
+        """Given CisternalMiddleware on a v3 server;
         When a tool is called with arguments;
         Then mcp.call_start + mcp.call_end appear with correct tool name and arg_keys."""
 
@@ -78,7 +78,7 @@ class TestAcMcp1CisternaMiddleware:
         async def mock_call_next(ctx):
             return "ok"
 
-        middleware = CisternaMiddleware()
+        middleware = CisternalMiddleware()
         result = await middleware.on_call_tool(context, mock_call_next)
 
         # Allow time for events to be exported
@@ -126,7 +126,7 @@ class TestAcMcp1CisternaMiddleware:
         async def mock_call_next(ctx):
             return {"status": "success", "data": 42}
 
-        middleware = CisternaMiddleware()
+        middleware = CisternalMiddleware()
         result = await middleware.on_call_tool(context, mock_call_next)
 
         # BathosAdapter should merge the result with envelope fields
@@ -260,7 +260,7 @@ class TestAcMcp3ErrorHandling:
         async def mock_call_next_error(ctx):
             raise RuntimeError("boom")
 
-        middleware = CisternaMiddleware()
+        middleware = CisternalMiddleware()
         result = await middleware.on_call_tool(context, mock_call_next_error)
 
         # Allow time for events
@@ -336,7 +336,7 @@ class TestAcMcp4TokenManagement:
     """AC-MCP-4: Token reset in different Context raises ValueError, wrapper swallows it.
 
     Note: AC-MCP-4 tests the error-handling path. The ValueError from reset()
-    is caught in the finally block of both CisternaMiddleware.on_call_tool and
+    is caught in the finally block of both CisternalMiddleware.on_call_tool and
     traced_tool wrapper. This test verifies the wrapper doesn't crash when
     exceptions occur during token management.
     """
@@ -356,7 +356,7 @@ class TestAcMcp4TokenManagement:
         async def mock_call_next(ctx):
             return "ok"
 
-        middleware = CisternaMiddleware()
+        middleware = CisternalMiddleware()
         # Should not raise; token set/reset should complete safely
         result = await middleware.on_call_tool(context, mock_call_next)
         assert result is not None
@@ -380,9 +380,9 @@ class TestAcMcp4TokenManagement:
     def test_token_reset_error_handling_code_path(self):
         """Verify that the ValueError handling in finally block is in place."""
         import inspect
-        from cisterna.adapters import v3_middleware, v2_decorator
+        from cisternal.adapters import v3_middleware, v2_decorator
 
-        v3_source = inspect.getsource(v3_middleware.CisternaMiddleware.on_call_tool)
+        v3_source = inspect.getsource(v3_middleware.CisternalMiddleware.on_call_tool)
         assert "finally:" in v3_source
         assert "mcp_request_id_var.reset" in v3_source
         assert "except ValueError:" in v3_source
@@ -403,7 +403,7 @@ class TestAcMcp4TokenManagement:
         middleware's `except ValueError: pass` guards against this pattern.
         """
         import contextvars
-        from cisterna.telemetry.context import mcp_request_id_var
+        from cisternal.telemetry.context import mcp_request_id_var
 
         # Set a token in the current (outer) context
         outer_tok = mcp_request_id_var.set("outer_request")
@@ -441,7 +441,7 @@ class TestAcMcp4TokenManagement:
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
 
-        from cisterna.telemetry.context import mcp_request_id_var
+        from cisternal.telemetry.context import mcp_request_id_var
 
         # Pre-set the contextvar (simulating a caller that already set it)
         outer_tok = mcp_request_id_var.set("caller_request")
@@ -453,7 +453,7 @@ class TestAcMcp4TokenManagement:
         async def call_next(ctx):
             return {"data": "ok"}
 
-        middleware = CisternaMiddleware()
+        middleware = CisternalMiddleware()
         result = await middleware.on_call_tool(context, call_next)
 
         # Middleware completes without exception despite pre-existing contextvar

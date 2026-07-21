@@ -4,7 +4,7 @@ AC-M3-8:
   - export --import <module> populates the registry in-process and emits files to tmp out dir.
   - Empty registry → WARNING + exit 0.
   - --dry-run prints "path  sha256" lines and writes nothing.
-  - import cisterna.cli works without fastmcp installed (fastmcp-free import path).
+  - import cisternal.cli works without fastmcp installed (fastmcp-free import path).
 
 Note: cyclopts raises SystemExit(0) after successful execution.  All app() calls
 are wrapped in ``pytest.raises(SystemExit)`` with an assertion that the exit code is 0.
@@ -32,10 +32,10 @@ def _write_tool_module(tmp_path: Path, module_name: str, *, tool_names: list[str
     Returns the path to the file.  The caller must add tmp_path to sys.path
     before importing.
     """
-    lines = ["import cisterna\n"]
+    lines = ["import cisternal\n"]
     for tool_name in tool_names:
         lines.append(
-            f"\n@cisterna.tool\ndef {tool_name}(x: int) -> int:\n"
+            f"\n@cisternal.tool\ndef {tool_name}(x: int) -> int:\n"
             f'    """Auto-registered tool {tool_name}."""\n'
             f"    return x\n"
         )
@@ -45,8 +45,8 @@ def _write_tool_module(tmp_path: Path, module_name: str, *, tool_names: list[str
 
 
 def _invoke_app(args: list[str]) -> None:
-    """Invoke the cisterna CLI app; raise AssertionError on non-zero exit."""
-    from cisterna.cli import app
+    """Invoke the cisternal CLI app; raise AssertionError on non-zero exit."""
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(args)
@@ -67,9 +67,9 @@ def test_export_import_populates_registry_and_emits_files(
     """--import <module> side-effects fire and result in tool export.
 
     M13 note: the real Claude Code plugin.json schema has no ``commands``
-    key (see ``cisterna.export.claude`` module docstring) — registry-derived
+    key (see ``cisternal.export.claude`` module docstring) — registry-derived
     commands never carry a body (``registry_bundle`` in
-    ``cisterna.assets.source`` always sets ``body=""``), so they leave no
+    ``cisternal.assets.source`` always sets ``body=""``), so they leave no
     trace in Claude's emitted files either. The "registry got populated"
     signal this test can still check is the absence of the empty-registry
     WARNING (contrast ``test_export_empty_registry_emits_warning_and_exits_zero``)
@@ -84,7 +84,7 @@ def test_export_import_populates_registry_and_emits_files(
     sys.path.insert(0, str(tmp_path))
     try:
         sys.modules.pop(module_name, None)
-        with caplog.at_level(logging.WARNING, logger="cisterna.cli"):
+        with caplog.at_level(logging.WARNING, logger="cisternal.cli"):
             _invoke_app(["assets", "export", "--import", module_name, "--out", str(out_dir)])
     finally:
         sys.path.remove(str(tmp_path))
@@ -114,12 +114,12 @@ def test_export_empty_registry_emits_warning_and_exits_zero(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Empty registry emits a WARNING to cisterna.cli and returns with exit 0."""
+    """Empty registry emits a WARNING to cisternal.cli and returns with exit 0."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
     # _clear_all_registries autouse fixture ensures registry is empty.
-    with caplog.at_level(logging.WARNING, logger="cisterna.cli"):
+    with caplog.at_level(logging.WARNING, logger="cisternal.cli"):
         _invoke_app(["assets", "export", "--out", str(out_dir)])
 
     warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
@@ -242,13 +242,13 @@ def test_export_custom_name_and_version(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-M3-8e: cisterna.cli importable (M4 fastmcp-free path)
+# AC-M3-8e: cisternal.cli importable (M4 fastmcp-free path)
 # ---------------------------------------------------------------------------
 
 
 def test_cli_module_has_no_top_level_fastmcp_import() -> None:
-    """cisterna.cli must not import fastmcp at the top level (M4 fastmcp-free path)."""
-    import cisterna.cli as _cli_mod
+    """cisternal.cli must not import fastmcp at the top level (M4 fastmcp-free path)."""
+    import cisternal.cli as _cli_mod
 
     source = inspect.getsource(_cli_mod)
     lines = source.splitlines()
@@ -262,11 +262,11 @@ def test_cli_module_has_no_top_level_fastmcp_import() -> None:
     ]
 
     assert top_level_fastmcp_imports == [], (
-        f"cisterna.cli must not have top-level fastmcp imports; found: {top_level_fastmcp_imports}"
+        f"cisternal.cli must not have top-level fastmcp imports; found: {top_level_fastmcp_imports}"
     )
 
 
 def test_cli_importable_without_fastmcp() -> None:
-    """import cisterna.cli must succeed (verified by import in-process)."""
-    mod = importlib.import_module("cisterna.cli")
-    assert hasattr(mod, "app"), "cisterna.cli must export 'app'"
+    """import cisternal.cli must succeed (verified by import in-process)."""
+    mod = importlib.import_module("cisternal.cli")
+    assert hasattr(mod, "app"), "cisternal.cli must export 'app'"

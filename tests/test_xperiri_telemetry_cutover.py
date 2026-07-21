@@ -7,12 +7,12 @@ import time
 
 import pytest
 
-import cisterna
-from cisterna.adapters.base import XpeririAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.probe.telemetry_env import consumer_telemetry_enabled
-from cisterna.telemetry.exporter import ShadowExporter
-from cisterna.telemetry.pipeline import shutdown_pipeline
+import cisternal
+from cisternal.adapters.base import XpeririAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.probe.telemetry_env import consumer_telemetry_enabled
+from cisternal.telemetry.exporter import ShadowExporter
+from cisternal.telemetry.pipeline import shutdown_pipeline
 
 
 @pytest.fixture(autouse=True)
@@ -23,8 +23,8 @@ def _reset_pipeline() -> None:
 
 
 def test_consumer_telemetry_enabled_xperiri_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC-M8.2-2a: CISTERNA_TELEMETRY=xperiri enables xperiri."""
-    monkeypatch.setenv("CISTERNA_TELEMETRY", "xperiri")
+    """AC-M8.2-2a: CISTERNAL_TELEMETRY=xperiri enables xperiri."""
+    monkeypatch.setenv("CISTERNAL_TELEMETRY", "xperiri")
     assert consumer_telemetry_enabled("xperiri") is True
 
 
@@ -32,7 +32,7 @@ def test_consumer_telemetry_disabled_when_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC-M8.2-2b: unset env → disabled."""
-    monkeypatch.delenv("CISTERNA_TELEMETRY", raising=False)
+    monkeypatch.delenv("CISTERNAL_TELEMETRY", raising=False)
     assert consumer_telemetry_enabled("xperiri") is False
 
 
@@ -41,11 +41,11 @@ def test_traced_tool_emits_when_cutover_enabled(
     tmp_path,
 ) -> None:
     """AC-M8.2-2c: sync traced_tool + XpeririAdapter emits mcp.call_start."""
-    monkeypatch.setenv("CISTERNA_TELEMETRY", "xperiri")
+    monkeypatch.setenv("CISTERNAL_TELEMETRY", "xperiri")
     assert consumer_telemetry_enabled("xperiri")
 
     shadow = ShadowExporter()
-    cisterna.init(log_dir=tmp_path, exporters=[shadow], heartbeat_interval=30.0)
+    cisternal.init(log_dir=tmp_path, exporters=[shadow], heartbeat_interval=30.0)
 
     @traced_tool(XpeririAdapter())
     def expert_list() -> str:

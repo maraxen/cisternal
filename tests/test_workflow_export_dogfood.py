@@ -43,7 +43,7 @@ def test_rust_parity_job_is_blocking() -> None:
     assert "  rust-parity:" in text
     block = _job_block(text, "rust-parity")
     assert "continue-on-error" not in block
-    assert "CISTERNA_PRAXIA_ASSETS_REV" in block
+    assert "CISTERNAL_PRAXIA_ASSETS_REV" in block
     assert "bundle-hash" in block
 
 

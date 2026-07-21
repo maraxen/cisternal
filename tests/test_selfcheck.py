@@ -1,4 +1,4 @@
-"""Tests for cisterna self-check: AC-SELFCHECK acceptance criteria (CH-12).
+"""Tests for cisternal self-check: AC-SELFCHECK acceptance criteria (CH-12).
 
 AC-SELFCHECK-1: Heartbeat fires; status().heartbeat_alive and write_probe_ok
 are True when the file grows.
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import emit_event, init, status
-from cisterna.telemetry import self_obs as self_obs_module
+from cisternal import emit_event, init, status
+from cisternal.telemetry import self_obs as self_obs_module
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def cleanup():
     """Clean up between tests."""
     yield
     # Shutdown pipeline and reset heartbeat state
-    from cisterna.telemetry import pipeline as pipeline_module
+    from cisternal.telemetry import pipeline as pipeline_module
 
     if pipeline_module._global_pipeline is not None:
         pipeline_module._global_pipeline.shutdown()
@@ -123,7 +123,7 @@ class TestACSelfcheck2:
         assert st.pipeline_alive is True
 
         # Kill the listener thread
-        from cisterna.telemetry import pipeline as pipeline_module
+        from cisternal.telemetry import pipeline as pipeline_module
 
         pipeline = pipeline_module._global_pipeline
         if pipeline and pipeline._listener:
@@ -162,7 +162,7 @@ class TestACSelfcheck2:
         assert st.heartbeat_alive is True, "Should be alive shortly after init"
 
         # Now kill the listener to stop new heartbeats
-        from cisterna.telemetry import pipeline as pipeline_module
+        from cisternal.telemetry import pipeline as pipeline_module
 
         pipeline = pipeline_module._global_pipeline
         if pipeline and pipeline._listener:
@@ -189,7 +189,7 @@ class TestInitIdempotency:
 
     def test_double_init_single_listener(self, temp_log_dir):
         """Verify that calling init() twice leaves exactly one QueueListener."""
-        from cisterna.telemetry import pipeline as pipeline_module
+        from cisternal.telemetry import pipeline as pipeline_module
 
         init(log_dir=temp_log_dir)
         first_pipeline = pipeline_module._global_pipeline
@@ -213,7 +213,7 @@ class TestHeartbeatThread:
 
     def test_heartbeat_daemon_emits_events(self, temp_log_dir):
         """Verify that heartbeat thread emits 'heartbeat' events periodically."""
-        from cisterna.telemetry.exporter import ShadowExporter
+        from cisternal.telemetry.exporter import ShadowExporter
 
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
@@ -240,7 +240,7 @@ class TestHeartbeatThread:
             def close(self):
                 pass
 
-        from cisterna.telemetry.exporter import ShadowExporter
+        from cisternal.telemetry.exporter import ShadowExporter
 
         shadow = ShadowExporter()
         init(
@@ -274,7 +274,7 @@ class TestEC3Warn:
         emit_event("initial.event")
         time.sleep(0.15)  # let file grow so last_growth_ts is set
 
-        from cisterna.telemetry import pipeline as pipeline_module
+        from cisternal.telemetry import pipeline as pipeline_module
 
         pipeline = pipeline_module._global_pipeline
         if pipeline and pipeline._listener:
@@ -283,7 +283,7 @@ class TestEC3Warn:
 
         time.sleep(0.15)  # let liveness go stale (> 2x interval)
 
-        import cisterna.telemetry.self_obs as so
+        import cisternal.telemetry.self_obs as so
 
         so._last_ec3_warn = 0.0
         so._check_ec3_warn()

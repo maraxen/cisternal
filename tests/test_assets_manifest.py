@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cisterna
-from cisterna.assets.composite import CompositeAssetSource
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.assets.source import registry_bundle
+import cisternal
+from cisternal.assets.composite import CompositeAssetSource
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.assets.source import registry_bundle
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "manifest_minimal"
 MANIFEST = FIXTURE_ROOT / "manifest.toml"
@@ -40,12 +40,12 @@ def test_manifest_agent_default_tools_from_frontmatter() -> None:
 def test_registry_bundle_commands_only() -> None:
     """AC-M31a-9: registry_bundle maps tools to commands; other kinds empty."""
 
-    @cisterna.tool
+    @cisternal.tool
     def alpha_tool(x: int) -> int:
         """Alpha."""
         return x
 
-    @cisterna.tool
+    @cisternal.tool
     def beta_tool(y: str) -> str:
         """Beta."""
         return y
@@ -78,7 +78,7 @@ claude_code = ["commands/foo.md"]
         encoding="utf-8",
     )
 
-    @cisterna.tool
+    @cisternal.tool
     def foo() -> None:
         """Registry foo."""
 

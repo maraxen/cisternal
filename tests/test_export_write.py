@@ -10,7 +10,7 @@ import hashlib
 
 import pytest
 
-from cisterna.export.write import write_bundle
+from cisternal.export.write import write_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -48,13 +48,13 @@ def test_dry_run_returns_content_sha256_per_file(tmp_path: pytest.TempPathFactor
     content_b = '{"sha256":"deadbeef"}'
     files = {
         ".claude-plugin/plugin.json": content_a,
-        ".claude-plugin/cisterna-provenance.json": content_b,
+        ".claude-plugin/cisternal-provenance.json": content_b,
     }
     result = write_bundle(files, tmp_path, dry_run=True)  # type: ignore[arg-type]
 
     result_dict = dict(result.files)
     assert result_dict[".claude-plugin/plugin.json"] == _sha256(content_a)
-    assert result_dict[".claude-plugin/cisterna-provenance.json"] == _sha256(content_b)
+    assert result_dict[".claude-plugin/cisternal-provenance.json"] == _sha256(content_b)
 
 
 def test_dry_run_content_sha256_distinct_from_payload_repr(
@@ -81,15 +81,15 @@ def test_write_creates_files_on_disk(tmp_path: pytest.TempPathFactory) -> None:
     content_sidecar = '{"sha256":"cafebabe"}'
     files = {
         ".claude-plugin/plugin.json": content_plugin,
-        ".claude-plugin/cisterna-provenance.json": content_sidecar,
+        ".claude-plugin/cisternal-provenance.json": content_sidecar,
     }
     result = write_bundle(files, tmp_path, dry_run=False)  # type: ignore[arg-type]
 
     plugin_file = tmp_path / ".claude-plugin" / "plugin.json"  # type: ignore[operator]
-    sidecar_file = tmp_path / ".claude-plugin" / "cisterna-provenance.json"  # type: ignore[operator]
+    sidecar_file = tmp_path / ".claude-plugin" / "cisternal-provenance.json"  # type: ignore[operator]
 
     assert plugin_file.exists(), "plugin.json must be written to disk"
-    assert sidecar_file.exists(), "cisterna-provenance.json must be written to disk"
+    assert sidecar_file.exists(), "cisternal-provenance.json must be written to disk"
 
     assert plugin_file.read_text(encoding="utf-8") == content_plugin
     assert sidecar_file.read_text(encoding="utf-8") == content_sidecar
@@ -173,21 +173,21 @@ def test_write_bundle_never_raises_on_io_failure(
 
     Monkeypatches pathlib.Path.write_text to raise OSError on every call.
     Asserts the function returns a WriteResult (no exception) and that a
-    WARNING was emitted via the cisterna.export logger naming the failed path.
+    WARNING was emitted via the cisternal.export logger naming the failed path.
     content_sha256 is still included in the result (hash is content-based,
     independent of write success).
     """
     import logging
     import pathlib
 
-    from cisterna.export.write import WriteResult
+    from cisternal.export.write import WriteResult
 
     def _raise_oserror(self: pathlib.Path, *args: object, **kwargs: object) -> None:  # noqa: ARG001
         raise OSError("injected permission denied")
 
     monkeypatch.setattr(pathlib.Path, "write_text", _raise_oserror)
 
-    with caplog.at_level(logging.WARNING, logger="cisterna.export"):
+    with caplog.at_level(logging.WARNING, logger="cisternal.export"):
         result = write_bundle({"a/b.txt": "x"}, tmp_path, dry_run=False)  # type: ignore[arg-type]
 
     # Must return a WriteResult — no exception propagated.
@@ -202,7 +202,7 @@ def test_write_bundle_never_raises_on_io_failure(
 
     # A WARNING must have been logged naming the failed path.
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert warnings, "expected at least one WARNING from cisterna.export"
+    assert warnings, "expected at least one WARNING from cisternal.export"
     assert any("a/b.txt" in r.message or "b.txt" in r.message for r in warnings), (
         f"WARNING did not mention the failed path; got: {[r.message for r in warnings]}"
     )

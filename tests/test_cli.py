@@ -1,4 +1,4 @@
-"""Tests for cisterna CLI adapter: AC-CLI acceptance criteria."""
+"""Tests for cisternal CLI adapter: AC-CLI acceptance criteria."""
 
 import time
 from pathlib import Path
@@ -6,9 +6,9 @@ import tempfile
 
 import pytest
 
-from cisterna import init
-from cisterna.adapters.cli import timed_command
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import init
+from cisternal.adapters.cli import timed_command
+from cisternal.telemetry.exporter import ShadowExporter
 
 
 @pytest.fixture
@@ -23,8 +23,8 @@ def cleanup_pipeline():
     """Clean up pipeline between tests."""
     yield
     # Shutdown any existing pipeline
-    from cisterna.telemetry import pipeline as pipeline_module
-    from cisterna.telemetry import self_obs as self_obs_module
+    from cisternal.telemetry import pipeline as pipeline_module
+    from cisternal.telemetry import self_obs as self_obs_module
 
     if pipeline_module._global_pipeline is not None:
         pipeline_module._global_pipeline.shutdown()

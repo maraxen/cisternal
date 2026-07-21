@@ -16,8 +16,8 @@ jobs:
       - run: uv sync
       - name: Telemetry doctor preflight (M10.3)
         env:
-          CISTERNA_TELEMETRY: all
-        run: uv run cisterna telemetry doctor --json --strict
+          CISTERNAL_TELEMETRY: all
+        run: uv run cisternal telemetry doctor --json --strict
       - run: uv run ruff check .
       - run: uv run pytest -q
       - name: Shadow telemetry parity (bathos + contemplex patterns)
@@ -26,7 +26,7 @@ jobs:
         run: uv run pytest -m golden_matrix -q
       - name: Dry-run export self-manifest
         run: |
-          uv run cisterna assets export \
+          uv run cisternal assets export \
             --manifest .praxia/manifest.toml --surface claude --dry-run | grep -q .
       - name: Install and test minimal_emitter example
         run: |
@@ -42,10 +42,10 @@ jobs:
       - name: Native CLI parity (self-manifest, all surfaces)
         run: |
           for surface in claude cursor copilot antigravity; do
-            uv run cisterna assets validate \
+            uv run cisternal assets validate \
               --manifest .praxia/manifest.toml --surface "$surface" --use-native-cli
           done
-          uv run cisterna assets validate \
+          uv run cisternal assets validate \
             --manifest .praxia/manifest.toml --surface claude \
             --emit-command-bodies --use-native-cli
 
@@ -59,7 +59,7 @@ jobs:
       - run: uv sync
       - name: Start otel-collector
         run: |
-          docker run -d --name cisterna-otel \
+          docker run -d --name cisternal-otel \
             -p 4317:4317 -p 4318:4318 \
             -v "${{ github.workspace }}/tests/fixtures/otel-collector-config.yaml:/etc/otelcol/config.yaml" \
             otel/opentelemetry-collector:0.109.0 \
@@ -72,24 +72,24 @@ jobs:
             sleep 1
           done
           echo "collector did not become ready in time (need 4317 and 4318)"
-          docker logs cisterna-otel || true
+          docker logs cisternal-otel || true
           exit 1
       - name: OTLP gRPC + HTTP integration smoke
         run: uv run pytest tests/test_otlp_http.py -m integration -q
       - name: Stop otel-collector
         if: always()
-        run: docker rm -f cisterna-otel || true
+        run: docker rm -f cisternal-otel || true
 
   rust-parity:
     runs-on: ubuntu-latest
     env:
-      CISTERNA_PRAXIA_ASSETS_REV: 04bb683f11d6e879dcfc5dafbedfed426254985a
+      CISTERNAL_PRAXIA_ASSETS_REV: 04bb683f11d6e879dcfc5dafbedfed426254985a
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
           repository: maraxen/praxia
-          ref: ${{ env.CISTERNA_PRAXIA_ASSETS_REV }}
+          ref: ${{ env.CISTERNAL_PRAXIA_ASSETS_REV }}
           path: praxia
       - uses: astral-sh/setup-uv@v5
         with:
@@ -102,12 +102,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             praxia/target
-          key: praxia-cargo-${{ env.CISTERNA_PRAXIA_ASSETS_REV }}
+          key: praxia-cargo-${{ env.CISTERNAL_PRAXIA_ASSETS_REV }}
       - name: Build bundle-hash
         working-directory: praxia/crates/praxia-agent-assets
         run: cargo build --release --bin bundle-hash
       - run: uv sync
       - name: Rust parity conformance
         env:
-          CISTERNA_PRAXIA_ASSETS_BIN: ${{ github.workspace }}/praxia/crates/praxia-agent-assets/target/release/bundle-hash
+          CISTERNAL_PRAXIA_ASSETS_BIN: ${{ github.workspace }}/praxia/crates/praxia-agent-assets/target/release/bundle-hash
         run: uv run pytest tests/test_rust_parity.py tests/test_rust_parity_matrix.py tests/test_claude_rust_parity.py tests/test_cursor_rust_parity.py tests/test_copilot_rust_parity.py tests/test_antigravity_rust_parity.py tests/test_rust_parity_hook_filter.py -q

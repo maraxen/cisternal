@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import cisterna
-from cisterna.assets.source import registry_assets
-from cisterna.registration.registry import (
+import cisternal
+from cisternal.assets.source import registry_assets
+from cisternal.registration.registry import (
     _REGISTRIES,
     list_registries,
     snapshot,
@@ -13,10 +13,10 @@ from cisterna.registration.registry import (
 
 def test_snapshot_is_shallow_copy() -> None:
     """AC-M33a-1: mutating returned dict does not affect live registry."""
-    cisterna.clear_registry("snap_test")
+    cisternal.clear_registry("snap_test")
     try:
 
-        @cisterna.tool(registry="snap_test")
+        @cisternal.tool(registry="snap_test")
         def alpha() -> None:
             """Alpha."""
 
@@ -26,7 +26,7 @@ def test_snapshot_is_shallow_copy() -> None:
         after = snapshot("snap_test")
         assert "injected" not in after
     finally:
-        cisterna.clear_registry("snap_test")
+        cisternal.clear_registry("snap_test")
 
 
 def test_list_registries_excludes_unknown() -> None:

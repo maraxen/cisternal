@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from cisterna.export.sink import MemoryWriterSink
+from cisternal.export.sink import MemoryWriterSink
 
 
 def _sha256(text: str) -> str:

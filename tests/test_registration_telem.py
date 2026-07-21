@@ -1,15 +1,15 @@
-"""Tests for cisterna registration telemetry boundary and F1 dual error contract.
+"""Tests for cisternal registration telemetry boundary and F1 dual error contract.
 
 Acceptance criteria covered:
 
-  AC-M2-14 (direct call): a @cisterna.tool-decorated fn called DIRECTLY (no wire)
+  AC-M2-14 (direct call): a @cisternal.tool-decorated fn called DIRECTLY (no wire)
             returns the original value and emits ZERO telemetry. Verified via
             ShadowExporter spy pipeline.
 
   AC-M2-6 (boundary):
-    (a) WITHOUT CisternaMiddleware installed, invoking the wired MCP callable emits
+    (a) WITHOUT CisternalMiddleware installed, invoking the wired MCP callable emits
         ZERO telemetry (the callable itself emits nothing).
-    (b) WITH CisternaMiddleware installed (per M1), telemetry originates from
+    (b) WITH CisternalMiddleware installed (per M1), telemetry originates from
         MIDDLEWARE, not the wired callable — the wired callable makes no
         adapter.* calls (spy adapter asserted untouched by the callable).
 
@@ -32,10 +32,10 @@ import fastmcp
 import pytest
 from cyclopts import App
 
-from cisterna.registration.decorator import tool
-from cisterna.registration.registry import clear_registry
-from cisterna.registration.wired import wire
-from cisterna.telemetry import EventPipeline, ShadowExporter
+from cisternal.registration.decorator import tool
+from cisternal.registration.registry import clear_registry
+from cisternal.registration.wired import wire
+from cisternal.telemetry import EventPipeline, ShadowExporter
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +63,12 @@ def shadow_pipeline():
 
 
 # ---------------------------------------------------------------------------
-# AC-M2-14: direct call — @cisterna.tool decorated fn called directly emits zero telemetry
+# AC-M2-14: direct call — @cisternal.tool decorated fn called directly emits zero telemetry
 # ---------------------------------------------------------------------------
 
 
 class TestDirectCallZeroTelemetry:
-    """AC-M2-14: calling a @cisterna.tool-decorated fn directly returns the
+    """AC-M2-14: calling a @cisternal.tool-decorated fn directly returns the
     original value and emits ZERO telemetry (C1 decoration purity)."""
 
     def test_direct_call_returns_original_value_sync(self, shadow_pipeline):
@@ -138,7 +138,7 @@ class TestDirectCallZeroTelemetry:
 
         decorated = tool(original_fn)
         assert decorated is original_fn, (
-            "@cisterna.tool must return the original fn unchanged (C1 decoration purity)"
+            "@cisternal.tool must return the original fn unchanged (C1 decoration purity)"
         )
 
 
@@ -148,7 +148,7 @@ class TestDirectCallZeroTelemetry:
 
 
 class TestWiredMCPCallableNoTelemetry:
-    """AC-M2-6 boundary (a): WITHOUT CisternaMiddleware, the wired MCP callable
+    """AC-M2-6 boundary (a): WITHOUT CisternalMiddleware, the wired MCP callable
     itself emits ZERO telemetry when invoked."""
 
     @pytest.mark.asyncio
@@ -160,7 +160,7 @@ class TestWiredMCPCallableNoTelemetry:
         def add_numbers(a: int, b: int) -> int:
             return a + b
 
-        # Wire onto a FastMCP server WITHOUT CisternaMiddleware.
+        # Wire onto a FastMCP server WITHOUT CisternalMiddleware.
         server = fastmcp.FastMCP("test-no-middleware-telem")
         wire(server)
 
@@ -202,19 +202,19 @@ class TestWiredMCPCallableNoTelemetry:
 
 
 # ---------------------------------------------------------------------------
-# AC-M2-6 (boundary b): WITH CisternaMiddleware — telemetry comes from MIDDLEWARE
+# AC-M2-6 (boundary b): WITH CisternalMiddleware — telemetry comes from MIDDLEWARE
 # ---------------------------------------------------------------------------
 
 
 class TestWiredMCPCallableWithMiddlewareTelemetry:
-    """AC-M2-6 boundary (b): WITH CisternaMiddleware installed, telemetry
+    """AC-M2-6 boundary (b): WITH CisternalMiddleware installed, telemetry
     originates from MIDDLEWARE (not from the wired callable)."""
 
     @pytest.mark.asyncio
     async def test_middleware_emits_telemetry_callable_does_not(self, spy_adapter):
-        """AC-M2-6(b): with CisternaMiddleware, the adapter spy on the callable is untouched;
+        """AC-M2-6(b): with CisternalMiddleware, the adapter spy on the callable is untouched;
         telemetry emitted by middleware is attributable to middleware, not the callable."""
-        from cisterna.adapters.v3_middleware import CisternaMiddleware
+        from cisternal.adapters.v3_middleware import CisternalMiddleware
 
         # Set up a spy pipeline so we can see if telemetry flows.
         spy = ShadowExporter()
@@ -222,7 +222,7 @@ class TestWiredMCPCallableWithMiddlewareTelemetry:
 
         try:
             # Temporarily install the spy pipeline as the global pipeline.
-            import cisterna.telemetry.pipeline as _pipe_mod
+            import cisternal.telemetry.pipeline as _pipe_mod
             original_pipeline = _pipe_mod._global_pipeline
             _pipe_mod._global_pipeline = pipeline
 
@@ -231,7 +231,7 @@ class TestWiredMCPCallableWithMiddlewareTelemetry:
                 return f"Hello, {name}!"
 
             server = fastmcp.FastMCP("test-with-middleware")
-            server.add_middleware(CisternaMiddleware())
+            server.add_middleware(CisternalMiddleware())
             # spy_adapter — the callable must NOT call any of its methods.
             wire(server, adapter=spy_adapter)
 
@@ -248,12 +248,12 @@ class TestWiredMCPCallableWithMiddlewareTelemetry:
 
             # (2) The middleware DID emit telemetry (at least one record).
             assert len(spy.records) > 0, (
-                "Expected telemetry records from CisternaMiddleware, got none; "
+                "Expected telemetry records from CisternalMiddleware, got none; "
                 "middleware is not emitting?"
             )
 
             # (3) All emitted records should be MCP-related events (mcp.call_start, etc.)
-            #     These are attributable to CisternaMiddleware, not to the callable.
+            #     These are attributable to CisternalMiddleware, not to the callable.
             event_names = [r.name for r in spy.records]
             mcp_events = [n for n in event_names if n.startswith("mcp.")]
             assert mcp_events, (
@@ -297,7 +297,7 @@ class TestMCPCallableExceptionPropagates:
     @pytest.mark.asyncio
     async def test_mcp_callable_does_not_catch_exceptions_of_any_type(self):
         """F1 (MCP): various exception types propagate through the callable unchanged."""
-        from cisterna.registration.compose import compose_mcp_callable
+        from cisternal.registration.compose import compose_mcp_callable
 
         for exc_class, msg in [
             (ValueError, "value error"),

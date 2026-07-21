@@ -1,6 +1,6 @@
 """Rust parity digest tests via praxia bundle-hash (M12.1).
 
-Requires ``CISTERNA_PRAXIA_ASSETS_BIN`` pointing at a built ``bundle-hash``
+Requires ``CISTERNAL_PRAXIA_ASSETS_BIN`` pointing at a built ``bundle-hash``
 binary (see ``tests/conformance/README.md``). Subprocess integration tests skip
 when unset; in-process emit parity tests always run.
 
@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import pytest
 
-from cisterna.assets.bridge import (
+from cisternal.assets.bridge import (
     conformance_expected_path,
     conformance_manifest_path,
     resolve_bundle_hash_bin,
     rust_surface_digest,
 )
-from cisterna.assets.load import load_asset_report
+from cisternal.assets.load import load_asset_report
 
 _SURFACES = ("claude", "cursor", "copilot", "antigravity")
 
@@ -29,7 +29,7 @@ def _bundle_hash_available() -> bool:
 
 pytestmark = pytest.mark.skipif(
     not _bundle_hash_available(),
-    reason="CISTERNA_PRAXIA_ASSETS_BIN unset — skip rust parity integration",
+    reason="CISTERNAL_PRAXIA_ASSETS_BIN unset — skip rust parity integration",
 )
 
 
@@ -53,5 +53,5 @@ def test_rust_parity_digest_stable_on_repeat() -> None:
 
 
 def test_resolve_bundle_hash_bin_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CISTERNA_PRAXIA_ASSETS_BIN", "/tmp/bundle-hash")
+    monkeypatch.setenv("CISTERNAL_PRAXIA_ASSETS_BIN", "/tmp/bundle-hash")
     assert resolve_bundle_hash_bin() == "/tmp/bundle-hash"

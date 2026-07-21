@@ -3,7 +3,7 @@
 AC-M3-1: registry_assets on empty/unknown registry returns () and never raises.
 AC-M3-2: ToolEntry -> AssetSpec: name, cleandoc first-paragraph description with a
           MULTILINE docstring, signature param names; verifies _snapshot coupling by
-          registering a real @cisterna.tool.
+          registering a real @cisternal.tool.
 AC-M3-3: A tool whose inspect.signature raises (any Exception) → params=() + WARNING
           is emitted; a second well-formed tool in the same bundle still exports.
 """
@@ -14,8 +14,8 @@ import logging
 
 import pytest
 
-import cisterna
-from cisterna.assets.source import registry_assets
+import cisternal
+from cisternal.assets.source import registry_assets
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ def test_registry_assets_never_raises_on_empty() -> None:
 
 def test_asset_spec_name_reflects_tool_name() -> None:
     """AssetSpec.name must equal the registered tool name."""
-    @cisterna.tool
+    @cisternal.tool
     def my_tool(x: int) -> int:
         """Simple tool."""
         return x
@@ -63,7 +63,7 @@ def test_asset_spec_name_reflects_tool_name() -> None:
 
 def test_asset_spec_description_single_line_docstring() -> None:
     """Single-line docstring is returned as-is (stripped)."""
-    @cisterna.tool
+    @cisternal.tool
     def tool_single_doc(x: int) -> str:
         """Short description."""
         return str(x)
@@ -75,7 +75,7 @@ def test_asset_spec_description_single_line_docstring() -> None:
 
 def test_asset_spec_description_multiline_docstring_first_paragraph() -> None:
     """Multiline docstring: only the first paragraph is kept (inspect.cleandoc)."""
-    @cisterna.tool
+    @cisternal.tool
     def tool_multiline(a: str, b: int = 0) -> str:
         """First paragraph of the docstring.
 
@@ -99,7 +99,7 @@ def test_asset_spec_description_multiline_docstring_first_paragraph() -> None:
 
 def test_asset_spec_description_indented_multiline_docstring() -> None:
     """inspect.cleandoc must dedent the docstring before splitting paragraphs."""
-    @cisterna.tool
+    @cisternal.tool
     def tool_indented() -> None:
         """
         Indented first paragraph.
@@ -115,7 +115,7 @@ def test_asset_spec_description_indented_multiline_docstring() -> None:
 
 def test_asset_spec_no_docstring_gives_none_description() -> None:
     """A tool without a docstring produces description=None."""
-    @cisterna.tool
+    @cisternal.tool
     def tool_no_doc(x: int) -> int:
         return x
 
@@ -126,7 +126,7 @@ def test_asset_spec_no_docstring_gives_none_description() -> None:
 
 def test_asset_spec_params_from_signature() -> None:
     """params must be the tuple of parameter names from inspect.signature."""
-    @cisterna.tool
+    @cisternal.tool
     def tool_params(alpha: int, beta: str, gamma: float = 1.0) -> str:
         """Tool with params."""
         return f"{alpha}{beta}{gamma}"
@@ -138,7 +138,7 @@ def test_asset_spec_params_from_signature() -> None:
 
 def test_asset_spec_params_no_params() -> None:
     """A tool with no parameters has params=()."""
-    @cisterna.tool
+    @cisternal.tool
     def tool_no_params() -> None:
         """No params."""
 
@@ -148,14 +148,14 @@ def test_asset_spec_params_no_params() -> None:
 
 
 def test_asset_spec_snapshot_coupling() -> None:
-    """Exercises the _snapshot coupling: tools registered via @cisterna.tool are
+    """Exercises the _snapshot coupling: tools registered via @cisternal.tool are
     visible to registry_assets without any extra wiring step."""
-    @cisterna.tool
+    @cisternal.tool
     def snapshot_tool_a(x: int) -> int:
         """Tool A."""
         return x
 
-    @cisterna.tool
+    @cisternal.tool
     def snapshot_tool_b(y: str) -> str:
         """Tool B."""
         return y
@@ -168,7 +168,7 @@ def test_asset_spec_snapshot_coupling() -> None:
 
 def test_asset_spec_source_field_reflects_registry_name() -> None:
     """AssetSpec.source must equal the registry partition name."""
-    @cisterna.tool(registry="test_partition")
+    @cisternal.tool(registry="test_partition")
     def tool_in_partition(x: int) -> int:
         """Tool in a named partition."""
         return x
@@ -180,7 +180,7 @@ def test_asset_spec_source_field_reflects_registry_name() -> None:
 
 def test_asset_spec_kind_is_command() -> None:
     """AssetSpec.kind must always be 'command' in M3."""
-    @cisterna.tool
+    @cisternal.tool
     def any_tool() -> None:
         """Any tool."""
 
@@ -191,15 +191,15 @@ def test_asset_spec_kind_is_command() -> None:
 
 def test_registry_assets_sorted_by_name() -> None:
     """registry_assets returns specs sorted by name for canonical determinism."""
-    @cisterna.tool
+    @cisternal.tool
     def zebra() -> None:
         """Z tool."""
 
-    @cisterna.tool
+    @cisternal.tool
     def alpha() -> None:
         """A tool."""
 
-    @cisterna.tool
+    @cisternal.tool
     def mango() -> None:
         """M tool."""
 
@@ -221,7 +221,7 @@ def test_signature_failure_emits_warning_and_params_empty(
 
     broken_fn_ref: list[object] = []
 
-    @cisterna.tool
+    @cisternal.tool
     def broken_sig_tool2() -> None:
         """Tool with broken signature (2)."""
 
@@ -234,7 +234,7 @@ def test_signature_failure_emits_warning_and_params_empty(
             raise TypeError("Intentional introspection failure")
         return _real_sig(obj, **kwargs)  # type: ignore[arg-type]
 
-    with caplog.at_level(logging.WARNING, logger="cisterna.export"):
+    with caplog.at_level(logging.WARNING, logger="cisternal.export"):
         _inspect.signature = _patched_sig  # type: ignore[assignment]
         try:
             specs = registry_assets()
@@ -257,12 +257,12 @@ def test_second_tool_exports_despite_first_signature_failure(
     """A second well-formed tool still exports when the first tool's signature raises."""
     import inspect as _insp
 
-    @cisterna.tool
+    @cisternal.tool
     def good_tool(x: int, y: str) -> str:
         """Good tool with valid signature."""
         return f"{x}{y}"
 
-    @cisterna.tool
+    @cisternal.tool
     def bad_tool_introspect() -> None:
         """Bad tool whose signature will fail."""
 
@@ -276,7 +276,7 @@ def test_second_tool_exports_despite_first_signature_failure(
             raise ValueError("Synthetic introspection failure")
         return original_sig(obj, **kwargs)  # type: ignore[arg-type]
 
-    with caplog.at_level(logging.WARNING, logger="cisterna.export"):
+    with caplog.at_level(logging.WARNING, logger="cisternal.export"):
         _insp.signature = _patched_sig  # type: ignore[assignment]
         try:
             specs = registry_assets()

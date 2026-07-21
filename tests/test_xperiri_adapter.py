@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from cisterna.adapters.base import XpeririAdapter
+from cisternal.adapters.base import XpeririAdapter
 
 
 class TestXpeririAdapterShape:

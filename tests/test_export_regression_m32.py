@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cisterna.assets.manifest import ManifestAssetSource
-from cisterna.export.registry import get_emitter
+from cisternal.assets.manifest import ManifestAssetSource
+from cisternal.export.registry import get_emitter
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"

@@ -1,8 +1,8 @@
-# cisterna
+# cisternal
 
 **Status: alpha.** APIs may change without notice before `1.0`.
 
-Cisterna is a shared telemetry substrate and agent-asset export toolkit for the Praxia tool family. It has two parts:
+Cisternal is a shared telemetry substrate and agent-asset export toolkit for the Praxia tool family. It has two parts:
 
 - **Telemetry** — a lightweight, non-blocking event pipeline (JSONL export, OTLP export, MCP-tool registration wrapper) for instrumenting Python tools and MCP servers.
 - **Agent-asset export** — a CLI that takes a registry of MCP tools/commands and emits native plugin/config bundles for downstream coding-agent surfaces: Claude Code, Cursor, GitHub Copilot, and Antigravity.
@@ -10,72 +10,72 @@ Cisterna is a shared telemetry substrate and agent-asset export toolkit for the 
 ## Install
 
 ```bash
-pip install cisterna
+pip install cisternal
 ```
 
 For OTLP export support:
 
 ```bash
-pip install "cisterna[otlp]"
+pip install "cisternal[otlp]"
 ```
 
 ## Telemetry quickstart
 
 ```python
-import cisterna
+import cisternal
 
-cisterna.init()  # log_dir defaults to ~/.cisterna/logs, or env-resolved
+cisternal.init()  # log_dir defaults to ~/.cisternal/logs, or env-resolved
 
-with cisterna.span("my.operation", request_id="abc123"):
+with cisternal.span("my.operation", request_id="abc123"):
     do_work()
 
-cisterna.emit_event("my.custom_event", tool="foo")
-print(cisterna.status())
+cisternal.emit_event("my.custom_event", tool="foo")
+print(cisternal.status())
 ```
 
 Check your effective telemetry configuration from the shell:
 
 ```bash
-cisterna telemetry doctor
-cisterna telemetry doctor --json --strict
+cisternal telemetry doctor
+cisternal telemetry doctor --json --strict
 ```
 
 ### Registering MCP tools
 
 ```python
-import cisterna
+import cisternal
 
-@cisterna.tool
+@cisternal.tool
 def my_tool(x: int) -> int:
     return x * 2
 
-registry = cisterna.wire(server, app, adapter=my_adapter)
+registry = cisternal.wire(server, app, adapter=my_adapter)
 ```
 
-`cisterna.tool` is a pure-metadata decorator — it returns the original function unchanged. `cisterna.wire()` snapshots the registry at call time and registers each tool on a FastMCP server (and optionally a Cyclopts CLI app), returning a `WiredRegistry` for introspection.
+`cisternal.tool` is a pure-metadata decorator — it returns the original function unchanged. `cisternal.wire()` snapshots the registry at call time and registers each tool on a FastMCP server (and optionally a Cyclopts CLI app), returning a `WiredRegistry` for introspection.
 
 ## Agent-asset export
 
 ```bash
 # Preview what would be written, without touching disk
-cisterna assets export --dry-run
+cisternal assets export --dry-run
 
 # Write bundles for specific surfaces
-cisterna assets export --out ./dist/agent-assets
+cisternal assets export --out ./dist/agent-assets
 
 # Inspect or validate an existing bundle
-cisterna assets inspect
-cisterna assets validate
+cisternal assets inspect
+cisternal assets validate
 ```
 
 Supported export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**.
 
-The CLI is fastmcp-free by design — `cisterna.cli` imports and runs even in environments without `fastmcp` installed; asset-export logic never depends on the telemetry/registration surface.
+The CLI is fastmcp-free by design — `cisternal.cli` imports and runs even in environments without `fastmcp` installed; asset-export logic never depends on the telemetry/registration surface.
 
 ## Design notes
 
 - Telemetry emission never raises: if the pipeline isn't initialized, `emit_event`/`span` are no-ops.
-- Registry state is process-scoped — call `cisterna.clear_registry()` between tests to avoid cross-test contamination.
+- Registry state is process-scoped — call `cisternal.clear_registry()` between tests to avoid cross-test contamination.
 - The M2 wire-time MCP callable is a pure passthrough: telemetry and shape adaptation are exclusively owned by the telemetry middleware, never by the registration wrapper itself.
 
 ## License

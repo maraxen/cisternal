@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from cisterna.assets.bundle import (
+from cisternal.assets.bundle import (
     AgentAsset,
     AssetBundle,
     BundleMetadata,

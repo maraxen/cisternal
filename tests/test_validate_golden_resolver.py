@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.validate_golden import golden_digest_path, resolve_golden_slug
+from cisternal.assets.validate_golden import golden_digest_path, resolve_golden_slug
 
 MINIMAL = Path("tests/fixtures/manifest_minimal/manifest.toml")
 SELF = Path(".praxia/manifest.toml")

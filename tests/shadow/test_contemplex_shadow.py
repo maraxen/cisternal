@@ -1,6 +1,6 @@
 """AC-SHADOW-2: Contemplex shadow test for parity verification.
 
-Tests that contemplex legacy telemetry and cisterna shadow capture the same
+Tests that contemplex legacy telemetry and cisternal shadow capture the same
 tool invocations with start->end ordering in both streams.
 
 Schema notes:
@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import init
-from cisterna.adapters.base import ContemplexAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import init
+from cisternal.adapters.base import ContemplexAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.telemetry.exporter import ShadowExporter
 from .harness import assert_parity, capture_legacy
 
 _contemplex_logger = logging.getLogger("contemplex")
@@ -35,8 +35,8 @@ def temp_log_dir():
 def cleanup():
     """Clean up pipeline and self-observability state between tests."""
     yield
-    from cisterna.telemetry import pipeline as pm
-    import cisterna.telemetry.self_obs as so_mod
+    from cisternal.telemetry import pipeline as pm
+    import cisternal.telemetry.self_obs as so_mod
 
     if pm._global_pipeline:
         pm._global_pipeline.shutdown()
@@ -58,10 +58,10 @@ def cleanup():
 class TestAcShadow2:
     """AC-SHADOW-2: Contemplex stub pattern with start->end ordering in both streams."""
 
-    def test_start_end_ordering_in_cisterna(self, temp_log_dir):
+    def test_start_end_ordering_in_cisternal(self, temp_log_dir):
         """Given contemplex legacy telemetry;
         When brainstorm_start called and emits both start and end logs;
-        Then cisterna records preserve start->end ordering (call_start < call_end).
+        Then cisternal records preserve start->end ordering (call_start < call_end).
         """
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)
@@ -77,7 +77,7 @@ class TestAcShadow2:
             brainstorm_start()
             time.sleep(0.05)  # Allow events to export
 
-        # Get cisterna records for this tool
+        # Get cisternal records for this tool
         mcp_records = [
             r for r in shadow.records if r.fields.get("tool") == "brainstorm_start"
         ]
@@ -85,9 +85,9 @@ class TestAcShadow2:
         assert len(legacy) >= 2, f"Legacy stream must have >= 2 records, got {len(legacy)}"
         assert (
             len(mcp_records) >= 2
-        ), f"Cisterna stream must have >= 2 records, got {len(mcp_records)}"
+        ), f"Cisternal stream must have >= 2 records, got {len(mcp_records)}"
 
-        # Verify start->end ordering in cisterna
+        # Verify start->end ordering in cisternal
         names = [r.name for r in mcp_records]
         assert "mcp.call_start" in names, f"Missing call_start in {names}"
         assert "mcp.call_end" in names, f"Missing call_end in {names}"
@@ -99,9 +99,9 @@ class TestAcShadow2:
         ), f"call_start at {start_idx} should come before call_end at {end_idx}"
 
     def test_contemplex_parity(self, temp_log_dir):
-        """Given contemplex legacy telemetry + cisterna shadow active;
+        """Given contemplex legacy telemetry + cisternal shadow active;
         When brainstorm_reply called;
-        Then capture_legacy("contemplex") and capture_cisterna each captured >= 1
+        Then capture_legacy("contemplex") and capture_cisternal each captured >= 1
         matching record; parity passes.
         """
         shadow = ShadowExporter()
@@ -117,11 +117,11 @@ class TestAcShadow2:
             brainstorm_reply()
             time.sleep(0.05)  # Allow events to export
 
-        # Get cisterna records for this tool
+        # Get cisternal records for this tool
         mcp_records = [
             r for r in shadow.records if r.fields.get("tool") == "brainstorm_reply"
         ]
 
         assert len(legacy) >= 1, "Legacy stream must have >= 1 record"
-        assert len(mcp_records) >= 1, "Cisterna stream must have >= 1 record"
+        assert len(mcp_records) >= 1, "Cisternal stream must have >= 1 record"
         assert_parity(legacy, mcp_records)

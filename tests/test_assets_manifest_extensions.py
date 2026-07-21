@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cisterna.assets.manifest import ManifestAssetSource
+from cisternal.assets.manifest import ManifestAssetSource
 
 FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
@@ -87,7 +87,7 @@ path = "pipelines/nope.toml"
         encoding="utf-8",
     )
 
-    from cisterna.cli import app
+    from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(

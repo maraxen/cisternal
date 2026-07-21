@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from cisterna import init, job_span
-from cisterna.adapters.base import MyxcelAdapter
-from cisterna.adapters.v2_decorator import traced_tool
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import init, job_span
+from cisternal.adapters.base import MyxcelAdapter
+from cisternal.adapters.v2_decorator import traced_tool
+from cisternal.telemetry.exporter import ShadowExporter
 
 from .harness import assert_parity, capture_legacy
 
@@ -32,8 +32,8 @@ def temp_log_dir():
 @pytest.fixture(autouse=True)
 def cleanup():
     yield
-    from cisterna.telemetry import pipeline as pm
-    import cisterna.telemetry.self_obs as so_mod
+    from cisternal.telemetry import pipeline as pm
+    import cisternal.telemetry.self_obs as so_mod
 
     if pm._global_pipeline:
         pm._global_pipeline.shutdown()
@@ -63,10 +63,10 @@ def _wait_for_records(shadow: ShadowExporter, tool: str, min_count: int = 1) -> 
 
 
 class TestAcShadow4:
-    """AC-SHADOW-4: Myxcel stub pattern with legacy and cisterna parity."""
+    """AC-SHADOW-4: Myxcel stub pattern with legacy and cisternal parity."""
 
     def test_myxcel_shadow_parity(self, temp_log_dir: Path) -> None:
-        """Given myxcel legacy logger + cisterna shadow;
+        """Given myxcel legacy logger + cisternal shadow;
         When mount_project stub called;
         Then parity passes on tool name overlap.
         """
@@ -94,7 +94,7 @@ class TestAcShadow4:
     def test_myxcel_shadow_start_end_ordering(self, temp_log_dir: Path) -> None:
         """Given myxcel traced tool;
         When called;
-        Then mcp.call_start precedes mcp.call_end in cisterna records.
+        Then mcp.call_start precedes mcp.call_end in cisternal records.
         """
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)

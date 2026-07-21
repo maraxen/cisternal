@@ -1,4 +1,4 @@
-"""Shared pytest fixtures and helpers for cisterna registration tests.
+"""Shared pytest fixtures and helpers for cisternal registration tests.
 
 Provides a single shared SpyAdapter class used across test modules to avoid
 duplication and ensure consistent spy behavior.
@@ -22,7 +22,7 @@ class SpyAdapter:
     """Minimal spy adapter for asserting no adapter methods are called.
 
     Tracks all calls to emit_start, emit_end, emit_error, shape_ok, shape_error.
-    Does NOT subclass cisterna.adapters.base.AdapterBase to avoid a hard import
+    Does NOT subclass cisternal.adapters.base.AdapterBase to avoid a hard import
     dependency on adapters from other repos.  wire() and compose_mcp_callable()
     accept any object for the 'adapter' parameter and intentionally never call
     any method on it (C5 / AC-M2-6).
@@ -65,12 +65,12 @@ def _clear_all_registries() -> Any:
     in various named partitions.  The fixture runs at function scope (default)
     so each test starts with a clean slate.
 
-    Implementation: accesses cisterna.registration.registry._REGISTRIES
+    Implementation: accesses cisternal.registration.registry._REGISTRIES
     directly to discover and clear ALL partitions, not just "default".
-    cisterna.clear_registry() only clears one partition at a time, so we
+    cisternal.clear_registry() only clears one partition at a time, so we
     call it for each known partition, then also clear the live dict entirely.
     """
-    from cisterna.registration.registry import _REGISTRIES
+    from cisternal.registration.registry import _REGISTRIES
 
     # --- SETUP: clear before the test ---
     _REGISTRIES.clear()

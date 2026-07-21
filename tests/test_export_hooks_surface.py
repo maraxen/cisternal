@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from cisterna.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
-from cisterna.export.copilot import CopilotEmitter
-from cisterna.export.cursor import CursorEmitter
-from cisterna.export.hooks import hooks_for_surface
+from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+from cisternal.export.copilot import CopilotEmitter
+from cisternal.export.cursor import CursorEmitter
+from cisternal.export.hooks import hooks_for_surface
 
 
 def test_hooks_for_surface_empty_means_all() -> None:
@@ -50,7 +50,7 @@ def test_hooks_for_surface_filters_by_token() -> None:
 
 def test_antigravity_only_hook_not_on_cursor_export() -> None:
     """AC-M31c-2: surfaces=['antigravity'] hook appears only on antigravity export."""
-    from cisterna.export.antigravity import AntigravityEmitter
+    from cisternal.export.antigravity import AntigravityEmitter
 
     bundle = AssetBundle(
         metadata=BundleMetadata(name="p", version="1.0.0"),

@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from cisterna import init, job_span
-from cisterna.telemetry.exporter import ShadowExporter
+from cisternal import init, job_span
+from cisternal.telemetry.exporter import ShadowExporter
 
 
 @pytest.fixture
@@ -18,8 +18,8 @@ def temp_log_dir(tmp_path):
 @pytest.fixture(autouse=True)
 def cleanup():
     yield
-    from cisterna.telemetry import pipeline as pm
-    import cisterna.telemetry.self_obs as so_mod
+    from cisternal.telemetry import pipeline as pm
+    import cisternal.telemetry.self_obs as so_mod
 
     if pm._global_pipeline:
         pm._global_pipeline.shutdown()
