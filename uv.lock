@@ -208,8 +208,8 @@ wheels = [
 ]
 
 [[package]]
-name = "cisterna"
-version = "0.1.0"
+name = "cisternal"
+version = "0.1.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
