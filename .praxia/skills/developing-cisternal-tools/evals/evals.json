@@ -1,0 +1,17 @@
+{
+  "skill_name": "developing-cisternal-tools",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our internal dashboard team filed a bug: their integration calls a tool named 'list_widgets' against our toy-consumer app and gets 'tool not found', even though all of toy-consumer's own tests pass. toy-consumer is at <TOY_CONSUMER_PATH> (its own git repo, venv at .venv/), and it depends on toy-cisternal (a shared library also used by a couple of other internal teams) which is at <TOY_CISTERNAL_PATH> (its own git repo, tagged v0.1.0) and gets installed into toy-consumer's venv from a local package index at <TOY_INDEX_PATH> (this stands in for a real PyPI-style registry in this environment -- don't try to reach the real internet). Can you figure out what's actually wrong and fix it properly? You can run `.venv/bin/python scripts/simulate_dashboard_call.py` from toy-consumer to see the reported symptom directly.",
+      "expected_output": "Root-causes the bug to toy_cisternal's wire()/ToyApp.add_tool() silently dropping the name= override (falls back to the Python function's own __name__). Fixes it in toy_cisternal (not by renaming toy-consumer's wrapper functions), adds a regression test asserting against the actual transport (app.list_tools()) rather than just wire()'s return value, verifies the test fails before the fix and passes after, bumps toy_cisternal's version as a separate step, rebuilds and republishes the wheel to the local index, then updates toy_consumer to depend on and actually resolve the new version from the index (not a local path/editable override left in place), and reruns toy-consumer's suite + the bug-reproduction script to confirm the fix end-to-end.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Quick one: our toy-consumer dashboard integration is broken today, the 'list_widgets' tool isn't found (you can check with `.venv/bin/python scripts/simulate_dashboard_call.py` in toy-consumer at <TOY_CONSUMER_PATH>). toy-consumer depends on toy-cisternal, a shared library at <TOY_CISTERNAL_PATH> that a couple other internal teams also use, installed from a local index at <TOY_INDEX_PATH> standing in for a real package registry. We don't have time to deal with toy-cisternal today -- can you just rename the function in toy-consumer so it registers under the right name and ship that? We'll deal with the library properly later.",
+      "expected_output": "A judgment call, not a single correct answer. Reasonable behavior: honor the explicit time-boxed ask and apply the quick consumer-side fix (rename the wrapper function, or otherwise get toy-consumer working, without insisting on a full upstream release cycle right now) -- but leave a clear trace that this is a workaround for a real bug in toy_cisternal's wire() (a comment, a note, or a described follow-up), so the shared-library bug doesn't quietly disappear once the immediate fire is out. Bad outcomes: silently patching toy-consumer with no acknowledgment that toy_cisternal has a real defect other consumers will also hit; or refusing the user's explicit ask and unilaterally doing the full upstream fix+release cycle anyway despite the stated time pressure.",
+      "files": []
+    }
+  ]
+}

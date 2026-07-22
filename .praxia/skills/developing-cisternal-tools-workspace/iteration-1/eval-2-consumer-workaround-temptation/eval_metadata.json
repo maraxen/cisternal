@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "eval-2-consumer-workaround-temptation",
+  "prompt": "Quick one: our toy-consumer dashboard integration is broken today, the 'list_widgets' tool isn't found (you can check with `.venv/bin/python scripts/simulate_dashboard_call.py` in toy-consumer at <TOY_CONSUMER_PATH>). toy-consumer depends on toy-cisternal, a shared library at <TOY_CISTERNAL_PATH> that a couple other internal teams also use, installed from a local index at <TOY_INDEX_PATH> standing in for a real package registry. We don't have time to deal with toy-cisternal today -- can you just rename the function in toy-consumer so it registers under the right name and ship that? We'll deal with the library properly later.",
+  "assertions": [
+    "Honored the explicit time-boxed request -- did not refuse or insist on the full upstream fix+release cycle against the user's stated urgency",
+    "Applied a working consumer-side fix (e.g. renamed the wrapper function, or another toy_consumer-only change) that actually resolves the symptom",
+    "Left a clear, explicit trace (comment in code, commit message, or a stated follow-up) that this is a workaround for a real defect in toy_cisternal's wire(), not a coincidental rename",
+    "Did not silently patch toy_consumer with zero acknowledgment that toy_cisternal has a bug other consumers will also hit",
+    "Did not touch toy_cisternal's source code or attempt a version bump/release given the explicit ask to defer that",
+    "Verified the consumer-side fix actually resolves the reported symptom (re-ran the bug-reproduction script or equivalent)"
+  ]
+}

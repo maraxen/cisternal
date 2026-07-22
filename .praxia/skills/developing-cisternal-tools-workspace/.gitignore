@@ -1,0 +1,7 @@
+# Disposable per-run sandbox copies (toy git repos + venvs + built wheels) --
+# regenerate any of these with setup_sandbox.sh, no need to version them.
+iteration-*/*/*/*/sandbox/
+iteration-*/*/*/*/sandbox_setup.log
+sandbox-template/toy_cisternal/.venv/
+sandbox-template/toy_cisternal/dist/
+sandbox-template/toy_cisternal/*.egg-info/
