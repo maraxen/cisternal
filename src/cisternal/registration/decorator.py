@@ -18,6 +18,10 @@ Usage::
     async def my_async_tool(x: int) -> int:
         return x * 2
 
+    @tool(registry="bathos", name="list_runs")
+    async def mcp_list_runs_tool(x: int) -> int:
+        return x * 2
+
     # Both of these are True:
     assert my_sync_tool is my_sync_tool   # trivially
     assert asyncio.iscoroutinefunction(my_async_tool)
@@ -47,6 +51,7 @@ def tool(
     fn: None = None,
     *,
     registry: str = "default",
+    name: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...  # @tool(...)
 
 
@@ -54,6 +59,7 @@ def tool(
     fn: Callable[..., Any] | None = None,
     *,
     registry: str = "default",
+    name: str | None = None,
 ) -> Callable[..., Any]:
     """Pure metadata marker: register *fn* in the named registry.
 
@@ -66,12 +72,16 @@ def tool(
         fn:       The function to register.  Supplied positionally when the
                   decorator is used bare (``@tool``).
         registry: Which named registry partition to store the tool in.
+        name:     Override for the registered/exposed tool name. Defaults to
+                  ``fn.__name__``. Useful when the Python function name
+                  (e.g. an ``mcp_x_tool`` wrapper) differs from the name a
+                  consumer wants exposed to callers (e.g. ``x``).
 
     Returns:
         The original *fn* (not a wrapper).
     """
     def _register_and_return(f: Callable[..., Any]) -> Callable[..., Any]:
-        register(f, registry=registry)
+        register(f, registry=registry, name=name)
         # Benign marker attr — does NOT change callable identity.
         f.__cisternal_tool__ = True  # type: ignore[attr-defined]
         return f

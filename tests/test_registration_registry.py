@@ -322,3 +322,40 @@ class TestToolEntry:
         assert entry.name == "named_fn"
         assert entry.fn is named_fn
         assert entry.registry == "bathos"
+
+
+# ---------------------------------------------------------------------------
+# name= override: registered/exposed name can differ from fn.__name__
+# ---------------------------------------------------------------------------
+
+class TestNameOverride:
+    def test_name_override_stores_under_given_name(self):
+        """@tool(name=...) stores the ToolEntry under the override, not fn.__name__."""
+        @tool(registry="bathos", name="list_runs")
+        def mcp_list_runs_tool(x: int) -> int:
+            return x
+
+        assert "list_runs" in _registry("bathos")
+        assert "mcp_list_runs_tool" not in _registry("bathos")
+
+        entry = _registry("bathos")["list_runs"]
+        assert entry.name == "list_runs"
+        assert entry.fn is mcp_list_runs_tool
+        assert entry.registry == "bathos"
+
+    def test_no_name_override_defaults_to_fn_name(self):
+        """Omitting name= still defaults to fn.__name__ (backward compatible)."""
+        @tool(registry="bathos")
+        def default_named_fn() -> None:
+            pass
+
+        assert "default_named_fn" in _registry("bathos")
+
+    def test_name_override_purity_preserved(self):
+        """AC-M2-1 still holds with name=: decorated_fn is fn."""
+        @tool(registry="bathos", name="exposed_name")
+        def internal_fn(x: int) -> int:
+            return x * 2
+
+        assert internal_fn(3) == 6
+        assert asyncio.iscoroutinefunction(internal_fn) is False
