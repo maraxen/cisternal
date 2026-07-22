@@ -89,8 +89,10 @@ def wire(
         1. Take a point-in-time snapshot of *registry* via
            :func:`~cisternal.registration.registry._snapshot`.
         2. For each entry in the snapshot: produce an MCP callable via
-           :func:`~cisternal.registration.compose.compose_mcp_callable` and
-           register it on *server* using ``server.add_tool(callable)``.
+           :func:`~cisternal.registration.compose.compose_mcp_callable`, wrap it
+           in a ``fastmcp.tools.Tool`` explicitly named ``entry.name`` (AC-M2-15
+           -- this is NOT always the same as the callable's ``__name__``), and
+           register it on *server* via ``server.add_tool(tool)``.
         3. If *app* is given: register a CLI command per entry via
            ``app.command(name=entry.name)(entry.fn)``.  The CLI callable is
            a PASSTHROUGH to the original function; it does NOT emit telemetry
@@ -151,8 +153,16 @@ def wire(
         # Generate the async MCP callable (E2/E1/H1 guarantees from compose).
         mcp_callable = compose_mcp_callable(entry.fn)
 
-        # Register on the FastMCP server (same API used in test_registration_compose.py).
-        server.add_tool(mcp_callable)
+        # Explicitly name the registered Tool as entry.name (AC-M2-15). A bare
+        # callable falls back to FastMCP's own name inference, which reads
+        # mcp_callable.__name__ (== entry.fn.__name__ via compose's
+        # functools.update_wrapper) -- NOT entry.name. Whenever a consumer's
+        # wrapper function name differs from the name= override passed to
+        # @cisternal.tool, that fallback silently exposes the wrong tool name.
+        from fastmcp.tools import Tool
+
+        fastmcp_tool = Tool.from_function(mcp_callable, name=entry.name)
+        server.add_tool(fastmcp_tool)
         mcp_tool_names.append(entry.name)
 
         # Register CLI command if app is supplied.
