@@ -434,6 +434,55 @@ class TestWiredRegistryStructure:
 
 
 # ---------------------------------------------------------------------------
+# AC-M2-15: name= override actually reaches the wired FastMCP server
+# ---------------------------------------------------------------------------
+
+class TestNameOverrideReachesServer:
+    """A @tool(name=...) override must be the name FastMCP actually exposes,
+    not just what the internal registry snapshot records (regression: wire()
+    previously passed the bare callable to server.add_tool(), which falls
+    back to inspect on the callable's own __name__ and silently drops the
+    override whenever the wrapper function's name differs from it)."""
+
+    @pytest.mark.asyncio
+    async def test_wired_server_uses_name_override_not_fn_name(self):
+        """The FastMCP-registered tool name is entry.name, not fn.__name__."""
+
+        @tool(name="list_runs")
+        def mcp_list_runs_tool(x: int) -> int:
+            return x
+
+        server = fastmcp.FastMCP("test-name-override-server")
+        wire(server)
+
+        names = await _tool_names(server)
+        assert "list_runs" in names, (
+            f"Expected the name= override 'list_runs' on the wired server, "
+            f"got: {names}"
+        )
+        assert "mcp_list_runs_tool" not in names, (
+            f"The raw function name must NOT leak onto the wired server "
+            f"when name= overrides it, got: {names}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_wired_registry_and_server_agree_on_overridden_name(self):
+        """WiredRegistry.mcp_tools and the actual server tool set must match
+        for an overridden name (no silent divergence between the two)."""
+
+        @tool(registry="bathos", name="run")
+        def mcp_run_tool(x: int) -> int:
+            return x
+
+        server = fastmcp.FastMCP("test-name-override-agreement")
+        result = wire(server, registry="bathos", expected=["run"])
+
+        names = await _tool_names(server)
+        assert "run" in result.mcp_tools
+        assert "run" in names
+
+
+# ---------------------------------------------------------------------------
 # Adapter invariant — C5 / AC-M2-6
 # ---------------------------------------------------------------------------
 
