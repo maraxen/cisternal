@@ -1,6 +1,6 @@
 ---
 name: developing-cisternal-tools
-description: Guides safe, release-ready development of cisternal — the shared telemetry + registration substrate consumed by multiple sibling projects (bathos, contemplex, xperiri, myxcel). Use this whenever fixing a bug in cisternal itself, extending its registration/wire()/telemetry/export API, or cutting and publishing a new cisternal release (version bump, GitHub Release, PyPI publish via trusted OIDC). Also trigger whenever a consumer integration (e.g. bathos migrating onto cisternal.wire()) surfaces what looks like a bug in cisternal's public API — even if the user only asks you to fix or work around it in the consumer repo. This skill covers deciding whether to patch upstream in cisternal vs. work around it downstream, proving the fix with a regression test that actually fails without it, verifying end-to-end against the real consumer before publishing, and closing the loop by updating every dependent project afterward. Use proactively — don't wait for the user to say "cisternal" by name if the symptom (silently wrong behavior in a decorator/registry/wire() call, a consumer-side workaround for what looks like a library defect) points there.
+description: Guides safe, release-ready development of cisternal — the shared telemetry + registration substrate consumed by multiple sibling projects (bathos, contemplex, xperiri, myxcel). Use this whenever fixing a bug in cisternal itself, extending its registration/wire()/telemetry/export API, or cutting and publishing a new cisternal release (version bump, GitHub Release, PyPI publish via trusted OIDC). Also trigger whenever a consumer integration (e.g. bathos migrating onto cisternal.wire()) surfaces what looks like a bug in cisternal's public API — even if the user only asks you to fix or work around it in the consumer repo. Also trigger whenever a consumer wants to be packaged/exported as an agent-surface plugin (Claude Code, Cursor, Copilot, Antigravity) via `cisternal assets export` and a `.praxia/manifest.toml` — including debugging why an export silently dropped an agent/skill, or why a manifest's declared paths aren't resolving. This skill covers deciding whether to patch upstream in cisternal vs. work around it downstream, proving the fix with a regression test that actually fails without it, verifying end-to-end against the real consumer before publishing, closing the loop by updating every dependent project afterward, and the manifest/registry asset-export workflow's specific gotchas (path resolution, fail-open exit codes, export_command semantics). Use proactively — don't wait for the user to say "cisternal" by name if the symptom (silently wrong behavior in a decorator/registry/wire() call, a consumer-side workaround for what looks like a library defect, an agent/skill missing from an exported plugin bundle) points there.
 ---
 
 # Developing cisternal tools
@@ -39,6 +39,78 @@ Sandbox or permission denials during this work (writing into a sibling repo's wo
 
 The `wire()` name-override bug (`maraxen/cisternal#6`) is the canonical example of why this loop matters: the registry snapshot and `WiredRegistry.mcp_tools` both *correctly* recorded the intended tool name — only the actual FastMCP registration (`server.add_tool(...)`) silently fell back to the raw Python function's `__name__`. Every existing test asserted against the registry-level view, which was right all along, so nothing caught it. The lesson: **when a fix touches a boundary between two systems (a registry and a transport, a decorator and a real server), assert against the far side of that boundary** (`await app.list_tools()`, not just `WiredRegistry.mcp_tools`), not just the near side that's convenient to construct a test double for.
 
+## Packaging a consumer as an agent-surface plugin
+
+Registering tools via `@cisternal.tool` + `wire()` is only half of what cisternal offers a
+consumer. The other half, `cisternal assets export`, turns a consumer's *whole* agent
+footprint — its MCP tools, plus any skills/agents/hooks it ships — into a real,
+installable plugin bundle (Claude Code, Cursor, Copilot, or Antigravity). Reach for this
+whenever a consumer wants to be distributed as a plugin, not just consumed as a library.
+
+Two sources combine into one bundle:
+
+- **The wired MCP registry** (`--registry <name> --import <module that calls wire()>`)
+  contributes *commands only* — one per tool, sourced from the registry snapshot. This is
+  the same registry a consumer already populates via `@cisternal.tool(registry=...)`.
+- **A `.praxia/manifest.toml`** (`--manifest path/to/manifest.toml`) declares everything a
+  registry can't: `[plugin]` metadata, `[plugin.mcp]` (the MCP server launch command),
+  `[[plugin.skills]]`, `[[plugin.agents]]`, `[[plugin.hook_specs]]`.
+
+Passing both (`CompositeAssetSource`) merges them: manifest-declared commands win by name on
+conflict, registry-derived commands fill in the rest. Passing only `--registry` (no
+manifest) exports commands alone; passing only `--manifest` exports without any tool
+commands. For a full bundle — the common case — pass both.
+
+```bash
+cisternal assets export \
+  --manifest .praxia/manifest.toml --registry <consumer-registry-name> \
+  --import <consumer_package.mcp_module> \
+  --surface claude --out <output-dir>
+```
+
+### The manifest-path gotcha (a real bug this session hit)
+
+`ManifestAssetSource` resolves every `path = "..."` in the manifest **relative to the
+manifest file's own directory**, not the repo root. A manifest at `.praxia/manifest.toml`
+declaring `path = "agent_assets/skills/foo/SKILL.md"` will look for
+`.praxia/agent_assets/skills/foo/SKILL.md` — almost never what you meant. Paths need a
+`../` prefix to climb back out of `.praxia/` to the repo root (e.g.
+`../agent_assets/skills/foo/SKILL.md`). Verify with `--dry-run` before trusting any path in
+a manifest you didn't just write yourself.
+
+### It fails open, not closed — read stderr, don't just check the exit code
+
+`cisternal assets export` **always exits 0** (a deliberate never-raise convention) and
+reports every problem as a stderr warning instead: an unreadable path, a missing skill body,
+an unrecognized manifest table. The emitters (`ClaudeEmitter` et al.) are themselves
+fail-closed on top of that — a skill or agent with an empty `body` (because its file failed
+to load) is **silently dropped from the bundle**, not substituted with a placeholder or
+flagged as an error in the output itself. The combined effect: a badly-pathed manifest
+produces a bundle that *looks* successful (valid `plugin.json`, exit code 0) while quietly
+missing half its assets. Treat any non-empty stderr from an export run as a real failure to
+investigate, exactly like the "diagnose against real installed code, not assumptions"
+principle above — don't infer correctness from the exit code or from the presence of
+*some* output files.
+
+### `[plugin.export_command]` is not a shell command
+
+This table's values are lists of **markdown file paths** — each becomes a `CommandAsset`
+named after the file's stem, meant for a consumer that has literal slash-command body files
+to bundle. It is easy to mistake this for "the CLI invocation used to run export" (a shell
+argv array) — that's a different, unrelated concept, and cisternal's loader will interpret
+argv tokens as bogus file paths, producing a wall of "missing or unreadable" warnings for
+`bth`, `export`, `--surface`, etc. If a consumer has no real command markdown files (e.g.
+its "commands" are just its MCP tools, already covered by the registry side), leave this
+table out entirely rather than repurposing it.
+
+### Don't let the bundle's version drift from the package's
+
+A manifest's own `version` field is easy to forget to bump and will happily ship a stale
+version string in `plugin.json` forever if nothing overrides it. Pass `--name`/`--version`
+explicitly at export time, sourced from the actual installed package
+(`importlib.metadata.version(...)` or the package's own `__version__`), so the manifest's
+hand-maintained field becomes a fallback rather than the source of truth.
+
 ## Common commands
 
 ```bash
@@ -56,4 +128,9 @@ curl -sf https://pypi.org/pypi/<package>/json | python3 -c \
 # (pyproject.toml, DEV-ONLY — revert before committing):
 #   [tool.uv.sources]
 #   cisternal = { path = "../relative/path/to/cisterna", editable = true }
+
+# Dry-run a consumer's plugin export before trusting any file paths in its manifest
+cisternal assets export \
+  --manifest .praxia/manifest.toml --registry <name> --import <module> \
+  --surface claude --dry-run
 ```
