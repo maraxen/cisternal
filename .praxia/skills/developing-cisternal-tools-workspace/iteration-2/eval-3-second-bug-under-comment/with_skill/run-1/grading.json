@@ -1,0 +1,60 @@
+{
+  "expectations": [
+    {
+      "text": "Correctly root-caused symptom 1 (list_widgets not found) to toy_cisternal's wire()/ToyApp.add_tool() name-override drop, same shape as eval 1",
+      "passed": true,
+      "evidence": "Summary and commit 2e4a77e correctly identify the bare-callable/add_tool __name__ fallback as root cause 1."
+    },
+    {
+      "text": "Correctly root-caused symptom 2 (get_widget returning deleted:true) to a duplicate @tool(name=\"get_widget\") decorator on delete_widget in toy_consumer's own source -- a consumer-side authoring bug, not a cisternal defect",
+      "passed": true,
+      "evidence": "Summary and app.py diff confirm: delete_widget's duplicate name= override identified as the cause, fixed by giving it its own name."
+    },
+    {
+      "text": "Did not conflate the two bugs -- did not attempt to fix the name-collision inside cisternal, and did not attribute the wire() drop to a consumer-side cause",
+      "passed": true,
+      "evidence": "Fixed the collision in toy_consumer/app.py (delete_widget renamed). Also added a defensive collision-raise in registry.py, but verified via diff this is an additive safety net (raises ValueError on any future collision) not a substitute for the consumer-side fix -- the actual collision was still resolved at the source."
+    },
+    {
+      "text": "Did not take the 'intentional soft-delete alias' comment at face value -- verified empirically (ran the repro script, checked for any real spec/test backing the claim) rather than accepting the comment as ground truth",
+      "passed": true,
+      "evidence": "Summary states comment was debunked via grep for alias/soft-delete/overwrite/collision across both repos and reading all existing tests -- found zero backing, concluded it was self-justification for a bug."
+    },
+    {
+      "text": "Fixed the wire() bug upstream in toy_cisternal following the full loop: regression test against app.list_tools() (not just wire()'s return value or registry snapshot), verified fail-then-pass, ran toy_cisternal's full suite, version bump as a distinct step from the fix, rebuilt and republished the wheel to the local index",
+      "passed": true,
+      "evidence": "Verified directly: git log shows fix commit 2e4a77e separate from chore(release) commit 1674410. Test asserts against app.list_tools(). Summary states fail-then-pass verified via git stash. Full 6-test suite run. Wheel rebuilt and copied to toy_cisternal_index/."
+    },
+    {
+      "text": "Fixed the duplicate-name collision inside toy_consumer's own source (e.g. gave delete_widget its own @tool(name=\"delete_widget\"))",
+      "passed": true,
+      "evidence": "Verified directly: app.py shows @tool(name=\"delete_widget\") on mcp_delete_widget_tool."
+    },
+    {
+      "text": "Updated toy_consumer's dependency to resolve the new toy_cisternal version from the index (not a leftover local editable/path override)",
+      "passed": true,
+      "evidence": "pyproject.toml shows toy-cisternal>=0.1.1. Summary states no [tool.uv.sources] override was added, confirmed via importlib.metadata.version reporting 0.1.1 post-upgrade."
+    },
+    {
+      "text": "Re-verified BOTH symptoms end-to-end after both fixes -- ran simulate_dashboard_call.py AND simulate_get_widget_confusion.py (or equivalent) against the final state, confirming list_widgets, get_widget, and delete_widget are all distinctly registered and behave correctly",
+      "passed": true,
+      "evidence": "Summary states both repro scripts re-run on main with real published 0.1.1 wheel, both reporting OK."
+    },
+    {
+      "text": "Ran both toy_cisternal's and toy_consumer's full test suites after the fixes, not just new regression tests",
+      "passed": true,
+      "evidence": "Summary states all 6 cisternal tests and all 4 consumer tests run and passing, per-file due to the local suite guard."
+    },
+    {
+      "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+      "passed": true,
+      "evidence": "No GitHub remote/gh release used; publish simulated via uv build + local index copy."
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  }
+}

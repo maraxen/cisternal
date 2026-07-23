@@ -1,0 +1,12 @@
+[
+  {"query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.", "should_trigger": true},
+  {"query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?", "should_trigger": true},
+  {"query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?", "should_trigger": true},
+  {"query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?", "should_trigger": true},
+  {"query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?", "should_trigger": true},
+  {"query": "Can you help me write a unit test for bathos's campaign_conclude function?", "should_trigger": false},
+  {"query": "What's the JAX equivalent of torch.nn.functional.pad?", "should_trigger": false},
+  {"query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?", "should_trigger": false},
+  {"query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.", "should_trigger": false},
+  {"query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?", "should_trigger": false}
+]

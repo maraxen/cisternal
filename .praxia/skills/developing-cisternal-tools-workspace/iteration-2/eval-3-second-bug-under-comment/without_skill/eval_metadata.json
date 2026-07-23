@@ -1,0 +1,17 @@
+{
+  "eval_id": 3,
+  "eval_name": "eval-3-second-bug-under-comment",
+  "prompt": "Our internal dashboard team filed a bug report with two parts. First, same shape as before: calling the 'list_widgets' tool against toy-consumer returns 'tool not found', even though toy-consumer's own tests pass. Second, and separately, another team noticed that calling the 'get_widget' tool sometimes returns {'deleted': True} instead of the widget data they expect -- as if it's being confused with a delete operation. There's a comment in toy-consumer's source claiming this is an intentional 'soft-delete alias' feature, but nobody on that team can find any spec or documentation for such a feature. toy-consumer is at <TOY_CONSUMER_PATH> (its own git repo, venv at .venv/), and it depends on toy-cisternal (a shared library also used by a couple of other internal teams) which is at <TOY_CISTERNAL_PATH> (its own git repo, tagged v0.1.0) and gets installed into toy-consumer's venv from a local package index at <TOY_INDEX_PATH> (this stands in for a real PyPI-style registry in this environment -- don't try to reach the real internet). Can you figure out what's actually going on and fix it properly? You can run `.venv/bin/python scripts/simulate_dashboard_call.py` and `.venv/bin/python scripts/simulate_get_widget_confusion.py` from toy-consumer to see the two reported symptoms directly.",
+  "assertions": [
+    "Correctly root-caused symptom 1 (list_widgets not found) to toy_cisternal's wire()/ToyApp.add_tool() name-override drop, same shape as eval 1",
+    "Correctly root-caused symptom 2 (get_widget returning deleted:true) to a duplicate @tool(name=\"get_widget\") decorator on delete_widget in toy_consumer's own source -- a consumer-side authoring bug, not a cisternal defect",
+    "Did not conflate the two bugs -- did not attempt to fix the name-collision inside cisternal, and did not attribute the wire() drop to a consumer-side cause",
+    "Did not take the 'intentional soft-delete alias' comment at face value -- verified empirically (ran the repro script, checked for any real spec/test backing the claim) rather than accepting the comment as ground truth",
+    "Fixed the wire() bug upstream in toy_cisternal following the full loop: regression test against app.list_tools() (not just wire()'s return value or registry snapshot), verified fail-then-pass, ran toy_cisternal's full suite, version bump as a distinct step from the fix, rebuilt and republished the wheel to the local index",
+    "Fixed the duplicate-name collision inside toy_consumer's own source (e.g. gave delete_widget its own @tool(name=\"delete_widget\"))",
+    "Updated toy_consumer's dependency to resolve the new toy_cisternal version from the index (not a leftover local editable/path override)",
+    "Re-verified BOTH symptoms end-to-end after both fixes -- ran simulate_dashboard_call.py AND simulate_get_widget_confusion.py (or equivalent) against the final state, confirming list_widgets, get_widget, and delete_widget are all distinctly registered and behave correctly",
+    "Ran both toy_cisternal's and toy_consumer's full test suites after the fixes, not just new regression tests",
+    "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given"
+  ]
+}

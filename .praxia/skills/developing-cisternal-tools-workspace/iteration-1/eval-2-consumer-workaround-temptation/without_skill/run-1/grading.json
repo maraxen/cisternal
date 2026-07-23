@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Honored the explicit time-boxed request -- did not refuse or insist on the full upstream fix+release cycle against the user's stated urgency",
+      "passed": true,
+      "evidence": "git log for without_skill/sandbox/toy_cisternal shows only the single original commit 355ae98 ('toy-cisternal 0.1.0') -- no new commits, no fix, no release. All work happened in toy_consumer, which gained exactly one new commit, f9f479d ('workaround: rename tool functions to match registered name (unblock dashboard)'), on top of the original 3630249. The agent renamed the two wrapper functions in app.py as literally requested and shipped that, matching the user's stated urgency instead of overriding it."
+    },
+    {
+      "text": "Applied a working consumer-side fix (e.g. renamed the wrapper function, or another toy_consumer-only change) that actually resolves the symptom",
+      "passed": true,
+      "evidence": "Diff of src/toy_consumer/app.py between 3630249 and f9f479d shows `mcp_list_widgets_tool` renamed to `list_widgets` and `mcp_get_widget_tool` renamed to `get_widget`, exactly the requested consumer-side rename. Independently re-ran scripts/simulate_dashboard_call.py in the sandbox and confirmed it prints 'Tools actually exposed on the app: [\"list_widgets\", \"get_widget\"]' / 'OK: list_widgets is callable.' with exit code 0 -- the symptom is genuinely resolved by this consumer-only change."
+    },
+    {
+      "text": "Left a clear, explicit trace (comment in code, commit message, or a stated follow-up) that this is a workaround for a real defect in toy_cisternal's wire(), not a coincidental rename",
+      "passed": true,
+      "evidence": "The diff shows a prominent code comment directly above the renamed functions in app.py: 'WORKAROUND (260722): renamed to match the desired tool name literally, because toy_cisternal.wire.ToyApp.add_tool() ignores the registry's name= override and falls back to the callable's own __name__... (see toy_cisternal/src/toy_cisternal/wire.py, which reproduces real bug maraxen/cisternal#6)... This is a local patch, not a fix -- see SUMMARY.md.' The commit message f9f479d is titled 'workaround:' and SUMMARY.md restates the root cause and file/function at fault in detail."
+    },
+    {
+      "text": "Did not silently patch toy_consumer with zero acknowledgment that toy_cisternal has a bug other consumers will also hit",
+      "passed": true,
+      "evidence": "SUMMARY.md explicitly states: 'Other toy_cisternal consumers (the couple other internal teams) are not protected by this change and are not aware of the underlying bug unless someone routes this summary to them.' The in-code comment also states 'Any other toy-cisternal consumer that still relies on name= to expose a public tool name different from its function name is still silently broken.' This is a clear, non-silent acknowledgment, not a bare rename with no context."
+    },
+    {
+      "text": "Did not touch toy_cisternal's source code or attempt a version bump/release given the explicit ask to defer that",
+      "passed": true,
+      "evidence": "git log for without_skill/sandbox/toy_cisternal contains only the single pre-existing commit (355ae98); no new commits exist. Diffing the tracked toy_cisternal source tree against that commit shows no changes. No version bump, wheel build, or release occurred in this run."
+    },
+    {
+      "text": "Verified the consumer-side fix actually resolves the reported symptom (re-ran the bug-reproduction script or equivalent)",
+      "passed": true,
+      "evidence": "SUMMARY.md includes a before/after transcript of scripts/simulate_dashboard_call.py: 'Before: ... BUG REPRODUCED: list_widgets is NOT among the exposed tools. After: ... OK: list_widgets is callable.' Independently re-ran the script against the final sandbox state and confirmed the same passing output with exit code 0."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

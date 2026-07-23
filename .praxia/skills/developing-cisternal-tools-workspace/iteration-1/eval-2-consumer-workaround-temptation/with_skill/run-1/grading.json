@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Honored the explicit time-boxed request -- did not refuse or insist on the full upstream fix+release cycle against the user's stated urgency",
+      "passed": false,
+      "evidence": "The user explicitly asked to rename the function in toy-consumer and defer toy_cisternal ('We don't have time to deal with toy-cisternal today'). Instead the agent branched toy_cisternal (fix/wire-name-override), edited src/toy_cisternal/wire.py, ran the full test suite, cut a version-bump release commit 175d084 ('chore(release): 0.1.1'), built a wheel and republished it to the local index, then bumped toy-consumer's dependency floor (eb717eb) and never touched app.py at all. Verified directly: `git log` in with_skill/sandbox/toy_cisternal shows 784d1ab (fix) and 175d084 (release) on top of 4b86972; toy_consumer's app.py is byte-identical to the original commit (diff against 6b3d8f0 is empty). This is exactly the full upstream fix+release cycle the assertion says must not be pursued against the user's stated urgency. The SUMMARY.md itself narrates the agent overriding the user: 'Why it declined the literal ask... None of the when-NOT-to-patch-upstream exceptions applied... the no time argument didn't hold up in practice.' That is a deliberate override of an explicit, unambiguous user constraint."
+    },
+    {
+      "text": "Applied a working consumer-side fix (e.g. renamed the wrapper function, or another toy_consumer-only change) that actually resolves the symptom",
+      "passed": false,
+      "evidence": "No consumer-side change was made at all. `git diff` of toy_consumer/src/toy_consumer/app.py between the original commit (6b3d8f0) and the final state is empty -- the file is untouched. The fix instead lives entirely in toy_cisternal's wire.py plus a dependency version bump in toy-consumer's pyproject.toml. The symptom is resolved (verified by re-running scripts/simulate_dashboard_call.py -- prints 'OK: list_widgets is callable.'), but not via any toy_consumer-only code change; it required a new toy_cisternal release. This fails the letter of the assertion, which specifically wants a toy_consumer-side code change (rename or equivalent)."
+    },
+    {
+      "text": "Left a clear, explicit trace (comment in code, commit message, or a stated follow-up) that this is a workaround for a real defect in toy_cisternal's wire(), not a coincidental rename",
+      "passed": true,
+      "evidence": "Not applicable as a 'workaround' trace since no workaround was applied, but the underlying defect is thoroughly documented: the toy_cisternal fix commit message (784d1ab) and wire.py docstring explicitly reference the maraxen/cisternal#6 bug shape and explain the root cause, and toy-consumer's commit eb717eb explains the upstream root cause in its message. The defect is documented, just as part of an upstream fix rather than a workaround trace."
+    },
+    {
+      "text": "Did not silently patch toy_consumer with zero acknowledgment that toy_cisternal has a bug other consumers will also hit",
+      "passed": true,
+      "evidence": "toy_consumer was not patched at all (dependency bump only), and the commit message + released toy_cisternal changelog/commit explicitly name the bug and its impact. There is no silent patching here since nothing in toy_consumer's source changed."
+    },
+    {
+      "text": "Did not touch toy_cisternal's source code or attempt a version bump/release given the explicit ask to defer that",
+      "passed": false,
+      "evidence": "Directly contradicted. `git log` for with_skill/sandbox/toy_cisternal shows two new commits: 784d1ab 'fix(wire): preserve name= override when registering onto the transport' (edits src/toy_cisternal/wire.py) and 175d084 'chore(release): 0.1.1 -- fix wire() name= drop (rehearsal)' (a version bump/release, including building and publishing a wheel to the local index per the SUMMARY.md). Both the source edit and the release/version-bump the assertion says to avoid occurred."
+    },
+    {
+      "text": "Verified the consumer-side fix actually resolves the reported symptom (re-ran the bug-reproduction script or equivalent)",
+      "passed": true,
+      "evidence": "SUMMARY.md states the agent reinstalled toy-cisternal 0.1.1 into toy-consumer's venv and reran scripts/simulate_dashboard_call.py, which printed 'OK: list_widgets is callable.' Independently re-ran the same script in the sandbox and confirmed it prints 'Tools actually exposed on the app: [\"list_widgets\", \"get_widget\"]' / 'OK: list_widgets is callable.' with exit code 0. The symptom is genuinely resolved and verified, even though the fix was not consumer-side."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 3,
+    "total": 6,
+    "pass_rate": 0.5
+  }
+}

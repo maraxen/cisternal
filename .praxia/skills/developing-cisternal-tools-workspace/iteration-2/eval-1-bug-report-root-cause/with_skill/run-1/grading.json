@@ -1,0 +1,60 @@
+{
+  "expectations": [
+    {
+      "text": "Root-caused the bug to toy_cisternal's wire()/ToyApp.add_tool() dropping the name= override, not to toy_consumer",
+      "passed": true,
+      "evidence": "Summary correctly identifies wire() passing a bare callable and ToyApp.add_tool()'s __name__ fallback as the root cause; registry/wire() return value called out as correct throughout."
+    },
+    {
+      "text": "Fixed the bug inside toy_cisternal's source, not by renaming toy_consumer's wrapper functions",
+      "passed": true,
+      "evidence": "wire.py changed to app.add_tool(ToyTool(name=entry.name, fn=callable_)); toy_consumer wrapper functions left as mcp_x_tool names."
+    },
+    {
+      "text": "Added a new regression test that asserts against the actual transport (app.list_tools() / ToyApp), not just wire()'s return value or the registry snapshot",
+      "passed": true,
+      "evidence": "test_wire_registers_tool_under_registry_name_on_the_app asserts against app.list_tools()."
+    },
+    {
+      "text": "Verified (or the transcript shows evidence of verifying) that the new test fails on the pre-fix code and passes after the fix",
+      "passed": true,
+      "evidence": "Summary states the test failed with AssertionError against pre-fix code, then passed after the fix -- explicit fail-then-pass evidence."
+    },
+    {
+      "text": "Ran toy_cisternal's full existing test suite after the fix, not just the new test",
+      "passed": true,
+      "evidence": "Ran full 5-test suite, all passing."
+    },
+    {
+      "text": "Bumped toy_cisternal's version as a distinct step from the code fix",
+      "passed": true,
+      "evidence": "Two-commit pattern: fix commit 70f5ef1, separate chore(release): 0.1.1 commit 38a9a5a."
+    },
+    {
+      "text": "Rebuilt the toy_cisternal wheel and republished it to the local flat-file index (toy_cisternal_index)",
+      "passed": true,
+      "evidence": "uv build + copied wheel/sdist into toy_cisternal_index/."
+    },
+    {
+      "text": "Updated toy_consumer's dependency to resolve the new version from the index (not left depending on a local editable/path override)",
+      "passed": true,
+      "evidence": "Bumped dependency floor to >=0.1.1, deleted stale lockfile, uv lock/sync --find-links resolved the real 0.1.1 wheel, confirmed via dist-info -- no editable override."
+    },
+    {
+      "text": "Re-ran toy_consumer's test suite and/or the bug-reproduction script against the newly resolved version to confirm the fix end-to-end",
+      "passed": true,
+      "evidence": "Reran consumer suite (2/2) and simulate_dashboard_call.py, confirming list_widgets now callable."
+    },
+    {
+      "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+      "passed": true,
+      "evidence": "No GitHub remote used; publish simulated via uv build + local index copy."
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  }
+}

@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "toy-consumer"
+version = "0.1.0"
+description = "Toy rehearsal stand-in for a project that depends on toy-cisternal"
+requires-python = ">=3.11"
+dependencies = [
+    "toy-cisternal>=0.1.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toy_consumer"]

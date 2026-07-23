@@ -1,0 +1,549 @@
+{
+  "exit_reason": "max_iterations (3)",
+  "original_description": "Guides safe, release-ready development of cisternal \u2014 the shared telemetry + registration substrate consumed by multiple sibling projects (bathos, contemplex, xperiri, myxcel). Use this whenever fixing a bug in cisternal itself, extending its registration/wire()/telemetry/export API, or cutting and publishing a new cisternal release (version bump, GitHub Release, PyPI publish via trusted OIDC). Also trigger whenever a consumer integration (e.g. bathos migrating onto cisternal.wire()) surfaces what looks like a bug in cisternal's public API \u2014 even if the user only asks you to fix or work around it in the consumer repo. This skill covers deciding whether to patch upstream in cisternal vs. work around it downstream, proving the fix with a regression test that actually fails without it, verifying end-to-end against the real consumer before publishing, and closing the loop by updating every dependent project afterward. Use proactively \u2014 don't wait for the user to say \"cisternal\" by name if the symptom (silently wrong behavior in a decorator/registry/wire() call, a consumer-side workaround for what looks like a library defect) points there.",
+  "best_description": "Guides safe, release-ready development of cisternal \u2014 the shared telemetry + registration substrate consumed by multiple sibling projects (bathos, contemplex, xperiri, myxcel). Use this whenever fixing a bug in cisternal itself, extending its registration/wire()/telemetry/export API, or cutting and publishing a new cisternal release (version bump, GitHub Release, PyPI publish via trusted OIDC). Also trigger whenever a consumer integration (e.g. bathos migrating onto cisternal.wire()) surfaces what looks like a bug in cisternal's public API \u2014 even if the user only asks you to fix or work around it in the consumer repo. This skill covers deciding whether to patch upstream in cisternal vs. work around it downstream, proving the fix with a regression test that actually fails without it, verifying end-to-end against the real consumer before publishing, and closing the loop by updating every dependent project afterward. Use proactively \u2014 don't wait for the user to say \"cisternal\" by name if the symptom (silently wrong behavior in a decorator/registry/wire() call, a consumer-side workaround for what looks like a library defect) points there.",
+  "best_score": "5/10",
+  "best_train_score": "5/10",
+  "best_test_score": null,
+  "final_description": "Use for hands-on work on the cisternal package: fixing or extending wire(), the @tool decorator (including new parameters like timeout=), registration internals, telemetry, or export code, and for cutting/publishing a cisternal release (version bump, GitHub Release, PyPI). Trigger immediately whenever MCP tools register under the wrong function name instead of a name= override, wire() misbehaves, or any other registration/decorator bug shows up \u2014 including when reported from a consumer repo (bathos, contemplex, xperiri, myxcel) without the word \"cisternal\" appearing at all. Guides root-cause-vs-workaround decisions, regression tests that fail before the fix, end-to-end verification against a real consumer, and updating dependents post-release. Skip for consumer-only work with no cisternal API involvement: schema/field changes, generic MCP client timeout config, unrelated CI setup.",
+  "iterations_run": 3,
+  "holdout": 0.0,
+  "train_size": 10,
+  "test_size": 0,
+  "history": [
+    {
+      "iteration": 1,
+      "description": "Guides safe, release-ready development of cisternal \u2014 the shared telemetry + registration substrate consumed by multiple sibling projects (bathos, contemplex, xperiri, myxcel). Use this whenever fixing a bug in cisternal itself, extending its registration/wire()/telemetry/export API, or cutting and publishing a new cisternal release (version bump, GitHub Release, PyPI publish via trusted OIDC). Also trigger whenever a consumer integration (e.g. bathos migrating onto cisternal.wire()) surfaces what looks like a bug in cisternal's public API \u2014 even if the user only asks you to fix or work around it in the consumer repo. This skill covers deciding whether to patch upstream in cisternal vs. work around it downstream, proving the fix with a regression test that actually fails without it, verifying end-to-end against the real consumer before publishing, and closing the loop by updating every dependent project afterward. Use proactively \u2014 don't wait for the user to say \"cisternal\" by name if the symptom (silently wrong behavior in a decorator/registry/wire() call, a consumer-side workaround for what looks like a library defect) points there.",
+      "train_passed": 5,
+      "train_failed": 5,
+      "train_total": 10,
+      "train_results": [
+        {
+          "query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "What's the JAX equivalent of torch.nn.functional.pad?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you help me write a unit test for bathos's campaign_conclude function?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        }
+      ],
+      "test_passed": null,
+      "test_failed": null,
+      "test_total": null,
+      "test_results": null,
+      "passed": 5,
+      "failed": 5,
+      "total": 10,
+      "results": [
+        {
+          "query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "What's the JAX equivalent of torch.nn.functional.pad?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you help me write a unit test for bathos's campaign_conclude function?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "description": "Use when working on cisternal itself: fixing bugs in wire()/registration/telemetry/export, adding or changing its @tool decorator API, or cutting a release (version bump, GitHub Release, PyPI publish). Also use when a consumer project (bathos, contemplex, xperiri, myxcel) hits what looks like a cisternal defect \u2014 e.g. MCP tools registering under the wrong function name instead of the name= override, wire() silently misbehaving, or any other decorator/registry bug \u2014 even if the user frames it as a consumer-side question or workaround, and even if they never say \"cisternal\" by name. Covers deciding upstream-fix vs. downstream-workaround, writing a regression test that fails without the fix, verifying end-to-end against the real consumer, and updating dependents after release. Do not use for consumer-only work unrelated to cisternal's API \u2014 e.g. bathos schema/field changes, generic MCP client timeout configuration, or unrelated CI/GitHub Actions setup.",
+      "train_passed": 5,
+      "train_failed": 5,
+      "train_total": 10,
+      "train_results": [
+        {
+          "query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "What's the JAX equivalent of torch.nn.functional.pad?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you help me write a unit test for bathos's campaign_conclude function?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        }
+      ],
+      "test_passed": null,
+      "test_failed": null,
+      "test_total": null,
+      "test_results": null,
+      "passed": 5,
+      "failed": 5,
+      "total": 10,
+      "results": [
+        {
+          "query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "What's the JAX equivalent of torch.nn.functional.pad?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you help me write a unit test for bathos's campaign_conclude function?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "description": "Use for hands-on work on the cisternal package: fixing or extending wire(), the @tool decorator (including new parameters like timeout=), registration internals, telemetry, or export code, and for cutting/publishing a cisternal release (version bump, GitHub Release, PyPI). Trigger immediately whenever MCP tools register under the wrong function name instead of a name= override, wire() misbehaves, or any other registration/decorator bug shows up \u2014 including when reported from a consumer repo (bathos, contemplex, xperiri, myxcel) without the word \"cisternal\" appearing at all. Guides root-cause-vs-workaround decisions, regression tests that fail before the fix, end-to-end verification against a real consumer, and updating dependents post-release. Skip for consumer-only work with no cisternal API involvement: schema/field changes, generic MCP client timeout config, unrelated CI setup.",
+      "train_passed": 5,
+      "train_failed": 5,
+      "train_total": 10,
+      "train_results": [
+        {
+          "query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "What's the JAX equivalent of torch.nn.functional.pad?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you help me write a unit test for bathos's campaign_conclude function?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        }
+      ],
+      "test_passed": null,
+      "test_failed": null,
+      "test_total": null,
+      "test_results": null,
+      "passed": 5,
+      "failed": 5,
+      "total": 10,
+      "results": [
+        {
+          "query": "I need to fix a bug in cisternal's wire() function and cut a new release once it's verified.",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Can you add a `timeout=` parameter to cisternal's @tool decorator and ship it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "bathos just migrated onto cisternal.wire() and now half its MCP tools are showing up under weird internal function names instead of the names we gave them -- can you look into it?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "We need to publish v0.2.0 of cisternal to PyPI -- can you handle the release?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "Our MCP tool registration is silently exposing tools under the wrong Python function name instead of the name= override we gave them in the decorator -- anyone seen this shape of bug before?",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": false
+        },
+        {
+          "query": "What's the JAX equivalent of torch.nn.functional.pad?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you help me write a unit test for bathos's campaign_conclude function?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "Can you set up a GitHub Actions workflow for a brand new Python project I'm starting from scratch?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "I want to add a new field to bathos's RUN_SCHEMA pyarrow schema.",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        },
+        {
+          "query": "My Claude Code MCP tool calls keep timing out after 30 seconds -- how do I increase the timeout in the client config?",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 2,
+          "pass": true
+        }
+      ]
+    }
+  ]
+}
