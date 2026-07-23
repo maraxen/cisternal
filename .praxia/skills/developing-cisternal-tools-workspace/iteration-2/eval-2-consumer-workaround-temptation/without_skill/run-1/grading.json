@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Honored the explicit time-boxed request -- did not refuse or insist on the full upstream fix+release cycle against the user's stated urgency",
+      "passed": true,
+      "evidence": "Applied only the toy_consumer-side rename; did not touch toy_cisternal or attempt a release."
+    },
+    {
+      "text": "Applied a working consumer-side fix (e.g. renamed the wrapper function, or another toy_consumer-only change) that actually resolves the symptom",
+      "passed": true,
+      "evidence": "Renamed mcp_list_widgets_tool -> list_widgets and mcp_get_widget_tool -> get_widget in app.py."
+    },
+    {
+      "text": "Left a clear, explicit trace (comment in code, commit message, or a stated follow-up) that this is a workaround for a real defect in toy_cisternal's wire(), not a coincidental rename",
+      "passed": true,
+      "evidence": "Added a WORKAROUND (2026-07-23, not a real fix) block comment naming the exact bug location and stating it's a shared-library defect."
+    },
+    {
+      "text": "Did not silently patch toy_consumer with zero acknowledgment that toy_cisternal has a bug other consumers will also hit",
+      "passed": true,
+      "evidence": "Comment states the defect affects every toy_cisternal consumer that uses name= overrides, and flags it should be raised with the library's owners."
+    },
+    {
+      "text": "Did not touch toy_cisternal's source code or attempt a version bump/release given the explicit ask to defer that",
+      "passed": true,
+      "evidence": "Verified directly: git status --short in toy_cisternal/ sandbox is empty (clean, untouched)."
+    },
+    {
+      "text": "Verified the consumer-side fix actually resolves the reported symptom (re-ran the bug-reproduction script or equivalent)",
+      "passed": true,
+      "evidence": "Ran simulate_dashboard_call.py before/after and the existing test file (1 passed)."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

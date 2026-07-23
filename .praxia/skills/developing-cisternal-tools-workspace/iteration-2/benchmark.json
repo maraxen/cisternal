@@ -1,0 +1,433 @@
+{
+  "metadata": {
+    "skill_name": "developing-cisternal-tools",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-07-23T16:28:31Z",
+    "evals_run": [
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 375.7,
+        "tokens": 84465,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Root-caused the bug to toy_cisternal's wire()/ToyApp.add_tool() dropping the name= override, not to toy_consumer",
+          "passed": true,
+          "evidence": "Summary correctly identifies wire() passing a bare callable and ToyApp.add_tool()'s __name__ fallback as the root cause; registry/wire() return value called out as correct throughout."
+        },
+        {
+          "text": "Fixed the bug inside toy_cisternal's source, not by renaming toy_consumer's wrapper functions",
+          "passed": true,
+          "evidence": "wire.py changed to app.add_tool(ToyTool(name=entry.name, fn=callable_)); toy_consumer wrapper functions left as mcp_x_tool names."
+        },
+        {
+          "text": "Added a new regression test that asserts against the actual transport (app.list_tools() / ToyApp), not just wire()'s return value or the registry snapshot",
+          "passed": true,
+          "evidence": "test_wire_registers_tool_under_registry_name_on_the_app asserts against app.list_tools()."
+        },
+        {
+          "text": "Verified (or the transcript shows evidence of verifying) that the new test fails on the pre-fix code and passes after the fix",
+          "passed": true,
+          "evidence": "Summary states the test failed with AssertionError against pre-fix code, then passed after the fix -- explicit fail-then-pass evidence."
+        },
+        {
+          "text": "Ran toy_cisternal's full existing test suite after the fix, not just the new test",
+          "passed": true,
+          "evidence": "Ran full 5-test suite, all passing."
+        },
+        {
+          "text": "Bumped toy_cisternal's version as a distinct step from the code fix",
+          "passed": true,
+          "evidence": "Two-commit pattern: fix commit 70f5ef1, separate chore(release): 0.1.1 commit 38a9a5a."
+        },
+        {
+          "text": "Rebuilt the toy_cisternal wheel and republished it to the local flat-file index (toy_cisternal_index)",
+          "passed": true,
+          "evidence": "uv build + copied wheel/sdist into toy_cisternal_index/."
+        },
+        {
+          "text": "Updated toy_consumer's dependency to resolve the new version from the index (not left depending on a local editable/path override)",
+          "passed": true,
+          "evidence": "Bumped dependency floor to >=0.1.1, deleted stale lockfile, uv lock/sync --find-links resolved the real 0.1.1 wheel, confirmed via dist-info -- no editable override."
+        },
+        {
+          "text": "Re-ran toy_consumer's test suite and/or the bug-reproduction script against the newly resolved version to confirm the fix end-to-end",
+          "passed": true,
+          "evidence": "Reran consumer suite (2/2) and simulate_dashboard_call.py, confirming list_widgets now callable."
+        },
+        {
+          "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+          "passed": true,
+          "evidence": "No GitHub remote used; publish simulated via uv build + local index copy."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 74.9,
+        "tokens": 53919,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Honored the explicit time-boxed request -- did not refuse or insist on the full upstream fix+release cycle against the user's stated urgency",
+          "passed": true,
+          "evidence": "Applied only the toy_consumer-side rename; did not touch toy_cisternal or attempt a release. This reverses the iteration-1 regression where the with-skill agent overrode the deferral and did the full upstream cycle anyway."
+        },
+        {
+          "text": "Applied a working consumer-side fix (e.g. renamed the wrapper function, or another toy_consumer-only change) that actually resolves the symptom",
+          "passed": true,
+          "evidence": "Renamed mcp_list_widgets_tool -> list_widgets and mcp_get_widget_tool -> get_widget in toy_consumer/src/toy_consumer/app.py, confirmed via diff."
+        },
+        {
+          "text": "Left a clear, explicit trace (comment in code, commit message, or a stated follow-up) that this is a workaround for a real defect in toy_cisternal's wire(), not a coincidental rename",
+          "passed": true,
+          "evidence": "Verified directly in the sandbox diff: a substantial WORKAROUND (260723) docstring comment naming the exact bug location in toy_cisternal/wire.py, why it's a shared-library defect, and what the real fix should be."
+        },
+        {
+          "text": "Did not silently patch toy_consumer with zero acknowledgment that toy_cisternal has a bug other consumers will also hit",
+          "passed": true,
+          "evidence": "Comment explicitly states any other consumer using the mcp_x_tool convention with a differing name= override will hit the same failure until the upstream fix ships."
+        },
+        {
+          "text": "Did not touch toy_cisternal's source code or attempt a version bump/release given the explicit ask to defer that",
+          "passed": true,
+          "evidence": "Verified directly: git status --short in toy_cisternal/ sandbox is empty (clean, untouched)."
+        },
+        {
+          "text": "Verified the consumer-side fix actually resolves the reported symptom (re-ran the bug-reproduction script or equivalent)",
+          "passed": true,
+          "evidence": "Ran simulate_dashboard_call.py before/after (BUG REPRODUCED -> OK: list_widgets is callable) and the consumer test suite (1 passed)."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 315.5,
+        "tokens": 89898,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Correctly root-caused symptom 1 (list_widgets not found) to toy_cisternal's wire()/ToyApp.add_tool() name-override drop, same shape as eval 1",
+          "passed": true,
+          "evidence": "Summary and commit 2e4a77e correctly identify the bare-callable/add_tool __name__ fallback as root cause 1."
+        },
+        {
+          "text": "Correctly root-caused symptom 2 (get_widget returning deleted:true) to a duplicate @tool(name=\"get_widget\") decorator on delete_widget in toy_consumer's own source -- a consumer-side authoring bug, not a cisternal defect",
+          "passed": true,
+          "evidence": "Summary and app.py diff confirm: delete_widget's duplicate name= override identified as the cause, fixed by giving it its own name."
+        },
+        {
+          "text": "Did not conflate the two bugs -- did not attempt to fix the name-collision inside cisternal, and did not attribute the wire() drop to a consumer-side cause",
+          "passed": true,
+          "evidence": "Fixed the collision in toy_consumer/app.py (delete_widget renamed). Also added a defensive collision-raise in registry.py, but verified via diff this is an additive safety net (raises ValueError on any future collision) not a substitute for the consumer-side fix -- the actual collision was still resolved at the source."
+        },
+        {
+          "text": "Did not take the 'intentional soft-delete alias' comment at face value -- verified empirically (ran the repro script, checked for any real spec/test backing the claim) rather than accepting the comment as ground truth",
+          "passed": true,
+          "evidence": "Summary states comment was debunked via grep for alias/soft-delete/overwrite/collision across both repos and reading all existing tests -- found zero backing, concluded it was self-justification for a bug."
+        },
+        {
+          "text": "Fixed the wire() bug upstream in toy_cisternal following the full loop: regression test against app.list_tools() (not just wire()'s return value or registry snapshot), verified fail-then-pass, ran toy_cisternal's full suite, version bump as a distinct step from the fix, rebuilt and republished the wheel to the local index",
+          "passed": true,
+          "evidence": "Verified directly: git log shows fix commit 2e4a77e separate from chore(release) commit 1674410. Test asserts against app.list_tools(). Summary states fail-then-pass verified via git stash. Full 6-test suite run. Wheel rebuilt and copied to toy_cisternal_index/."
+        },
+        {
+          "text": "Fixed the duplicate-name collision inside toy_consumer's own source (e.g. gave delete_widget its own @tool(name=\"delete_widget\"))",
+          "passed": true,
+          "evidence": "Verified directly: app.py shows @tool(name=\"delete_widget\") on mcp_delete_widget_tool."
+        },
+        {
+          "text": "Updated toy_consumer's dependency to resolve the new toy_cisternal version from the index (not a leftover local editable/path override)",
+          "passed": true,
+          "evidence": "pyproject.toml shows toy-cisternal>=0.1.1. Summary states no [tool.uv.sources] override was added, confirmed via importlib.metadata.version reporting 0.1.1 post-upgrade."
+        },
+        {
+          "text": "Re-verified BOTH symptoms end-to-end after both fixes -- ran simulate_dashboard_call.py AND simulate_get_widget_confusion.py (or equivalent) against the final state, confirming list_widgets, get_widget, and delete_widget are all distinctly registered and behave correctly",
+          "passed": true,
+          "evidence": "Summary states both repro scripts re-run on main with real published 0.1.1 wheel, both reporting OK."
+        },
+        {
+          "text": "Ran both toy_cisternal's and toy_consumer's full test suites after the fixes, not just new regression tests",
+          "passed": true,
+          "evidence": "Summary states all 6 cisternal tests and all 4 consumer tests run and passing, per-file due to the local suite guard."
+        },
+        {
+          "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+          "passed": true,
+          "evidence": "No GitHub remote/gh release used; publish simulated via uv build + local index copy."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 231.8,
+        "tokens": 69055,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Root-caused the bug to toy_cisternal's wire()/ToyApp.add_tool() dropping the name= override, not to toy_consumer",
+          "passed": true,
+          "evidence": "Summary correctly identifies the same root cause: wire() passing a bare callable, ToyApp.add_tool()'s __name__ fallback."
+        },
+        {
+          "text": "Fixed the bug inside toy_cisternal's source, not by renaming toy_consumer's wrapper functions",
+          "passed": true,
+          "evidence": "wire.py line 59 changed to app.add_tool(ToyTool(name=entry.name, fn=callable_))."
+        },
+        {
+          "text": "Added a new regression test that asserts against the actual transport (app.list_tools() / ToyApp), not just wire()'s return value or the registry snapshot",
+          "passed": true,
+          "evidence": "test_wired_tool_exposed_under_registered_name_not_fn_name asserts against app.list_tools()."
+        },
+        {
+          "text": "Verified (or the transcript shows evidence of verifying) that the new test fails on the pre-fix code and passes after the fix",
+          "passed": true,
+          "evidence": "Summary states tests were verified to fail against pre-fix code path and pass cleanly against the fix."
+        },
+        {
+          "text": "Ran toy_cisternal's full existing test suite after the fix, not just the new test",
+          "passed": true,
+          "evidence": "5 passed for toy_cisternal, 2 passed for toy_consumer."
+        },
+        {
+          "text": "Bumped toy_cisternal's version as a distinct step from the code fix",
+          "passed": true,
+          "evidence": "Bumped to 0.1.1, committed the fix, tagged v0.1.1 -- described as distinct steps though not explicitly noted as two separate commits."
+        },
+        {
+          "text": "Rebuilt the toy_cisternal wheel and republished it to the local flat-file index (toy_cisternal_index)",
+          "passed": true,
+          "evidence": "Built wheel/sdist with uv build, copied 0.1.1 wheel into toy_cisternal_index/ alongside 0.1.0."
+        },
+        {
+          "text": "Updated toy_consumer's dependency to resolve the new version from the index (not left depending on a local editable/path override)",
+          "passed": true,
+          "evidence": "Bumped floor to >=0.1.1, reinstalled via --find-links ../toy_cisternal_index --no-index, confirmed resolved from index not editable."
+        },
+        {
+          "text": "Re-ran toy_consumer's test suite and/or the bug-reproduction script against the newly resolved version to confirm the fix end-to-end",
+          "passed": true,
+          "evidence": "Reran both suites (5/5, 2/2) and the repro script post-reinstall, confirming fix."
+        },
+        {
+          "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+          "passed": true,
+          "evidence": "All operations local; publish simulated via wheel copy to local index."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 59.2,
+        "tokens": 50051,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Honored the explicit time-boxed request -- did not refuse or insist on the full upstream fix+release cycle against the user's stated urgency",
+          "passed": true,
+          "evidence": "Applied only the toy_consumer-side rename; did not touch toy_cisternal or attempt a release."
+        },
+        {
+          "text": "Applied a working consumer-side fix (e.g. renamed the wrapper function, or another toy_consumer-only change) that actually resolves the symptom",
+          "passed": true,
+          "evidence": "Renamed mcp_list_widgets_tool -> list_widgets and mcp_get_widget_tool -> get_widget in app.py."
+        },
+        {
+          "text": "Left a clear, explicit trace (comment in code, commit message, or a stated follow-up) that this is a workaround for a real defect in toy_cisternal's wire(), not a coincidental rename",
+          "passed": true,
+          "evidence": "Added a WORKAROUND (2026-07-23, not a real fix) block comment naming the exact bug location and stating it's a shared-library defect."
+        },
+        {
+          "text": "Did not silently patch toy_consumer with zero acknowledgment that toy_cisternal has a bug other consumers will also hit",
+          "passed": true,
+          "evidence": "Comment states the defect affects every toy_cisternal consumer that uses name= overrides, and flags it should be raised with the library's owners."
+        },
+        {
+          "text": "Did not touch toy_cisternal's source code or attempt a version bump/release given the explicit ask to defer that",
+          "passed": true,
+          "evidence": "Verified directly: git status --short in toy_cisternal/ sandbox is empty (clean, untouched)."
+        },
+        {
+          "text": "Verified the consumer-side fix actually resolves the reported symptom (re-ran the bug-reproduction script or equivalent)",
+          "passed": true,
+          "evidence": "Ran simulate_dashboard_call.py before/after and the existing test file (1 passed)."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.9,
+        "passed": 9,
+        "failed": 1,
+        "total": 10,
+        "time_seconds": 210.2,
+        "tokens": 73258,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Correctly root-caused symptom 1 (list_widgets not found) to toy_cisternal's wire()/ToyApp.add_tool() name-override drop, same shape as eval 1",
+          "passed": true,
+          "evidence": "Summary and commit 2b07dc6 correctly identify the bare-callable/add_tool __name__ fallback as root cause 1."
+        },
+        {
+          "text": "Correctly root-caused symptom 2 (get_widget returning deleted:true) to a duplicate @tool(name=\"get_widget\") decorator on delete_widget in toy_consumer's own source -- a consumer-side authoring bug, not a cisternal defect",
+          "passed": true,
+          "evidence": "Summary and app.py diff confirm: delete_widget's duplicate name= override identified as the cause, fixed by giving it its own name."
+        },
+        {
+          "text": "Did not conflate the two bugs -- did not attempt to fix the name-collision inside cisternal, and did not attribute the wire() drop to a consumer-side cause",
+          "passed": true,
+          "evidence": "Collision fixed only in toy_consumer/app.py; no registry.py changes in this run at all."
+        },
+        {
+          "text": "Did not take the 'intentional soft-delete alias' comment at face value -- verified empirically (ran the repro script, checked for any real spec/test backing the claim) rather than accepting the comment as ground truth",
+          "passed": true,
+          "evidence": "Summary states registry.py, both toy repos, and the real cisterna repo were grepped for any alias/spec backing, found none, concluded the comment was unsubstantiated."
+        },
+        {
+          "text": "Fixed the wire() bug upstream in toy_cisternal following the full loop: regression test against app.list_tools() (not just wire()'s return value or registry snapshot), verified fail-then-pass, ran toy_cisternal's full suite, version bump as a distinct step from the fix, rebuilt and republished the wheel to the local index",
+          "passed": false,
+          "evidence": "Verified directly: git log shows a SINGLE commit 2b07dc6 containing the wire.py fix, the new test, AND the pyproject.toml version bump to 0.1.1 together (git show --stat confirms all three files in one commit) -- the version bump was not a distinct step from the fix, same failure mode iteration-1's baseline showed on eval 1. All other sub-parts (transport-level test, fail-then-pass, full suite, wheel rebuild+republish) were satisfied."
+        },
+        {
+          "text": "Fixed the duplicate-name collision inside toy_consumer's own source (e.g. gave delete_widget its own @tool(name=\"delete_widget\"))",
+          "passed": true,
+          "evidence": "Verified directly: app.py shows @tool(name=\"delete_widget\") on mcp_delete_widget_tool."
+        },
+        {
+          "text": "Updated toy_consumer's dependency to resolve the new toy_cisternal version from the index (not a leftover local editable/path override)",
+          "passed": true,
+          "evidence": "pyproject.toml shows toy-cisternal>=0.1.1, resolved via --find-links --no-index per summary, no editable override."
+        },
+        {
+          "text": "Re-verified BOTH symptoms end-to-end after both fixes -- ran simulate_dashboard_call.py AND simulate_get_widget_confusion.py (or equivalent) against the final state, confirming list_widgets, get_widget, and delete_widget are all distinctly registered and behave correctly",
+          "passed": true,
+          "evidence": "Both repro scripts re-run post-fix, both reporting OK per summary."
+        },
+        {
+          "text": "Ran both toy_cisternal's and toy_consumer's full test suites after the fixes, not just new regression tests",
+          "passed": true,
+          "evidence": "Summary states all 6 toy_cisternal tests and all 3 toy_consumer tests pass, run per-file per the local suite guard."
+        },
+        {
+          "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+          "passed": true,
+          "evidence": "No GitHub remote/gh release used; publish simulated via uv build + local index copy."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 255.3667,
+        "stddev": 159.1608,
+        "min": 74.9,
+        "max": 375.7
+      },
+      "tokens": {
+        "mean": 76094.0,
+        "stddev": 19395.2917,
+        "min": 53919,
+        "max": 89898
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.9667,
+        "stddev": 0.0577,
+        "min": 0.9,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 167.0667,
+        "stddev": 94.0375,
+        "min": 59.2,
+        "max": 231.8
+      },
+      "tokens": {
+        "mean": 64121.3333,
+        "stddev": 12365.1531,
+        "min": 50051,
+        "max": 73258
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.03",
+      "time_seconds": "+88.3",
+      "tokens": "+11973"
+    }
+  },
+  "notes": []
+}

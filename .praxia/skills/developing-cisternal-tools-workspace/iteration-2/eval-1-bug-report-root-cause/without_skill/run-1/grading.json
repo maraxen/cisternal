@@ -1,0 +1,60 @@
+{
+  "expectations": [
+    {
+      "text": "Root-caused the bug to toy_cisternal's wire()/ToyApp.add_tool() dropping the name= override, not to toy_consumer",
+      "passed": true,
+      "evidence": "Summary correctly identifies the same root cause: wire() passing a bare callable, ToyApp.add_tool()'s __name__ fallback."
+    },
+    {
+      "text": "Fixed the bug inside toy_cisternal's source, not by renaming toy_consumer's wrapper functions",
+      "passed": true,
+      "evidence": "wire.py line 59 changed to app.add_tool(ToyTool(name=entry.name, fn=callable_))."
+    },
+    {
+      "text": "Added a new regression test that asserts against the actual transport (app.list_tools() / ToyApp), not just wire()'s return value or the registry snapshot",
+      "passed": true,
+      "evidence": "test_wired_tool_exposed_under_registered_name_not_fn_name asserts against app.list_tools()."
+    },
+    {
+      "text": "Verified (or the transcript shows evidence of verifying) that the new test fails on the pre-fix code and passes after the fix",
+      "passed": true,
+      "evidence": "Summary states tests were verified to fail against pre-fix code path and pass cleanly against the fix."
+    },
+    {
+      "text": "Ran toy_cisternal's full existing test suite after the fix, not just the new test",
+      "passed": true,
+      "evidence": "5 passed for toy_cisternal, 2 passed for toy_consumer."
+    },
+    {
+      "text": "Bumped toy_cisternal's version as a distinct step from the code fix",
+      "passed": true,
+      "evidence": "Bumped to 0.1.1, committed the fix, tagged v0.1.1 -- described as distinct steps though not explicitly noted as two separate commits."
+    },
+    {
+      "text": "Rebuilt the toy_cisternal wheel and republished it to the local flat-file index (toy_cisternal_index)",
+      "passed": true,
+      "evidence": "Built wheel/sdist with uv build, copied 0.1.1 wheel into toy_cisternal_index/ alongside 0.1.0."
+    },
+    {
+      "text": "Updated toy_consumer's dependency to resolve the new version from the index (not left depending on a local editable/path override)",
+      "passed": true,
+      "evidence": "Bumped floor to >=0.1.1, reinstalled via --find-links ../toy_cisternal_index --no-index, confirmed resolved from index not editable."
+    },
+    {
+      "text": "Re-ran toy_consumer's test suite and/or the bug-reproduction script against the newly resolved version to confirm the fix end-to-end",
+      "passed": true,
+      "evidence": "Reran both suites (5/5, 2/2) and the repro script post-reinstall, confirming fix."
+    },
+    {
+      "text": "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given",
+      "passed": true,
+      "evidence": "All operations local; publish simulated via wheel copy to local index."
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  }
+}

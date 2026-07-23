@@ -1,0 +1,17 @@
+{
+  "eval_id": 1,
+  "eval_name": "eval-1-bug-report-root-cause",
+  "prompt": "Our internal dashboard team filed a bug: their integration calls a tool named 'list_widgets' against our toy-consumer app and gets 'tool not found', even though all of toy-consumer's own tests pass. toy-consumer is at <TOY_CONSUMER_PATH> (its own git repo, venv at .venv/), and it depends on toy-cisternal (a shared library also used by a couple of other internal teams) which is at <TOY_CISTERNAL_PATH> (its own git repo, tagged v0.1.0) and gets installed into toy-consumer's venv from a local package index at <TOY_INDEX_PATH> (this stands in for a real PyPI-style registry in this environment -- don't try to reach the real internet). Can you figure out what's actually wrong and fix it properly? You can run `.venv/bin/python scripts/simulate_dashboard_call.py` from toy-consumer to see the reported symptom directly.",
+  "assertions": [
+    "Root-caused the bug to toy_cisternal's wire()/ToyApp.add_tool() dropping the name= override, not to toy_consumer",
+    "Fixed the bug inside toy_cisternal's source, not by renaming toy_consumer's wrapper functions",
+    "Added a new regression test that asserts against the actual transport (app.list_tools() / ToyApp), not just wire()'s return value or the registry snapshot",
+    "Verified (or the transcript shows evidence of verifying) that the new test fails on the pre-fix code and passes after the fix",
+    "Ran toy_cisternal's full existing test suite after the fix, not just the new test",
+    "Bumped toy_cisternal's version as a distinct step from the code fix",
+    "Rebuilt the toy_cisternal wheel and republished it to the local flat-file index (toy_cisternal_index)",
+    "Updated toy_consumer's dependency to resolve the new version from the index (not left depending on a local editable/path override)",
+    "Re-ran toy_consumer's test suite and/or the bug-reproduction script against the newly resolved version to confirm the fix end-to-end",
+    "Did not attempt any real network, GitHub, or PyPI operations -- stayed within the local sandbox paths given"
+  ]
+}

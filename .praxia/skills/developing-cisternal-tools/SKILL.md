@@ -25,7 +25,15 @@ This is the shape the work takes, whether you're extending cisternal's API or fi
 
 ## When NOT to patch upstream
 
-Fix it in the consumer instead when: the behavior is genuinely project-specific (not something a second consumer would ever want), the "fix" would require cisternal to know about a consumer's internals (breaks the substrate/consumer boundary), or the turnaround time genuinely doesn't allow a release cycle and the workaround is trivially removable later. Even then, leave a comment or issue noting the workaround exists *because* of a cisternal gap, so it doesn't quietly become permanent.
+There are two different questions here, and they get different answers.
+
+**If the user has told you how to scope this — that instruction wins, full stop.** "We don't have time for the library today, just patch the consumer" is not one factor to weigh against "fix at the root" — it's the answer. The "bug found through one consumer will eventually bite every consumer" reasoning is true, but it's an argument for *why upstream is usually better when the choice is yours to make*, not a license to override someone who has already made the call for a stated reason (time pressure, a freeze, wanting to batch several fixes into one release later). Talking yourself into the full upstream cycle anyway — "the time-pressure argument didn't really hold up" — is answering a question nobody asked. When you honor a deferred/scoped request, your job shifts from "decide whether to patch upstream" to "make sure the workaround doesn't silently erase the fact that a shared-library bug exists": leave a code comment, a commit message note, or a stated follow-up that says what the real defect is and where it lives, so it doesn't quietly become permanent or blindside the next consumer who hits it.
+
+**If the user hasn't specified — then you're the one deciding, and the default is to prefer cisternal.** Fix it in the consumer instead when: the behavior is genuinely project-specific (not something a second consumer would ever want), the "fix" would require cisternal to know about a consumer's internals (breaks the substrate/consumer boundary), or you have good reason to believe a release cycle isn't warranted yet and the workaround is trivially removable later. Same rule applies here too: leave a trace of the real defect rather than letting the workaround read as a coincidental rename.
+
+## Asking before bypassing friction
+
+Sandbox or permission denials during this work (writing into a sibling repo's worktree, running git operations outside the current session's default allowlist) are common — cisternal deliberately sits alongside consumer repos rather than inside them. Hitting one is a normal, expected part of the loop, not a sign something's broken. Retry the specific operation with elevated/unsandboxed access rather than disabling the sandbox wholesale, and say what you're doing and why before you do it — a quick "this needs write access to the cisternal repo, which is outside the default sandbox for this session" costs one line and lets the user object if the access is broader than they intended. Silently flipping a permission or sandbox setting to make an error go away removes their chance to say no.
 
 ## The kind of bug that hides from unit tests
 
