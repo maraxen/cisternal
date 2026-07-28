@@ -26,6 +26,10 @@ def format_skill_markdown(skill: SkillAsset) -> str:
     lines = ["---", f"name: {skill.name}"]
     if skill.description:
         lines.append(f"description: {skill.description}")
+    if skill.triggers:
+        lines.append("triggers:")
+        for trigger in skill.triggers:
+            lines.append(f"  - {trigger}")
     lines.append("---")
     body = skill.body
     if body and not body.startswith("\n"):

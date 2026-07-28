@@ -152,6 +152,39 @@ class BathosAdapter(AdapterBase):
         }
 
 
+class PassthroughAdapter(AdapterBase):
+    """Adapter for a real FastMCP v3 server (bugfix, cisternal/mcp-middleware-fix).
+
+    Event names (spec §4.2): mcp.call_start, mcp.call_end, mcp.tool_error.
+    Response shape: pure passthrough. ``shape_ok`` returns whatever
+    ``call_next`` produced completely unmodified -- critical against a real
+    FastMCP server, where that value is a ``fastmcp.tools.tool.ToolResult``
+    (never a ``dict``). Reshaping or discarding it -- as ``BathosAdapter``'s
+    ``isinstance(result, dict)`` check does -- silently breaks every real
+    tool call, since FastMCP's own mixins call ``.to_mcp_result()`` on
+    whatever this adapter returns.
+
+    Intended to be paired with ``CisternalMiddleware(reraise=True)``, so
+    ``shape_error`` is never exercised in practice: the middleware re-raises
+    the original exception itself before consulting the adapter. If used
+    with ``reraise=False``, ``shape_error`` re-raises the original exception
+    rather than trying to fabricate a dict-shaped error envelope that real
+    FastMCP consumers wouldn't recognize as a ``ToolResult``.
+    """
+
+    ALLOWED_NAMES = frozenset({"mcp.call_start", "mcp.call_end", "mcp.tool_error"})
+
+    def shape_ok(self, tool_name: str, result: Any) -> Any:
+        """Shape success: passthrough, unmodified -- see class docstring."""
+        return result
+
+    def shape_error(self, tool_name: str, exc: BaseException, **fields: Any) -> Any:
+        """Shape error: re-raise the original exception (no dict shape exists
+        for a real FastMCP ``ToolResult`` error). Prefer
+        ``CisternalMiddleware(reraise=True)``, which never calls this."""
+        raise exc
+
+
 class ContemplexAdapter(AdapterBase):
     """Adapter for contemplex v2 decorator (sync).
 
