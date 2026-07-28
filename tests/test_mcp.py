@@ -5,6 +5,12 @@ AC-MCP-2: traced_tool(ContemplexAdapter) on sync tool emits start/end and shapes
 AC-MCP-3: v3 tool raises RuntimeError → mcp.tool_error emitted, error envelope returned.
 AC-MCP-3b: v2 sync tool raises ValueError → mcp.tool_error emitted, no exception escapes.
 AC-MCP-4: Token reset in different Context raises ValueError, wrapper swallows it.
+
+AC-MCP-5 (bugfix, cisternal/mcp-middleware-fix, 260728): CisternalMiddleware
+against a REAL fastmcp.FastMCP server (not Mock()) -- the test that would
+have caught the ToolResult-shape bug (BathosAdapter's isinstance(result, dict)
+check silently discarded every real tool result; a plain-dict shape_error had
+no .to_mcp_result(), crashing on every tool error).
 """
 
 import tempfile
@@ -12,6 +18,7 @@ import time
 from pathlib import Path
 from unittest.mock import Mock
 
+import fastmcp
 import pytest
 
 from cisternal import init
@@ -19,11 +26,15 @@ from cisternal.adapters.base import (
     AdapterBase,
     BathosAdapter,
     ContemplexAdapter,
+    PassthroughAdapter,
     XpeririAdapter,
     MyxcelAdapter,
 )
 from cisternal.adapters.v2_decorator import traced_tool
 from cisternal.adapters.v3_middleware import CisternalMiddleware
+from cisternal.registration.decorator import tool as cisternal_tool
+from cisternal.registration.registry import clear_registry
+from cisternal.registration.wired import wire
 from cisternal.telemetry.exporter import ShadowExporter
 
 
@@ -531,3 +542,151 @@ class TestRuntimeNameGuard:
         # The assert should fail because _swallow_name_error raises
         with pytest.raises(AssertionError, match="Illegal name"):
             adapter.emit_start("mcp.call_start", [], "req-1")
+
+
+class TestAcMcp5RealFastMCPServer:
+    """AC-MCP-5 (bugfix, cisternal/mcp-middleware-fix, 260728): CisternalMiddleware
+    against a REAL fastmcp.FastMCP server, not Mock().
+
+    This is the test that would have caught the confirmed bug: on a real
+    server, ``call_next(context)`` returns a ``fastmcp.tools.tool.ToolResult``
+    object, never a dict. The old hardcoded ``BathosAdapter()`` -- whose
+    ``shape_ok`` does ``isinstance(result, dict)`` -- silently discarded
+    every real tool result, and its ``shape_error`` returns a plain dict with
+    no ``.to_mcp_result()``, which crashes once FastMCP tries to normalize
+    the middleware's return value.
+
+    All three assertions are made by comparing a server WITH
+    CisternalMiddleware(adapter=PassthroughAdapter(), reraise=True) installed
+    against a baseline server with NO middleware installed at all:
+      (a) success: shaped result is unchanged from the no-middleware baseline.
+      (b) error: the raise still propagates exactly as it would with no
+          middleware installed.
+      (c) telemetry: records were captured for both the success and error path.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self):
+        clear_registry(name="default")
+        yield
+        clear_registry(name="default")
+
+    @pytest.mark.asyncio
+    async def test_successful_call_unchanged_vs_no_middleware(self, temp_log_dir):
+        """(a) Successful call's shaped ToolResult == the no-middleware baseline."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        @cisternal_tool
+        def add_two(a: int, b: int) -> int:
+            return a + b
+
+        baseline_server = fastmcp.FastMCP("mcp-fix-baseline-ok")
+        wire(baseline_server)
+        baseline_result = await baseline_server.call_tool("add_two", {"a": 3, "b": 4})
+
+        mw_server = fastmcp.FastMCP("mcp-fix-with-middleware-ok")
+        wire(mw_server)
+        mw_server.add_middleware(
+            CisternalMiddleware(adapter=PassthroughAdapter(), reraise=True)
+        )
+        mw_result = await mw_server.call_tool("add_two", {"a": 3, "b": 4})
+
+        time.sleep(0.1)
+
+        # The middleware must not reshape/discard the real ToolResult.
+        assert mw_result == baseline_result, (
+            f"Middleware-shaped result must equal the no-middleware baseline; "
+            f"got {mw_result!r} vs baseline {baseline_result!r}"
+        )
+        assert mw_result.structured_content == {"result": 7}
+
+        # (c) telemetry was captured for the success path.
+        start_records = [r for r in shadow.records if r.name == "mcp.call_start"]
+        end_records = [r for r in shadow.records if r.name == "mcp.call_end"]
+        assert len(start_records) == 1
+        assert len(end_records) == 1
+        assert start_records[0].fields["tool"] == "add_two"
+
+    @pytest.mark.asyncio
+    async def test_raising_call_still_propagates_with_reraise(self, temp_log_dir):
+        """(b) A raising tool call still raises/propagates exactly as it would
+        with no middleware installed, when reraise=True."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        @cisternal_tool
+        def boom(x: int) -> int:
+            raise ValueError(f"boom: {x}")
+
+        baseline_server = fastmcp.FastMCP("mcp-fix-baseline-err")
+        wire(baseline_server)
+        baseline_exc: BaseException | None = None
+        try:
+            await baseline_server.call_tool("boom", {"x": 1})
+        except Exception as exc:  # noqa: BLE001 - capturing for comparison
+            baseline_exc = exc
+
+        mw_server = fastmcp.FastMCP("mcp-fix-with-middleware-err")
+        wire(mw_server)
+        mw_server.add_middleware(
+            CisternalMiddleware(adapter=PassthroughAdapter(), reraise=True)
+        )
+        mw_exc: BaseException | None = None
+        try:
+            await mw_server.call_tool("boom", {"x": 1})
+        except Exception as exc:  # noqa: BLE001 - capturing for comparison
+            mw_exc = exc
+
+        time.sleep(0.1)
+
+        assert baseline_exc is not None, "baseline (no middleware) call must raise"
+        assert mw_exc is not None, "middleware in reraise=True mode must still raise"
+        assert type(mw_exc) is type(baseline_exc)
+        assert str(mw_exc) == str(baseline_exc)
+
+        # (c) telemetry was captured for the error path (start + tool_error).
+        start_records = [r for r in shadow.records if r.name == "mcp.call_start"]
+        error_records = [r for r in shadow.records if r.name == "mcp.tool_error"]
+        assert len(start_records) == 1
+        assert len(error_records) == 1
+        assert error_records[0].fields["tool"] == "boom"
+        # Note: by the time the exception reaches our middleware's except
+        # clause, FastMCP's own tool-execution core has already wrapped the
+        # raw ValueError into a fastmcp.exceptions.ToolError (this happens
+        # inside call_next, on both the baseline and middleware paths alike —
+        # confirmed identical above via type(mw_exc) is type(baseline_exc)).
+        assert error_records[0].fields["exc_type"] == type(baseline_exc).__name__
+        assert "boom: 1" in error_records[0].fields["exc_msg"]
+
+    @pytest.mark.asyncio
+    async def test_default_adapter_still_bathos_shapes_dict_result(self, temp_log_dir):
+        """Constructor default (no adapter passed) is still BathosAdapter -- the
+        additive, backward-compatible part of the fix (spec item 1)."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        middleware = CisternalMiddleware()
+        assert isinstance(middleware._adapter, BathosAdapter)
+
+    @pytest.mark.asyncio
+    async def test_reraise_default_false_preserves_ch5_behavior(self, temp_log_dir):
+        """reraise defaults to False: errors are still caught and shaped, never
+        propagated -- zero behavior change for existing (pre-fix) callers."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        context = Mock()
+        context.message = Mock()
+        context.message.name = "legacy_tool"
+        context.message.arguments = {}
+
+        async def call_next_error(ctx):
+            raise RuntimeError("legacy boom")
+
+        middleware = CisternalMiddleware()  # adapter=None, reraise=False (defaults)
+        result = await middleware.on_call_tool(context, call_next_error)
+
+        assert isinstance(result, dict)
+        assert result["ok"] is False
+        assert "legacy boom" in result["error"]

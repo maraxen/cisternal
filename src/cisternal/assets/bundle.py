@@ -84,11 +84,20 @@ class McpAsset:
 
 @dataclass(frozen=True, slots=True)
 class SkillAsset:
-    """A single skill asset entry."""
+    """A single skill asset entry.
+
+    ``triggers`` (bugfix, cisternal/manifest-skill-export) carries the
+    manifest's ``[[plugin.skills]] triggers = [...]`` list through to export,
+    so Claude Code's skill-selection heuristics see the same trigger phrases
+    the manifest declares. Empty by default — most SKILL.md sources don't set
+    it, and omitting it from the exported frontmatter entirely (rather than
+    emitting ``triggers: []``) matches existing agent/skill export behavior.
+    """
 
     name: str
     description: str = ""
     body: str = ""
+    triggers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

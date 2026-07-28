@@ -97,8 +97,29 @@ def _load_skills(
             warnings.append(f"skill entry missing name or path: {entry!r}")
             continue
         text = _read_text(root / rel, warnings, f"skill {name!r}")
-        body = text if text is not None else ""
-        skills.append(SkillAsset(name=name, body=body))
+        raw = text if text is not None else ""
+
+        # Strip any existing SKILL.md frontmatter (mirrors _load_agents /
+        # _parse_agent_markdown) so format_skill_markdown's own frontmatter
+        # block on export isn't doubled up with the source file's own.
+        fm, body = _split_frontmatter(raw)
+
+        manifest_description = str(entry.get("description") or "")
+        description = manifest_description or _parse_scalar_field(fm, "description")
+
+        manifest_triggers = entry.get("triggers")
+        triggers: tuple[str, ...] = ()
+        if isinstance(manifest_triggers, list) and manifest_triggers:
+            triggers = tuple(str(t) for t in manifest_triggers)
+
+        skills.append(
+            SkillAsset(
+                name=name,
+                description=description,
+                body=body,
+                triggers=triggers,
+            )
+        )
     return tuple(skills)
 
 
@@ -196,16 +217,47 @@ def _load_mcp(plugin: dict[str, object], plugin_name: str) -> tuple[McpAsset, ..
     return (McpAsset(name=plugin_name or "mcp", command=argv),)
 
 
-def _parse_agent_markdown(text: str) -> tuple[tuple[str, ...], str]:
-    """Return (default_tools, body_without_frontmatter)."""
+def _split_frontmatter(text: str) -> tuple[str, str]:
+    """Split a markdown asset source into (frontmatter, body).
+
+    Shared by ``_load_agents``/``_parse_agent_markdown`` and ``_load_skills``
+    so both asset kinds strip a source file's own ``---`` frontmatter block
+    the same way before re-wrapping it in the exporter's own frontmatter
+    (avoids doubled/malformed frontmatter on export).
+
+    If ``text`` does not start with a ``---`` delimiter, or the delimiter is
+    never closed, frontmatter is ``""`` and body is the original text
+    unchanged.
+    """
     if not text.startswith("---"):
-        return (), text
+        return "", text
     parts = text.split("---", 2)
     if len(parts) < 3:
-        return (), text
+        return "", text
     fm = parts[1]
     body = parts[2].lstrip("\n")
+    return fm, body
+
+
+def _parse_agent_markdown(text: str) -> tuple[tuple[str, ...], str]:
+    """Return (default_tools, body_without_frontmatter)."""
+    fm, body = _split_frontmatter(text)
     return _parse_default_tools(fm), body
+
+
+def _parse_scalar_field(frontmatter: str, field: str) -> str:
+    """Return a single-line ``field: value`` from a frontmatter block, or "".
+
+    Handles an optionally quoted value; does not attempt list/multi-line
+    values (use ``_parse_default_tools``-style parsing for those).
+    """
+    prefix = f"{field}:"
+    for line in frontmatter.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            value = stripped[len(prefix):].strip()
+            return value.strip("'\"")
+    return ""
 
 
 def _parse_default_tools(frontmatter: str) -> tuple[str, ...]:
