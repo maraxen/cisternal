@@ -544,6 +544,90 @@ class TestRuntimeNameGuard:
             adapter.emit_start("mcp.call_start", [], "req-1")
 
 
+class TestEmitStartNeverBreaksCaller:
+    """Regression: AdapterBase.emit_start's emit_event() call runs before the
+    v3/v2 wrappers' own try/except, so it must never propagate on its own --
+    guarded by AdapterBase._safe_emit_event. See fix/span-start-try-guard."""
+
+    @staticmethod
+    def _raising_emit_event(monkeypatch, target_name: str):
+        """Monkeypatch cisternal.adapters.base.emit_event to raise only for
+        *target_name*, passing everything else through to the real emit_event."""
+        import cisternal.adapters.base as base_module
+
+        real_emit_event = base_module.emit_event
+
+        def raising(name, **fields):
+            if name == target_name:
+                raise RuntimeError(f"{target_name} emission failed")
+            return real_emit_event(name, **fields)
+
+        monkeypatch.setattr(base_module, "emit_event", raising)
+
+    @pytest.mark.asyncio
+    async def test_v3_middleware_survives_raising_emit_start(
+        self, temp_log_dir, capsys, monkeypatch
+    ):
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+        self._raising_emit_event(monkeypatch, "mcp.call_start")
+
+        context = Mock()
+        context.message = Mock()
+        context.message.name = "test_tool"
+        context.message.arguments = {}
+
+        async def mock_call_next(ctx):
+            return "ok"
+
+        middleware = CisternalMiddleware()
+        result = await middleware.on_call_tool(context, mock_call_next)
+
+        assert result is not None
+        assert result.get("ok") is True
+        assert "mcp.call_start emission failed" in capsys.readouterr().err
+
+        time.sleep(0.1)
+        end_records = [r for r in shadow.records if r.name == "mcp.call_end"]
+        assert len(end_records) == 1
+
+    def test_traced_tool_sync_survives_raising_emit_start(
+        self, temp_log_dir, capsys, monkeypatch
+    ):
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+        self._raising_emit_event(monkeypatch, "mcp.call_start")
+
+        @traced_tool(ContemplexAdapter())
+        def my_tool(arg: str) -> str:
+            return f"got {arg}"
+
+        result = my_tool(arg="x")
+
+        assert result == "got x"
+        assert "mcp.call_start emission failed" in capsys.readouterr().err
+
+    @pytest.mark.asyncio
+    async def test_traced_tool_async_survives_raising_emit_start(
+        self, temp_log_dir, capsys, monkeypatch
+    ):
+        import asyncio
+
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+        self._raising_emit_event(monkeypatch, "mcp.call_start")
+
+        @traced_tool(MyxcelAdapter())
+        async def mount_project(remote: str) -> dict:
+            await asyncio.sleep(0)
+            return {"remote": remote, "mounted": True}
+
+        result = await mount_project(remote="hpc")
+
+        assert result == {"remote": "hpc", "mounted": True}
+        assert "mcp.call_start emission failed" in capsys.readouterr().err
+
+
 class TestAcMcp5RealFastMCPServer:
     """AC-MCP-5 (bugfix, cisternal/mcp-middleware-fix, 260728): CisternalMiddleware
     against a REAL fastmcp.FastMCP server, not Mock().

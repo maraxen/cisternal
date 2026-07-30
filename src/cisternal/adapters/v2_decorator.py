@@ -59,6 +59,9 @@ def traced_tool(
                 request_id = uuid.uuid4().hex
                 token = mcp_request_id_var.set(request_id)
                 arg_keys = sorted(kwargs.keys())  # CH-6: kwargs only (parity caveat)
+                # emit_start runs before the try/except below, so it could break
+                # the tool call before it even starts -- safe because
+                # AdapterBase.emit_start guards its own emit_event() call.
                 adapter.emit_start(fn.__name__, arg_keys, request_id)
                 t0 = time.monotonic_ns()
 
@@ -81,6 +84,9 @@ def traced_tool(
             request_id = uuid.uuid4().hex
             token = mcp_request_id_var.set(request_id)
             arg_keys = sorted(kwargs.keys())  # CH-6: kwargs only (parity caveat)
+            # emit_start runs before the try/except below, so it could break
+            # the tool call before it even starts -- safe because
+            # AdapterBase.emit_start guards its own emit_event() call.
             adapter.emit_start(fn.__name__, arg_keys, request_id)
             t0 = time.monotonic_ns()
 

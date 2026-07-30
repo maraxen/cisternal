@@ -8,6 +8,15 @@ and never re-raise exceptions (CH-5).
 (CH-9) Runtime name guard: emit_start/end/error check that the emitted name is
 in self.ALLOWED_NAMES; on mismatch, calls _swallow_name_error (stderr warn + continue).
 Tests monkeypatch _swallow_name_error to raise AssertionError instead.
+
+emit_start/end/error guard their emit_event() call with a local try/except
+(stderr warn + continue) so a telemetry failure can never break the caller
+(all v2/v3 wrapper call sites can call these unguarded and still uphold
+CH-5) -- defense in depth on top of emit_event's own never-raise contract.
+This guard deliberately wraps only the emit_event() call, not the
+ALLOWED_NAMES check/_swallow_name_error() above it, so the AC-NAMEFREEZE-4
+test escape hatch (monkeypatching _swallow_name_error to raise) still
+propagates normally.
 """
 
 from abc import ABC, abstractmethod
@@ -29,6 +38,19 @@ class AdapterBase(ABC):
 
     ALLOWED_NAMES: frozenset[str]
 
+    def _safe_emit_event(self, name: str, **fields: Any) -> None:
+        """Call emit_event(), guarding against it ever breaking the caller.
+
+        emit_event() is documented never-raise; this is defense in depth in
+        case that leaf contract is ever violated. Never call this to guard
+        _swallow_name_error -- callers must check ALLOWED_NAMES and invoke
+        _swallow_name_error() before calling this (see AC-NAMEFREEZE-4).
+        """
+        try:
+            emit_event(name, **fields)
+        except Exception as e:
+            print(f"[cisternal] {name} emission failed: {e}", file=sys.stderr)
+
     def emit_start(self, tool_name: str, arg_keys: list[str], request_id: str) -> None:
         """Emit mcp.call_start event.
 
@@ -40,7 +62,7 @@ class AdapterBase(ABC):
         name = "mcp.call_start"
         if name not in self.ALLOWED_NAMES:
             self._swallow_name_error(name)
-        emit_event(name, tool=tool_name, arg_keys=arg_keys, request_id=request_id)
+        self._safe_emit_event(name, tool=tool_name, arg_keys=arg_keys, request_id=request_id)
 
     def emit_end(self, tool_name: str, request_id: str, duration_ms: float) -> None:
         """Emit mcp.call_end event.
@@ -53,7 +75,7 @@ class AdapterBase(ABC):
         name = "mcp.call_end"
         if name not in self.ALLOWED_NAMES:
             self._swallow_name_error(name)
-        emit_event(name, tool=tool_name, request_id=request_id, duration_ms=duration_ms)
+        self._safe_emit_event(name, tool=tool_name, request_id=request_id, duration_ms=duration_ms)
 
     def emit_error(self, tool_name: str, request_id: str, exc: BaseException) -> None:
         """Emit mcp.tool_error event.
@@ -66,7 +88,7 @@ class AdapterBase(ABC):
         name = "mcp.tool_error"
         if name not in self.ALLOWED_NAMES:
             self._swallow_name_error(name)
-        emit_event(
+        self._safe_emit_event(
             name,
             tool=tool_name,
             request_id=request_id,

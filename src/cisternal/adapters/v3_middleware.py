@@ -29,7 +29,6 @@ on every tool error. Fixed by:
 cross-context token resets (possible in asyncio context copy scenarios).
 """
 
-import sys
 import time
 import uuid
 from typing import Any
@@ -91,16 +90,10 @@ class CisternalMiddleware(Middleware):
         # Set mcp_request_id in context for this call
         token = mcp_request_id_var.set(request_id)
         adapter = self._adapter
-        # Guarded locally: emit_start runs before the try/except below, so
-        # without this it could break the tool call before it even starts
-        # (mirrors the local start-event guard added to telemetry.span).
-        try:
-            adapter.emit_start(tool_name, arg_keys, request_id)
-        except Exception as e:
-            print(
-                f"[cisternal] emit_start failed for tool={tool_name!r}: {e}",
-                file=sys.stderr,
-            )
+        # emit_start runs before the try/except below, so it could break the
+        # tool call before it even starts -- safe because AdapterBase.emit_start
+        # guards its own emit_event() call (see adapters/base.py).
+        adapter.emit_start(tool_name, arg_keys, request_id)
         t0 = time.monotonic_ns()
 
         try:
