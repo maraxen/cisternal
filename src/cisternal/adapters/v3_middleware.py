@@ -90,6 +90,9 @@ class CisternalMiddleware(Middleware):
         # Set mcp_request_id in context for this call
         token = mcp_request_id_var.set(request_id)
         adapter = self._adapter
+        # emit_start runs before the try/except below, so it could break the
+        # tool call before it even starts -- safe because AdapterBase.emit_start
+        # guards its own emit_event() call (see adapters/base.py).
         adapter.emit_start(tool_name, arg_keys, request_id)
         t0 = time.monotonic_ns()
 

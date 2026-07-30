@@ -6,12 +6,28 @@ Mirrors bathos.telemetry.span behavior (CH-5).
 """
 
 from contextlib import asynccontextmanager, contextmanager
+import sys
 import time
 import uuid
 from typing import Any, AsyncIterator, Iterator
 
-from .pipeline import get_pipeline
+from .pipeline import EventPipeline, get_pipeline
 from .context import _build_record
+
+
+def _emit_start(pipeline: EventPipeline, name: str, span_id: str, fields: dict[str, Any]) -> None:
+    """Build and emit <name>.start, guarded so it can never break the caller.
+
+    Not just defense on top of _build_record/pipeline.emit's own never-raise
+    contracts: this gives the start event the same local guarantee the
+    try/except in span()/aspan() already gives the end event.
+    """
+    try:
+        record = _build_record(f"{name}.start", span_id=span_id, **fields)
+        if record is not None:
+            pipeline.emit(record)
+    except Exception as e:
+        print(f"[cisternal] start-event emission failed for {name!r}: {e}", file=sys.stderr)
 
 
 @contextmanager
@@ -46,14 +62,7 @@ def span(name: str, **fields: Any) -> Iterator[None]:
     span_id = uuid.uuid4().hex
     t0 = time.monotonic_ns()
 
-    # Emit start event
-    record = _build_record(
-        f"{name}.start",
-        span_id=span_id,
-        **fields,
-    )
-    if record is not None:
-        pipeline.emit(record)
+    _emit_start(pipeline, name, span_id, fields)
 
     try:
         yield
@@ -164,14 +173,7 @@ async def aspan(name: str, **fields: Any) -> AsyncIterator[None]:
     span_id = uuid.uuid4().hex
     t0 = time.monotonic_ns()
 
-    # Emit start event
-    record = _build_record(
-        f"{name}.start",
-        span_id=span_id,
-        **fields,
-    )
-    if record is not None:
-        pipeline.emit(record)
+    _emit_start(pipeline, name, span_id, fields)
 
     try:
         yield

@@ -299,6 +299,86 @@ class TestAsyncSpan:
         assert end_records[0].fields["ok"] is False
 
 
+class TestSpanStartEventNeverBreaksCaller:
+    """Regression: span()/aspan()'s start-event emission must never propagate
+    to the caller, matching the existing guarantee for the end event.
+    See fix/span-start-try-guard."""
+
+    def test_span_survives_raising_start_build_record(self, temp_log_dir, capsys, monkeypatch):
+        """Given _build_record raises for the .start record;
+        When span() runs; Then the body still executes and .end is still emitted."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        import sys
+
+        # cisternal.telemetry re-exports the span() function as its own
+        # `.span` attribute, shadowing the submodule of the same name --
+        # go through sys.modules to get the actual submodule object.
+        span_module = sys.modules["cisternal.telemetry.span"]
+
+        real_build_record = span_module._build_record
+
+        def raising_build_record(name, *args, **kwargs):
+            if name.endswith(".start"):
+                raise RuntimeError("start-event build failed")
+            return real_build_record(name, *args, **kwargs)
+
+        monkeypatch.setattr(span_module, "_build_record", raising_build_record)
+
+        executed = False
+        with span("test.span.start_fail"):
+            executed = True
+
+        assert executed is True
+
+        _wait_for_events_exported()
+        names = [r.name for r in shadow.records]
+        assert "test.span.start_fail.end" in names
+        assert "test.span.start_fail.start" not in names
+
+        captured = capsys.readouterr()
+        assert "start-event emission failed" in captured.err
+
+    @pytest.mark.asyncio
+    async def test_aspan_survives_raising_start_build_record(
+        self, temp_log_dir, capsys, monkeypatch
+    ):
+        """Async equivalent of test_span_survives_raising_start_build_record."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        import sys
+
+        # cisternal.telemetry re-exports the span() function as its own
+        # `.span` attribute, shadowing the submodule of the same name --
+        # go through sys.modules to get the actual submodule object.
+        span_module = sys.modules["cisternal.telemetry.span"]
+
+        real_build_record = span_module._build_record
+
+        def raising_build_record(name, *args, **kwargs):
+            if name.endswith(".start"):
+                raise RuntimeError("start-event build failed")
+            return real_build_record(name, *args, **kwargs)
+
+        monkeypatch.setattr(span_module, "_build_record", raising_build_record)
+
+        executed = False
+        async with aspan("test.aspan.start_fail"):
+            executed = True
+
+        assert executed is True
+
+        _wait_for_events_exported()
+        names = [r.name for r in shadow.records]
+        assert "test.aspan.start_fail.end" in names
+        assert "test.aspan.start_fail.start" not in names
+
+        captured = capsys.readouterr()
+        assert "start-event emission failed" in captured.err
+
+
 class TestNeverRaise:
     """Test never-raise contract: exporters that raise don't crash the caller."""
 
