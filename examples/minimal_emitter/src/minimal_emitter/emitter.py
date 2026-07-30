@@ -1,11 +1,11 @@
-"""MinimalEmitter — example third-party surface for cisterna.emitters."""
+"""MinimalEmitter — example third-party surface for cisternal.emitters."""
 
 from __future__ import annotations
 
 import json
 
-from cisterna.assets.bundle import AssetBundle
-from cisterna.export.base import Emitter
+from cisternal.assets.bundle import AssetBundle
+from cisternal.export.base import Emitter
 
 
 class MinimalEmitter(Emitter):
