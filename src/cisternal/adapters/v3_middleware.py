@@ -34,7 +34,7 @@ import uuid
 from typing import Any
 
 from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
-from cisternal.telemetry.context import mcp_request_id_var
+from cisternal.telemetry.context import _last_recovery_var, mcp_request_id_var
 from cisternal.adapters.base import AdapterBase, BathosAdapter
 
 
@@ -106,6 +106,29 @@ class CisternalMiddleware(Middleware):
                 raise
             return adapter.shape_error(tool_name, exc)
         finally:
+            # Recovery-telemetry bridge (companion spec, Spec B AC2-AC4): the
+            # `finally` block is the only placement that runs uniformly across
+            # success, a shaped error, and (under this middleware's
+            # `reraise=True` config) a re-raised exception past the dead
+            # `except` branch above. If a recovery attempt happened inside the
+            # composed callable invoked via call_next (Spec A's mechanism),
+            # the contextvar carries its outcome here.
+            recovery_payload = _last_recovery_var.get()
+            if recovery_payload is not None:
+                synthetic_name = f"recovery:{recovery_payload['tool']}"
+                adapter.emit_start(synthetic_name, arg_keys, request_id)
+                if recovery_payload["outcome"] == "recovered":
+                    adapter.emit_end(
+                        synthetic_name, request_id, recovery_payload["duration_ms"]
+                    )
+                else:
+                    adapter.emit_error(
+                        synthetic_name, request_id, recovery_payload["exc"]
+                    )
+                # AC3: plain overwrite, not the token-based .reset() pattern —
+                # the .set() above happened in a different call frame (inside
+                # the composed callable), so no token is available here.
+                _last_recovery_var.set(None)
             try:
                 mcp_request_id_var.reset(token)
             except ValueError:

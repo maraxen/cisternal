@@ -36,9 +36,9 @@ import inspect
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
-from cisternal.registration.compose import compose_mcp_callable
+from cisternal.registration.compose import apply_recovery_sync, compose_mcp_callable
 from cisternal.registration.errors import CisternalWireError
 from cisternal.registration.registry import snapshot
 
@@ -82,6 +82,7 @@ def wire(
     registry: str = "default",
     expected: list[str] | None = None,
     validate: bool = True,
+    recovery: tuple[Callable[[BaseException], bool], Callable[[], None]] | None = None,
 ) -> WiredRegistry:
     """Snapshot the named registry and register each tool on *server* (and *app*).
 
@@ -103,7 +104,11 @@ def wire(
     HARD INVARIANT (C5 / AC-M2-6):
         This function and the callables it registers MUST NOT call any adapter
         methods or emit any telemetry.  The *adapter* parameter is accepted for
-        forward-compat and is intentionally never used.
+        forward-compat and is intentionally never used.  (*recovery*'s hooks
+        are supplied by the caller, not owned by cisternal, and the only
+        cisternal-side side effect of a recovery attempt is a plain
+        ``ContextVar.set()`` — a signal, not a telemetry call; see
+        ``compose.py``'s module docstring, R1.)
 
     Args:
         server:    A ``fastmcp.FastMCP`` instance (or any object with an
@@ -122,6 +127,16 @@ def wire(
         validate:  When ``True`` (default) and *expected* names are missing:
                    raise :class:`CisternalWireError`.  When ``False``: log a
                    WARNING to ``cisternal.registration`` and continue.
+        recovery:  Optional ``(is_recoverable, recover)`` pair of synchronous
+                   callables (spec 260805_nlm-adapter-transparent-auto-reauth,
+                   AC7-AC13).  When supplied, it is threaded uniformly into
+                   every entry's composed MCP callable AND its CLI closure
+                   (AC13) — there is no separate exclusion parameter at this
+                   level; exclusion is entirely the caller's registration-time
+                   decision (only pass a tool's own function through this
+                   registry partition if it should be recovery-eligible).
+                   ``None`` (default) preserves today's exact behaviour for
+                   every other cisternal consumer.
 
     Returns:
         A :class:`WiredRegistry` recording which tools were wired.
@@ -151,7 +166,12 @@ def wire(
 
     for entry in snapshot_view.values():
         # Generate the async MCP callable (E2/E1/H1 guarantees from compose).
-        mcp_callable = compose_mcp_callable(entry.fn)
+        # entry.name (not entry.fn.__name__) both names the FastMCP tool
+        # (AC-M2-15, below) and is what compose_mcp_callable tags Spec B's
+        # recovery-telemetry payload with, so the two stay in agreement.
+        mcp_callable = compose_mcp_callable(
+            entry.fn, recovery=recovery, tool_name=entry.name
+        )
 
         # Explicitly name the registered Tool as entry.name (AC-M2-15). A bare
         # callable falls back to FastMCP's own name inference, which reads
@@ -181,11 +201,14 @@ def wire(
             def _make_cli_cmd(original_fn: Any) -> Any:
                 def _cli_cmd(*args: Any, **kwargs: Any) -> Any:
                     # F1 CLI error contract: wrap exceptions into a clean exit.
-                    # No telemetry emitted here (C5 / AC-M2-6).
-                    from cisternal.registration.shim import cli_dispatch
-
+                    # No telemetry emitted here (C5 / AC-M2-6). AC13: the same
+                    # `recovery` policy passed to wire() applies here too, via
+                    # apply_recovery_sync's AC12 sync leg (no thread offload,
+                    # no telemetry contextvar — see compose.py).
                     try:
-                        return cli_dispatch(original_fn, *args, **kwargs)
+                        return apply_recovery_sync(
+                            original_fn, recovery, *args, **kwargs
+                        )
                     except SystemExit:
                         # Re-raise SystemExit unchanged (already a clean exit).
                         raise

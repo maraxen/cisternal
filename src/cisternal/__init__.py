@@ -12,9 +12,13 @@ Public API (spec §3.2 — M1 telemetry + M2 registration surface):
   M2 — Registration surface (B+G2 hybrid design, challenger-hardened):
     tool: Pure-metadata decorator for registering MCP tools (A1, A2).
           @cisternal.tool returns the original fn unchanged (decorated_fn is fn).
-    wire(server, app, *, adapter, registry, expected, validate):
+    wire(server, app, *, adapter, registry, expected, validate, recovery):
           Snapshot a registry at call time and register each tool on a FastMCP
           server (and optionally a Cyclopts App). Returns a WiredRegistry.
+          `recovery=(is_recoverable, recover)` (optional; spec
+          260805_nlm-adapter-transparent-auto-reauth) applies a transparent
+          retry-once-after-recovery policy uniformly to every entry's MCP
+          callable and CLI closure; `None` (default) is unaffected.
     WiredRegistry: Introspection object returned by wire().
     CisternalWireError: Raised by wire() when expected tools are missing.
     clear_registry(name): Test teardown helper; clears a named registry (A7).
