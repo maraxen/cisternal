@@ -68,6 +68,44 @@ cisternal assets inspect
 cisternal assets validate
 ```
 
+### Install as a real Claude Code plugin
+
+`cisternal assets export` only writes files — nothing picks them up until
+something registers them. `cisternal assets install` does both steps: it
+writes the bundle, then drives the real `claude` CLI to register it as a
+local marketplace and install it, so its skills/agents/MCP config actually
+load in a Claude Code session.
+
+Requires a `[plugin.marketplace]` table in your manifest:
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "1.0.0"
+
+[plugin.marketplace]
+name = "my-plugin-marketplace"
+
+[plugin.marketplace.owner]
+name = "Your Name"
+```
+
+```bash
+cisternal assets install --manifest .praxia/manifest.toml
+# writes the bundle to ./ , then runs:
+#   claude plugin marketplace add .
+#   claude plugin install my-plugin@my-plugin-marketplace --scope project
+```
+
+Both underlying `claude` commands are idempotent — re-running `install` is
+safe. `--scope project` (the default) registers the plugin in this
+project's `.claude/settings.json`, so anyone who clones the repo needs only
+one manual `claude plugin install my-plugin@my-plugin-marketplace` (Claude
+Code's own trust-on-first-use step — not something this command tries to
+bypass). To remove it later: `claude plugin uninstall
+my-plugin@my-plugin-marketplace` and `claude plugin marketplace remove
+my-plugin-marketplace`.
+
 Supported export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**.
 
 The CLI is fastmcp-free by design — `cisternal.cli` imports and runs even in environments without `fastmcp` installed; asset-export logic never depends on the telemetry/registration surface.
