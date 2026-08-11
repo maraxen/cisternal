@@ -92,7 +92,7 @@ name = "Your Name"
 
 ```bash
 cisternal assets install --manifest .praxia/manifest.toml
-# writes the bundle to ./ , then runs:
+# writes the bundle to ./, then runs:
 #   claude plugin marketplace add .
 #   claude plugin install my-plugin@my-plugin-marketplace --scope project
 ```

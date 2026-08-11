@@ -43,6 +43,7 @@ Fields:
         skills:      Tuple of SkillAsset, sorted by name at construction.
         agents:      Tuple of AgentAsset, sorted by name at construction.
         hook_specs:  Tuple of HookSpecAsset, sorted by (event, matcher, script).
+        marketplace: Optional MarketplaceAsset (from [plugin.marketplace]).
 
     LoadReport:
         bundle:     Loaded AssetBundle.

@@ -42,6 +42,11 @@ Output files (non-rust-parity mode):
         entry with a non-empty ``body``. This is the real Claude Code
         ``commands/`` directory concept and is unaffected by M13.
 
+    ``.claude-plugin/marketplace.json``
+        Present only when ``bundle.marketplace`` is set. Renders the
+        [plugin.marketplace] table (name, owner, plugin entries) per
+        code.claude.com's local-marketplace schema.
+
     ``.claude-plugin/cisternal-provenance.json``
         SHA-256 provenance sidecar. Computed over the full non-provenance
         file set above (now larger than the M3-era two-file set) to avoid
