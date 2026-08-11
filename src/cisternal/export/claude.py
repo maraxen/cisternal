@@ -73,6 +73,7 @@ _PROVENANCE_PATH = ".claude-plugin/cisternal-provenance.json"
 _COMMAND_BODY_DIR = "commands"
 _HOOKS_JSON_PATH = "hooks/hooks.json"
 _MCP_JSON_PATH = ".mcp.json"
+_MARKETPLACE_JSON_PATH = ".claude-plugin/marketplace.json"
 
 
 class ClaudeEmitter(Emitter):
@@ -140,6 +141,23 @@ class ClaudeEmitter(Emitter):
                 }
             }
             files[_MCP_JSON_PATH] = json.dumps(mcp_obj, sort_keys=True, indent=2)
+
+        if bundle.marketplace is not None:
+            owner: dict[str, str] = {
+                "name": bundle.marketplace.owner_name or bundle.metadata.name,
+            }
+            if bundle.marketplace.owner_email:
+                owner["email"] = bundle.marketplace.owner_email
+            if bundle.marketplace.owner_url:
+                owner["url"] = bundle.marketplace.owner_url
+            marketplace_obj = {
+                "name": bundle.marketplace.name,
+                "owner": owner,
+                "plugins": [{"name": bundle.metadata.name, "source": "./"}],
+            }
+            files[_MARKETPLACE_JSON_PATH] = json.dumps(
+                marketplace_obj, sort_keys=True, indent=2
+            )
 
         if self._emit_command_bodies:
             for cmd in bundle.commands:

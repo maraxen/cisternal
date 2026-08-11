@@ -20,6 +20,7 @@ from cisternal.assets.bundle import (
     AssetBundle,
     BundleMetadata,
     CommandAsset,
+    MarketplaceAsset,
     McpAsset,
 )
 from cisternal.assets.manifest import ManifestAssetSource
@@ -346,3 +347,37 @@ def test_claude_fail_closed_omits_agent_file_without_body() -> None:
 
     assert "agents/present.md" in files
     assert "agents/ghost.md" not in files
+
+
+# ---------------------------------------------------------------------------
+# Marketplace.json emission (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_emit_includes_marketplace_json_when_set() -> None:
+    bundle = AssetBundle(
+        metadata=_meta(name="pull-books"),
+        marketplace=MarketplaceAsset(name="pull-books-marketplace", owner_name="Marielle Russo"),
+    )
+    files = ClaudeEmitter().emit(bundle)
+    assert ".claude-plugin/marketplace.json" in files
+    marketplace = json.loads(files[".claude-plugin/marketplace.json"])
+    assert marketplace["name"] == "pull-books-marketplace"
+    assert marketplace["owner"]["name"] == "Marielle Russo"
+    assert marketplace["plugins"] == [{"name": "pull-books", "source": "./"}]
+
+
+def test_emit_omits_marketplace_json_when_unset() -> None:
+    files = ClaudeEmitter().emit(_bundle())
+    assert ".claude-plugin/marketplace.json" not in files
+
+
+def test_marketplace_json_covered_by_provenance_digest() -> None:
+    bundle = AssetBundle(
+        metadata=_meta(name="pull-books"),
+        marketplace=MarketplaceAsset(name="pull-books-marketplace"),
+    )
+    files_a = ClaudeEmitter().emit(bundle)
+    files_b = ClaudeEmitter().emit(bundle)
+    assert files_a == files_b
+    assert files_a[_PROVENANCE_PATH] == files_b[_PROVENANCE_PATH]
