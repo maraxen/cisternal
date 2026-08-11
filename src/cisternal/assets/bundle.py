@@ -133,6 +133,22 @@ class HookSpecAsset:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketplaceAsset:
+    """Local Claude Code marketplace metadata for self-installing a plugin.
+
+    When present on a bundle, ``ClaudeEmitter`` renders a
+    ``.claude-plugin/marketplace.json`` alongside the plugin bundle, listing
+    the plugin itself via ``source: "./"`` — a single-repo, self-contained
+    marketplace+plugin pair, installable via ``cisternal assets install``.
+    """
+
+    name: str
+    owner_name: str = ""
+    owner_email: str = ""
+    owner_url: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class AssetBundle:
     """Complete asset bundle with canonical sort invariants at construction.
 
@@ -147,6 +163,7 @@ class AssetBundle:
     skills: tuple[SkillAsset, ...] = ()
     agents: tuple[AgentAsset, ...] = ()
     hook_specs: tuple[HookSpecAsset, ...] = ()
+    marketplace: MarketplaceAsset | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
