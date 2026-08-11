@@ -7,6 +7,7 @@ Subcommand tree:
     cisternal assets export [OPTIONS]
     cisternal assets inspect [OPTIONS]
     cisternal assets validate [OPTIONS]
+    cisternal assets install [OPTIONS]
     cisternal telemetry doctor
 
 This module is FASTMCP-FREE by design (spec M4): importing ``cisternal.cli``
@@ -40,6 +41,7 @@ import logging
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -165,6 +167,7 @@ def _load_export_bundle(
             _log.warning("cisternal.cli: conflict: %s", conflict)
         return bundle
 
+    # Import registry_assets via fastmcp-free path (spec M4).
     from cisternal.assets.source import registry_assets  # noqa: PLC0415
 
     snapshot = registry_assets(registry)
@@ -372,8 +375,8 @@ def install(
     Requires --manifest with a [plugin.marketplace] table. Writes the bundle
     to --out, then runs `claude plugin marketplace add <out>` and `claude
     plugin install <name>@<marketplace> --scope <scope>` as subprocesses.
-    Both underlying commands are idempotent (confirmed live against claude
-    2.1.227) — re-running install is safe.
+    Both underlying commands are idempotent as of claude 2.1.227 — re-running
+    install is safe.
 
     Unlike export/inspect/validate, install exits non-zero on real failure:
     it mutates live Claude Code state (marketplace registration, installed-
@@ -394,6 +397,8 @@ def install(
         raise SystemExit(2)
 
     resolved_marketplace_name = marketplace_name or bundle.marketplace.name
+    if marketplace_name and marketplace_name != bundle.marketplace.name:
+        bundle = replace(bundle, marketplace=replace(bundle.marketplace, name=marketplace_name))
 
     from cisternal.export.claude import ClaudeEmitter  # noqa: PLC0415
     from cisternal.export.write import write_bundle  # noqa: PLC0415
@@ -410,10 +415,19 @@ def install(
 
     write_bundle(files, out, dry_run=False)
 
-    add_result = subprocess.run(
-        [claude_bin, "plugin", "marketplace", "add", str(out)],
-        capture_output=True,
-        text=True,
+    if not (out / ".claude-plugin" / "plugin.json").is_file() or not (
+        out / ".claude-plugin" / "marketplace.json"
+    ).is_file():
+        _log.error(
+            "cisternal.cli: bundle write to %s appears incomplete "
+            "(missing .claude-plugin/plugin.json or .claude-plugin/marketplace.json); "
+            "refusing to run claude",
+            out,
+        )
+        raise SystemExit(1)
+
+    add_result = _run_claude(
+        [claude_bin, "plugin", "marketplace", "add", str(out)], claude_bin=claude_bin
     )
     if add_result.returncode != 0:
         _log.error(
@@ -423,10 +437,8 @@ def install(
         )
         raise SystemExit(1)
 
-    install_result = subprocess.run(
-        [claude_bin, "plugin", "install", plugin_id, "--scope", scope],
-        capture_output=True,
-        text=True,
+    install_result = _run_claude(
+        [claude_bin, "plugin", "install", plugin_id, "--scope", scope], claude_bin=claude_bin
     )
     if install_result.returncode != 0:
         _log.error(
@@ -437,6 +449,20 @@ def install(
         raise SystemExit(1)
 
     print(f"Installed {plugin_id} (scope={scope})")
+
+
+def _run_claude(argv: list[str], *, claude_bin: str) -> subprocess.CompletedProcess[str]:
+    """Run a `claude` subprocess, converting binary-not-found into SystemExit(1).
+
+    Every other install() failure path logs via _log.error + raises
+    SystemExit(1); without this, a missing/non-executable claude_bin would
+    instead propagate as a raw, unhandled Python traceback.
+    """
+    try:
+        return subprocess.run(argv, capture_output=True, text=True)
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        _log.error("cisternal.cli: could not run %r: %s", claude_bin, exc)
+        raise SystemExit(1) from exc
 
 
 # ---------------------------------------------------------------------------

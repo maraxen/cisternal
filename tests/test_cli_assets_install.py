@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import stat
 from pathlib import Path
 
@@ -224,3 +225,70 @@ def test_install_marketplace_name_override(
 
     log_lines = log_path.read_text(encoding="utf-8").splitlines()
     assert log_lines[1] == "plugin install demo-plugin@override-marketplace --scope user"
+
+    # The emitted marketplace.json must actually carry the overridden name —
+    # otherwise `claude plugin marketplace add` (step 1) registers the
+    # marketplace under the *manifest's* name while step 2 tries to install
+    # from the overridden name, which doesn't exist.
+    marketplace_json = json.loads(
+        (out_dir / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert marketplace_json["name"] == "override-marketplace"
+
+
+def test_install_claude_binary_not_found(tmp_path: Path) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    nonexistent_bin = tmp_path / "no-such-claude-binary"
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(nonexistent_bin),
+        ],
+        exit_code=1,
+    )
+
+
+def test_install_aborts_when_bundle_write_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    log_path = tmp_path / "fake-claude.log"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_path))
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL_STEP", raising=False)
+
+    import cisternal.export.write as write_module
+
+    def _noop_write_bundle(files, out, *, dry_run=False):  # noqa: ANN001, ANN202, ARG001
+        from cisternal.export.write import WriteResult  # noqa: PLC0415
+
+        return WriteResult(files=(), dry_run=dry_run)
+
+    monkeypatch.setattr(write_module, "write_bundle", _noop_write_bundle)
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=1,
+    )
+
+    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
