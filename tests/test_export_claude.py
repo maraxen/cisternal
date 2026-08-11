@@ -202,8 +202,36 @@ def test_mcp_json_present_when_non_empty() -> None:
     assert ".mcp.json" in files
     mcp_doc = json.loads(files[".mcp.json"])
     srv = mcp_doc["mcpServers"]["my_server"]
-    assert srv["command"] == ["python", "-m", "server"]
+    # Claude Code's real .mcp.json schema wants a single executable string in
+    # "command" and a separate "args" array — NOT the whole argv crammed into
+    # "command" (that shape is rejected: "command: expected string, received
+    # array"). See git history for the confirmed production failure.
+    assert srv["command"] == "python"
+    assert srv["args"] == ["-m", "server"]
     assert srv["env"] == {"API_KEY": "secret", "DEBUG": "1"}
+
+
+def test_mcp_json_single_element_command_omits_args() -> None:
+    """A single-element argv (no arguments) still yields a string command.
+
+    "args" is omitted entirely rather than emitted as an empty list, mirroring
+    this emitter's sparse-field conventions elsewhere (e.g. optional
+    marketplace owner fields, optional plugin.json keys).
+    """
+    bundle = _bundle(
+        mcp_servers=(
+            McpAsset(name="solo_server", command=("python",), env=()),
+        )
+    )
+    files = ClaudeEmitter().emit(bundle)
+
+    assert ".mcp.json" in files
+    mcp_doc = json.loads(files[".mcp.json"])
+    srv = mcp_doc["mcpServers"]["solo_server"]
+    assert srv["command"] == "python"
+    assert isinstance(srv["command"], str)
+    assert "args" not in srv
+    assert srv["env"] == {}
 
 
 def test_empty_bundle_produces_valid_manifest_no_error() -> None:

@@ -107,10 +107,23 @@ def append_hook_entry(
 
 
 def mcp_servers_json(bundle_mcp: tuple[McpAsset, ...]) -> dict[str, Any]:
-    return {
-        srv.name: {
-            "command": list(srv.command),
-            "env": dict(srv.env),
-        }
-        for srv in bundle_mcp
-    }
+    """Build the ``mcpServers`` object (shared by ``.mcp.json`` and plugin.json).
+
+    Mirrors praxia's ``bundle_claude.rs``: ``command`` is a single executable
+    string (the first argv element, ``""`` if the tuple is empty — defensive,
+    see ``assets/manifest.py::_load_mcp``), ``args`` holds the remaining argv
+    elements and is only added when non-empty, ``env`` is always present.
+    Fields are inserted in the alphabetical order (``args``, ``command``,
+    ``env``) serde_json's default ``BTreeMap``-backed ``Map`` produces on
+    serialization, to preserve rust-parity byte-for-byte output ordering.
+    """
+    result: dict[str, Any] = {}
+    for srv in bundle_mcp:
+        command = srv.command
+        obj: dict[str, Any] = {}
+        if len(command) > 1:
+            obj["args"] = list(command[1:])
+        obj["command"] = command[0] if command else ""
+        obj["env"] = dict(srv.env)
+        result[srv.name] = obj
+    return result
