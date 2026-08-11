@@ -11,6 +11,7 @@ from cisternal.assets.bundle import (
     BundleMetadata,
     HookSpecAsset,
     LoadReport,
+    MarketplaceAsset,
     McpAsset,
     SkillAsset,
 )
@@ -52,6 +53,7 @@ class ManifestAssetSource:
         agents = _load_agents(plugin, self._root, warnings)
         hook_specs = _load_hook_specs(plugin, self._root, warnings)
         mcp_servers = _load_mcp(plugin, name)
+        marketplace = _load_marketplace(plugin, name)
         commands = load_export_commands(plugin, self._root, warnings)
         warnings.extend(validate_extension_sections(plugin, self._root))
 
@@ -62,6 +64,7 @@ class ManifestAssetSource:
             skills=skills,
             agents=agents,
             hook_specs=hook_specs,
+            marketplace=marketplace,
         )
         return LoadReport(bundle=bundle, warnings=tuple(warnings))
 
@@ -215,6 +218,27 @@ def _load_mcp(plugin: dict[str, object], plugin_name: str) -> tuple[McpAsset, ..
         return ()
     argv = tuple(str(part) for part in command)
     return (McpAsset(name=plugin_name or "mcp", command=argv),)
+
+
+def _load_marketplace(plugin: dict[str, object], plugin_name: str) -> MarketplaceAsset | None:
+    marketplace = plugin.get("marketplace")
+    if not isinstance(marketplace, dict):
+        return None
+    name = str(marketplace.get("name") or plugin_name or "")
+    if not name:
+        return None
+    owner = marketplace.get("owner")
+    owner_name = owner_email = owner_url = ""
+    if isinstance(owner, dict):
+        owner_name = str(owner.get("name") or "")
+        owner_email = str(owner.get("email") or "")
+        owner_url = str(owner.get("url") or "")
+    return MarketplaceAsset(
+        name=name,
+        owner_name=owner_name,
+        owner_email=owner_email,
+        owner_url=owner_url,
+    )
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:

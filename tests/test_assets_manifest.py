@@ -170,3 +170,56 @@ path = "hooks/missing.sh"
     report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
     assert report.bundle.hook_specs[0].content == ""
     assert any("pre.sh" in w for w in report.warnings)
+
+
+def test_manifest_loads_marketplace_table(tmp_path: Path) -> None:
+    """[plugin.marketplace] loads into AssetBundle.marketplace."""
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "demo-plugin"
+version = "1.0.0"
+
+[plugin.marketplace]
+name = "demo-marketplace"
+
+[plugin.marketplace.owner]
+name = "Demo Owner"
+email = "demo@example.com"
+""",
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    marketplace = report.bundle.marketplace
+    assert marketplace is not None
+    assert marketplace.name == "demo-marketplace"
+    assert marketplace.owner_name == "Demo Owner"
+    assert marketplace.owner_email == "demo@example.com"
+    assert marketplace.owner_url == ""
+
+
+def test_manifest_marketplace_name_defaults_to_plugin_name(tmp_path: Path) -> None:
+    """[plugin.marketplace] with no `name` falls back to [plugin].name."""
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "demo-plugin"
+version = "1.0.0"
+
+[plugin.marketplace]
+""",
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    assert report.bundle.marketplace is not None
+    assert report.bundle.marketplace.name == "demo-plugin"
+
+
+def test_manifest_without_marketplace_table_leaves_it_none() -> None:
+    """No [plugin.marketplace] table → bundle.marketplace stays None."""
+    report = ManifestAssetSource(MANIFEST).load()
+    assert report.bundle.marketplace is None
