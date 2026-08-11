@@ -215,6 +215,7 @@ dependencies = [
     { name = "cyclopts" },
     { name = "fastmcp" },
     { name = "opentelemetry-api" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -234,7 +235,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
-    { name = "pyyaml" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -248,6 +248,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = ">=1.42.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'otlp'", specifier = ">=1.42.1" },
     { name = "opentelemetry-semantic-conventions", marker = "extra == 'otlp'", specifier = ">=0.63b1" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 provides-extras = ["otlp"]
 
@@ -260,7 +261,6 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "ruff", specifier = ">=0.15.17" },
     { name = "ty", specifier = ">=0.0.49" },
 ]

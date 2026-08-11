@@ -21,6 +21,24 @@ output -- it's just not correctly delimited as YAML. These tests instead
 parse the rendered frontmatter with real PyYAML (``yaml.safe_load``) and
 assert the round-tripped value equals the original input exactly, which is
 the check that would have caught the bug.
+
+A first implementation of ``_yaml_scalar`` used a hand-rolled set of
+indicator-char/whitespace/``: ``/`` #`` checks instead of round-tripping
+through the real parser, and review found two more gaps in that heuristic
+(also covered below):
+
+3. YAML 1.1 numeric productions the hand-rolled ``float()`` check didn't
+   know about -- sexagesimal (colon-separated) ints like ``"16:9"`` ->
+   ``969``, and hex/binary like ``"0x1A"``/``"0b1010"`` -> ``26``/``10``.
+4. ``json.dumps`` defaulting to ``ensure_ascii=True`` split astral-plane
+   Unicode (e.g. emoji) into a UTF-16 surrogate pair across two ``\\uXXXX``
+   escapes, which YAML's escape scanner does not recombine the way JSON
+   parsers do.
+
+``_yaml_scalar`` now determines safety by actually calling
+``yaml.safe_load`` and checking round-trip equality, rather than continuing
+to hand-enumerate unsafe productions -- this subsumes every case above (and
+any future YAML 1.1 resolver production not yet identified).
 """
 
 from __future__ import annotations
@@ -209,10 +227,53 @@ def test_yaml_scalar_quotes_reserved_words_case_insensitively() -> None:
 
 
 def test_yaml_scalar_quotes_numeric_looking_strings() -> None:
-    for numeric in ("42", "-3.14", "0", "1e10"):
+    # Note: "1e10"/"1.0e10" are deliberately excluded here -- PyYAML's
+    # default resolver's float regex requires an explicit sign on the
+    # exponent to match, so unsigned-exponent forms round-trip safely as
+    # strings under yaml.safe_load and are correctly left bare by the
+    # ground-truth check. "1.0e-10" (signed exponent) IS resolved as a
+    # float and covered below.
+    for numeric in ("42", "-3.14", "0", "1.0e-10"):
         quoted = _yaml_scalar(numeric)
         assert quoted != numeric, f"{numeric!r} should have been quoted"
         assert yaml.safe_load(quoted) == numeric
+
+
+def test_yaml_scalar_leaves_pyyaml_unresolved_numeric_looking_string_bare() -> None:
+    """"1e10" looks numeric to a human, but PyYAML's own resolver does not
+    treat it as a float (no decimal point), so the ground-truth round-trip
+    check correctly leaves it bare -- this is intentional, not a gap: the
+    safety check is defined relative to what yaml.safe_load actually does,
+    not what looks numeric to a human."""
+    assert _yaml_scalar("1e10") == "1e10"
+    assert yaml.safe_load("1e10") == "1e10"
+
+
+def test_yaml_scalar_quotes_sexagesimal_and_hex_and_binary_looking_strings() -> None:
+    """Regression for review Finding 1: the original hand-rolled ``float()``
+    check missed YAML 1.1 productions PyYAML's default resolver still
+    treats as non-string -- e.g. a trigger phrase literally named "16:9"
+    (a very plausible aspect-ratio trigger) would silently become the
+    integer 969 on re-parse, not the original string, unless quoted."""
+    for numeric_like in ("16:9", "1:30", "0x1A", "0b1010"):
+        quoted = _yaml_scalar(numeric_like)
+        assert quoted != numeric_like, f"{numeric_like!r} should have been quoted"
+        assert yaml.safe_load(quoted) == numeric_like
+
+
+def test_yaml_scalar_preserves_astral_plane_unicode_when_quoting() -> None:
+    """Regression for review Finding 2: json.dumps defaults to
+    ensure_ascii=True, which splits an astral-plane character (e.g. emoji)
+    into a UTF-16 surrogate pair across two separate \\uXXXX escapes.
+    YAML's escape scanner does not recombine surrogate pairs the way JSON
+    parsers do, so a value needing quoting for any reason (here: the
+    trailing colon) that also contains an astral-plane character would
+    come back corrupted unless ensure_ascii=False is used."""
+    value = "trailing colon and emoji \U0001f600:"
+    quoted = _yaml_scalar(value)
+    assert quoted != value
+    assert "\\ud83d" not in quoted and "\\ude00" not in quoted
+    assert yaml.safe_load(quoted) == value
 
 
 def test_yaml_scalar_quotes_leading_indicator_chars() -> None:
