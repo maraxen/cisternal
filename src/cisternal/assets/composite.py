@@ -50,6 +50,7 @@ class CompositeAssetSource:
             skills=manifest_report.bundle.skills,
             agents=manifest_report.bundle.agents,
             hook_specs=manifest_report.bundle.hook_specs,
+            marketplace=manifest_report.bundle.marketplace,
         )
         return LoadReport(
             bundle=bundle,
