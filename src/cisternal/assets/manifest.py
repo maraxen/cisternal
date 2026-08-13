@@ -79,6 +79,37 @@ def _read_text(path: Path, warnings: list[str], label: str) -> str | None:
         return None
 
 
+_SKILL_RESOURCE_DIRS = ("references", "scripts", "assets")
+
+
+def _load_skill_resources(skill_dir: Path, name: str, warnings: list[str]) -> tuple[tuple[str, str], ...]:
+    """Walk a skill's ``references/``/``scripts/``/``assets/`` sibling dirs.
+
+    Returns ``(relative_path, content)`` pairs, forward-slash paths, sorted
+    for determinism. Non-UTF-8 files are skipped with a warning rather than
+    raising (fail-open, matching ``_read_text``'s convention) — a binary
+    asset (e.g. a real image) isn't supported by this text-only bundle
+    format yet, but one bad file shouldn't drop the rest of the skill.
+    """
+    resources: list[tuple[str, str]] = []
+    for subdir_name in _SKILL_RESOURCE_DIRS:
+        subdir = skill_dir / subdir_name
+        if not subdir.is_dir():
+            continue
+        for path in sorted(subdir.rglob("*")):
+            if not path.is_file():
+                continue
+            if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                warnings.append(f"skill {name!r}: unreadable resource {path}: {exc}")
+                continue
+            resources.append((path.relative_to(skill_dir).as_posix(), content))
+    return tuple(resources)
+
+
 def _load_skills(
     plugin: dict[str, object],
     root: Path,
@@ -96,7 +127,8 @@ def _load_skills(
         if not name or not rel:
             warnings.append(f"skill entry missing name or path: {entry!r}")
             continue
-        text = _read_text(root / rel, warnings, f"skill {name!r}")
+        skill_path = root / rel
+        text = _read_text(skill_path, warnings, f"skill {name!r}")
         raw = text if text is not None else ""
 
         # Strip any existing SKILL.md frontmatter (mirrors _load_agents /
@@ -112,12 +144,15 @@ def _load_skills(
         if isinstance(manifest_triggers, list) and manifest_triggers:
             triggers = tuple(str(t) for t in manifest_triggers)
 
+        resources = _load_skill_resources(skill_path.parent, name, warnings)
+
         skills.append(
             SkillAsset(
                 name=name,
                 description=description,
                 body=body,
                 triggers=triggers,
+                resources=resources,
             )
         )
     return tuple(skills)

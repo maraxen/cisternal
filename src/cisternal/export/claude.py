@@ -120,6 +120,8 @@ class ClaudeEmitter(Emitter):
 
         for skill in emit_skills:
             files[f"skills/{skill.name}/SKILL.md"] = format_skill_markdown(skill)
+            for resource_path, content in skill.resources:
+                files[f"skills/{skill.name}/{resource_path}"] = content
 
         if hook_specs:
             hooks_root = build_claude_style_hooks(hook_specs)

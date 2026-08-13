@@ -92,12 +92,23 @@ class SkillAsset:
     the manifest declares. Empty by default — most SKILL.md sources don't set
     it, and omitting it from the exported frontmatter entirely (rather than
     emitting ``triggers: []``) matches existing agent/skill export behavior.
+
+    ``resources`` carries sibling ``references/``, ``scripts/``, and
+    ``assets/`` files found next to the manifest-declared SKILL.md, as
+    ``(relative_path, content)`` pairs (e.g. ``("references/foo.md", "...")``).
+    Previously an emitter wrote only the single SKILL.md body and silently
+    dropped everything else in a skill's directory — a documented gap
+    (myxcel's marketplace README, "sibling-file export limitation"). Text
+    files only: a resource that fails UTF-8 decoding is skipped with a
+    warning by the loader rather than raising, matching the rest of this
+    module's fail-open convention.
     """
 
     name: str
     description: str = ""
     body: str = ""
     triggers: tuple[str, ...] = ()
+    resources: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

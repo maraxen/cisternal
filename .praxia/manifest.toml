@@ -8,6 +8,10 @@ requires_praxia = "0.0.0"
 name = "export-trust"
 path = "skills/export-trust/SKILL.md"
 
+[[plugin.skills]]
+name = "customizing-tools"
+path = "skills/customizing-tools/SKILL.md"
+
 [[plugin.agents]]
 name = "validate-helper"
 path = "agents/validate-helper.md"
