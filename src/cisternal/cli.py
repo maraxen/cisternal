@@ -405,11 +405,14 @@ def install(
 
     files = ClaudeEmitter().emit(bundle)
     plugin_id = f"{bundle.metadata.name}@{resolved_marketplace_name}"
+    # `claude plugin marketplace add` rejects bare relative paths like "." (though
+    # it accepts "./"), so always pass an absolute path to avoid that footgun.
+    out_abs = out.resolve()
 
     if dry_run:
         for path in sorted(files):
             print(path)
-        print(f"would run: {claude_bin} plugin marketplace add {out}")
+        print(f"would run: {claude_bin} plugin marketplace add {out_abs}")
         print(f"would run: {claude_bin} plugin install {plugin_id} --scope {scope}")
         return
 
@@ -427,7 +430,7 @@ def install(
         raise SystemExit(1)
 
     add_result = _run_claude(
-        [claude_bin, "plugin", "marketplace", "add", str(out)], claude_bin=claude_bin
+        [claude_bin, "plugin", "marketplace", "add", str(out_abs)], claude_bin=claude_bin
     )
     if add_result.returncode != 0:
         _log.error(

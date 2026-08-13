@@ -144,6 +144,44 @@ def test_install_runs_marketplace_add_and_install(
     assert "Installed demo-plugin@demo-marketplace" in captured.out
 
 
+def test_install_resolves_relative_out_to_absolute_path_for_marketplace_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`claude plugin marketplace add .` is rejected by the real CLI (though
+    `./` is accepted); install must always pass an absolute path so the
+    default `--out` value of "." never triggers that footgun.
+    """
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    log_path = tmp_path / "fake-claude.log"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_path))
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL_STEP", raising=False)
+    monkeypatch.chdir(out_dir)
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            ".",
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=0,
+    )
+
+    log_lines = log_path.read_text(encoding="utf-8").splitlines()
+    marketplace_add_line = log_lines[0]
+    assert marketplace_add_line == f"plugin marketplace add {out_dir.resolve()}"
+    passed_arg = marketplace_add_line.removeprefix("plugin marketplace add ")
+    assert passed_arg not in (".", "./")
+    assert Path(passed_arg).is_absolute()
+
+
 def test_install_propagates_marketplace_add_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
