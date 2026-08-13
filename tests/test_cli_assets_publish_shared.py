@@ -1,4 +1,4 @@
-"""Tests for `cisternal plugin publish-local`."""
+"""Tests for `cisternal assets publish-shared`."""
 
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
     assert exc_info.value.code == exit_code
 
 
-def test_publish_local_writes_bundle_and_marketplace_entry(tmp_path: Path) -> None:
+def test_publish_shared_writes_bundle_and_marketplace_entry(tmp_path: Path) -> None:
     marketplace = tmp_path / "mkt"
 
     _invoke_app(
         [
-            "plugin",
-            "publish-local",
+            "assets",
+            "publish-shared",
             "--manifest",
             str(FIXTURE_MANIFEST),
             "--marketplace",
@@ -51,11 +51,11 @@ def test_publish_local_writes_bundle_and_marketplace_entry(tmp_path: Path) -> No
     assert plugin_json["version"].startswith("1.2.3+")
 
 
-def test_publish_local_is_idempotent_and_prunes_stale_files(tmp_path: Path) -> None:
+def test_publish_shared_is_idempotent_and_prunes_stale_files(tmp_path: Path) -> None:
     marketplace = tmp_path / "mkt"
     args = [
-        "plugin",
-        "publish-local",
+        "assets",
+        "publish-shared",
         "--manifest",
         str(FIXTURE_MANIFEST),
         "--marketplace",
@@ -85,7 +85,7 @@ def test_publish_local_is_idempotent_and_prunes_stale_files(tmp_path: Path) -> N
     assert [p["name"] for p in doc["plugins"]].count("fixture-plugin") == 1
 
 
-def test_publish_local_preserves_other_marketplace_entries(tmp_path: Path) -> None:
+def test_publish_shared_preserves_other_marketplace_entries(tmp_path: Path) -> None:
     marketplace = tmp_path / "mkt"
     marketplace_json = marketplace / ".claude-plugin" / "marketplace.json"
     marketplace_json.parent.mkdir(parents=True)
@@ -106,8 +106,8 @@ def test_publish_local_preserves_other_marketplace_entries(tmp_path: Path) -> No
 
     _invoke_app(
         [
-            "plugin",
-            "publish-local",
+            "assets",
+            "publish-shared",
             "--manifest",
             str(FIXTURE_MANIFEST),
             "--marketplace",
@@ -120,13 +120,13 @@ def test_publish_local_preserves_other_marketplace_entries(tmp_path: Path) -> No
     assert names == ["fixture-plugin", "other-tool"]
 
 
-def test_publish_local_name_override(tmp_path: Path) -> None:
+def test_publish_shared_name_override(tmp_path: Path) -> None:
     marketplace = tmp_path / "mkt"
 
     _invoke_app(
         [
-            "plugin",
-            "publish-local",
+            "assets",
+            "publish-shared",
             "--manifest",
             str(FIXTURE_MANIFEST),
             "--marketplace",

@@ -107,10 +107,35 @@ def append_hook_entry(
 
 
 def mcp_servers_json(bundle_mcp: tuple[McpAsset, ...]) -> dict[str, Any]:
-    return {
-        srv.name: {
-            "command": list(srv.command),
+    """Build the ``mcpServers`` object (shared by ``.mcp.json`` and plugin.json).
+
+    Mirrors praxia's ``bundle_claude.rs``: ``command`` is a single executable
+    string (the first argv element, ``""`` if the tuple is empty — defensive,
+    see ``assets/manifest.py::_load_mcp``), ``args`` holds the remaining argv
+    elements and is only added when non-empty, ``env`` is always present.
+
+    Field insertion order is ``command``, ``env``, ``args`` (args appended
+    last, only when non-empty) — the *literal* insertion order used by
+    ``bundle_claude.rs`` (``json!({"command": ..., "env": ...})`` followed by
+    a conditional ``server_obj["args"] = ...``), NOT alphabetical. praxia's
+    workspace-wide ``serde_json`` is compiled with the ``preserve_order``
+    feature (requested by ``praxia-core``'s Cargo.toml and unified across the
+    dependency graph that includes ``praxia-agent-assets`` — confirmed via
+    ``cargo tree -p praxia-agent-assets -e features -i serde_json``), so its
+    ``Map`` is insertion-ordered (``IndexMap``-backed), not the
+    ``BTreeMap``-backed alphabetical ordering ``serde_json`` uses by default
+    without that feature. ``compact_json`` (this module) does not
+    ``sort_keys``, so insertion order here must match the Rust source's
+    insertion order exactly for byte-for-byte rust-parity output.
+    """
+    result: dict[str, Any] = {}
+    for srv in bundle_mcp:
+        command = srv.command
+        obj: dict[str, Any] = {
+            "command": command[0] if command else "",
             "env": dict(srv.env),
         }
-        for srv in bundle_mcp
-    }
+        if len(command) > 1:
+            obj["args"] = list(command[1:])
+        result[srv.name] = obj
+    return result

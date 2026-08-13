@@ -32,7 +32,7 @@ def _ensure_minimal_emitter_installed() -> None:
 
 def test_minimal_surface_registered() -> None:
     """AC-M4-4b: minimal appears in list_emitter_surfaces when installed."""
-    from cisterna.export.registry import list_emitter_surfaces
+    from cisternal.export.registry import list_emitter_surfaces
 
     surfaces = list_emitter_surfaces()
     assert "minimal" in surfaces
@@ -41,8 +41,8 @@ def test_minimal_surface_registered() -> None:
 
 def test_minimal_emitter_emits_file() -> None:
     """AC-M4-4c: get_emitter('minimal').emit(bundle) returns ≥1 file."""
-    from cisterna.assets.load import load_asset_report
-    from cisterna.export.registry import get_emitter
+    from cisternal.assets.load import load_asset_report
+    from cisternal.export.registry import get_emitter
 
     report = load_asset_report(manifest=FIXTURE_MANIFEST)
     emitter = get_emitter("minimal")

@@ -35,12 +35,22 @@ Output files (non-rust-parity mode):
 
     ``.mcp.json`` (root, NOT under ``.claude-plugin/``)
         Present only when ``bundle.mcp_servers`` is non-empty:
-        ``{"mcpServers": {name: {"command": [...], "env": {...}}}}``.
+        ``{"mcpServers": {name: {"command": "...", "args": [...], "env": {...}}}}``.
+        ``command`` is a single executable string (the first element of the
+        argv tuple); ``args`` holds the remaining argv elements and is
+        omitted when there are none. Matches Claude Code's actual
+        ``.mcp.json`` schema (a bare argv array in ``command`` is rejected —
+        see git history for the confirmed production failure).
 
     ``commands/<name>.md``
         Only when ``emit_command_bodies=True``, one per ``bundle.commands``
         entry with a non-empty ``body``. This is the real Claude Code
         ``commands/`` directory concept and is unaffected by M13.
+
+    ``.claude-plugin/marketplace.json``
+        Present only when ``bundle.marketplace`` is set. Renders the
+        [plugin.marketplace] table (name, owner, plugin entries) per
+        code.claude.com's local-marketplace schema.
 
     ``.claude-plugin/cisternal-provenance.json``
         SHA-256 provenance sidecar. Computed over the full non-provenance
@@ -61,7 +71,7 @@ from __future__ import annotations
 
 import json
 
-from cisternal.assets.bundle import AssetBundle
+from cisternal.assets.bundle import AssetBundle, McpAsset
 from cisternal.export._hash import bundle_sha256
 from cisternal.export._markdown import format_agent_markdown, format_skill_markdown
 from cisternal.export.base import Emitter
@@ -73,6 +83,7 @@ _PROVENANCE_PATH = ".claude-plugin/cisternal-provenance.json"
 _COMMAND_BODY_DIR = "commands"
 _HOOKS_JSON_PATH = "hooks/hooks.json"
 _MCP_JSON_PATH = ".mcp.json"
+_MARKETPLACE_JSON_PATH = ".claude-plugin/marketplace.json"
 
 
 class ClaudeEmitter(Emitter):
@@ -134,14 +145,27 @@ class ClaudeEmitter(Emitter):
         if bundle.mcp_servers:
             mcp_obj = {
                 "mcpServers": {
-                    srv.name: {
-                        "command": list(srv.command),
-                        "env": dict(srv.env),
-                    }
-                    for srv in bundle.mcp_servers
+                    srv.name: _mcp_server_obj(srv) for srv in bundle.mcp_servers
                 }
             }
             files[_MCP_JSON_PATH] = json.dumps(mcp_obj, sort_keys=True, indent=2)
+
+        if bundle.marketplace is not None:
+            owner: dict[str, str] = {
+                "name": bundle.marketplace.owner_name or bundle.metadata.name,
+            }
+            if bundle.marketplace.owner_email:
+                owner["email"] = bundle.marketplace.owner_email
+            if bundle.marketplace.owner_url:
+                owner["url"] = bundle.marketplace.owner_url
+            marketplace_obj = {
+                "name": bundle.marketplace.name,
+                "owner": owner,
+                "plugins": [{"name": bundle.metadata.name, "source": "./"}],
+            }
+            files[_MARKETPLACE_JSON_PATH] = json.dumps(
+                marketplace_obj, sort_keys=True, indent=2
+            )
 
         if self._emit_command_bodies:
             for cmd in bundle.commands:
@@ -165,6 +189,28 @@ class ClaudeEmitter(Emitter):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _mcp_server_obj(srv: McpAsset) -> dict[str, object]:
+    """Build one ``mcpServers.<name>`` entry from an ``McpAsset``.
+
+    Claude Code's ``.mcp.json`` schema expects ``command`` as a single
+    executable string with a separate ``args`` array for the remaining
+    argv — NOT the whole argv tuple crammed into ``command``. ``args`` is
+    omitted entirely when there are no arguments (mirrors this file's other
+    sparse-field conventions, e.g. optional keys in the marketplace block).
+    Defensive: an empty ``command`` tuple (shouldn't happen — see
+    ``assets/manifest.py::_load_mcp``) falls back to ``""`` rather than
+    raising, per the NEVER-RAISE emitter contract.
+    """
+    command = srv.command
+    obj: dict[str, object] = {
+        "command": command[0] if command else "",
+        "env": dict(srv.env),
+    }
+    if len(command) > 1:
+        obj["args"] = list(command[1:])
+    return obj
 
 
 def _build_manifest(bundle: AssetBundle) -> dict[str, object]:

@@ -1,0 +1,332 @@
+"""Tests for `cisternal assets install` — export + real claude CLI registration."""
+
+from __future__ import annotations
+
+import json
+import stat
+from pathlib import Path
+
+import pytest
+
+_FAKE_CLAUDE_SCRIPT = """#!/bin/sh
+echo "$@" >> "$FAKE_CLAUDE_LOG"
+if [ "$1" = "plugin" ] && [ "$2" = "$FAKE_CLAUDE_FAIL_STEP" ]; then
+  echo "simulated failure at $2" >&2
+  exit 1
+fi
+exit 0
+"""
+
+
+def _write_fake_claude(tmp_path: Path) -> Path:
+    script = tmp_path / "fake-claude"
+    script.write_text(_FAKE_CLAUDE_SCRIPT, encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return script
+
+
+def _write_manifest_with_marketplace(tmp_path: Path) -> Path:
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "demo-plugin"
+version = "1.0.0"
+
+[plugin.marketplace]
+name = "demo-marketplace"
+""",
+        encoding="utf-8",
+    )
+    return manifest_dir / "manifest.toml"
+
+
+def _write_manifest_without_marketplace(tmp_path: Path) -> Path:
+    manifest_dir = tmp_path / "plugin"
+    manifest_dir.mkdir()
+    (manifest_dir / "manifest.toml").write_text(
+        """
+[plugin]
+name = "demo-plugin"
+version = "1.0.0"
+""",
+        encoding="utf-8",
+    )
+    return manifest_dir / "manifest.toml"
+
+
+def _invoke_app(args: list[str], *, exit_code: int) -> None:
+    from cisternal.cli import app
+
+    with pytest.raises(SystemExit) as exc_info:
+        app(args)
+    assert exc_info.value.code == exit_code, (
+        f"Expected exit {exit_code}; got: {exc_info.value.code}"
+    )
+
+
+def test_install_requires_manifest(tmp_path: Path) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _invoke_app(["assets", "install", "--out", str(out_dir)], exit_code=2)
+
+
+def test_install_requires_marketplace_table(tmp_path: Path) -> None:
+    manifest = _write_manifest_without_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _invoke_app(
+        ["assets", "install", "--manifest", str(manifest), "--out", str(out_dir)],
+        exit_code=2,
+    )
+
+
+def test_install_dry_run_writes_nothing_and_prints_commands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--dry-run",
+        ],
+        exit_code=0,
+    )
+
+    assert list(out_dir.rglob("*")) == []
+    captured = capsys.readouterr()
+    assert "would run: claude plugin marketplace add" in captured.out
+    assert "would run: claude plugin install demo-plugin@demo-marketplace --scope project" in captured.out
+
+
+def test_install_runs_marketplace_add_and_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    log_path = tmp_path / "fake-claude.log"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_path))
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL_STEP", raising=False)
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=0,
+    )
+
+    assert (out_dir / ".claude-plugin" / "plugin.json").exists()
+    assert (out_dir / ".claude-plugin" / "marketplace.json").exists()
+
+    log_lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert log_lines[0] == f"plugin marketplace add {out_dir}"
+    assert log_lines[1] == "plugin install demo-plugin@demo-marketplace --scope project"
+
+    captured = capsys.readouterr()
+    assert "Installed demo-plugin@demo-marketplace" in captured.out
+
+
+def test_install_resolves_relative_out_to_absolute_path_for_marketplace_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`claude plugin marketplace add .` is rejected by the real CLI (though
+    `./` is accepted); install must always pass an absolute path so the
+    default `--out` value of "." never triggers that footgun.
+    """
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    log_path = tmp_path / "fake-claude.log"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_path))
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL_STEP", raising=False)
+    monkeypatch.chdir(out_dir)
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            ".",
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=0,
+    )
+
+    log_lines = log_path.read_text(encoding="utf-8").splitlines()
+    marketplace_add_line = log_lines[0]
+    assert marketplace_add_line == f"plugin marketplace add {out_dir.resolve()}"
+    passed_arg = marketplace_add_line.removeprefix("plugin marketplace add ")
+    assert passed_arg not in (".", "./")
+    assert Path(passed_arg).is_absolute()
+
+
+def test_install_propagates_marketplace_add_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "fake-claude.log"))
+    monkeypatch.setenv("FAKE_CLAUDE_FAIL_STEP", "marketplace")
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=1,
+    )
+
+
+def test_install_propagates_plugin_install_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "fake-claude.log"))
+    monkeypatch.setenv("FAKE_CLAUDE_FAIL_STEP", "install")
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=1,
+    )
+
+
+def test_install_marketplace_name_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    log_path = tmp_path / "fake-claude.log"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_path))
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL_STEP", raising=False)
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(fake_claude),
+            "--marketplace-name",
+            "override-marketplace",
+            "--scope",
+            "user",
+        ],
+        exit_code=0,
+    )
+
+    log_lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert log_lines[1] == "plugin install demo-plugin@override-marketplace --scope user"
+
+    # The emitted marketplace.json must actually carry the overridden name —
+    # otherwise `claude plugin marketplace add` (step 1) registers the
+    # marketplace under the *manifest's* name while step 2 tries to install
+    # from the overridden name, which doesn't exist.
+    marketplace_json = json.loads(
+        (out_dir / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert marketplace_json["name"] == "override-marketplace"
+
+
+def test_install_claude_binary_not_found(tmp_path: Path) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    nonexistent_bin = tmp_path / "no-such-claude-binary"
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(nonexistent_bin),
+        ],
+        exit_code=1,
+    )
+
+
+def test_install_aborts_when_bundle_write_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _write_manifest_with_marketplace(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    fake_claude = _write_fake_claude(tmp_path)
+    log_path = tmp_path / "fake-claude.log"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_path))
+    monkeypatch.delenv("FAKE_CLAUDE_FAIL_STEP", raising=False)
+
+    import cisternal.export.write as write_module
+
+    def _noop_write_bundle(files, out, *, dry_run=False):  # noqa: ANN001, ANN202, ARG001
+        from cisternal.export.write import WriteResult  # noqa: PLC0415
+
+        return WriteResult(files=(), dry_run=dry_run)
+
+    monkeypatch.setattr(write_module, "write_bundle", _noop_write_bundle)
+
+    _invoke_app(
+        [
+            "assets",
+            "install",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(out_dir),
+            "--claude-bin",
+            str(fake_claude),
+        ],
+        exit_code=1,
+    )
+
+    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
