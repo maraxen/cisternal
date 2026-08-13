@@ -35,6 +35,7 @@ from cisternal.adapters.v3_middleware import CisternalMiddleware
 from cisternal.registration.decorator import tool as cisternal_tool
 from cisternal.registration.registry import clear_registry
 from cisternal.registration.wired import wire
+from cisternal.telemetry.context import _last_recovery_var
 from cisternal.telemetry.exporter import ShadowExporter
 
 
@@ -774,3 +775,177 @@ class TestAcMcp5RealFastMCPServer:
         assert isinstance(result, dict)
         assert result["ok"] is False
         assert "legacy boom" in result["error"]
+
+
+class TestRecoveryTelemetryBridge:
+    """Spec B (260805_nlm-adapter-recovery-telemetry-bridge.md) AC1-AC4.
+
+    AC1's own Assumption ("FastMCP's call_next(context) executes the
+    underlying tool callable within the same async context as
+    CisternalMiddleware.on_call_tool -- no context-copy that would break
+    contextvar visibility") is exercised directly here: a dummy tool sets
+    ``_last_recovery_var`` itself (mirroring what
+    cisternal.registration.compose's recovery branch does -- that mechanism
+    is exercised end-to-end separately in test_registration_recovery.py) and
+    we assert CisternalMiddleware.on_call_tool observes it, against a REAL
+    (not mocked) fastmcp.FastMCP server -- per the Assumption's own
+    verification method.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_registry_and_contextvar(self):
+        clear_registry(name="default")
+        _last_recovery_var.set(None)
+        yield
+        clear_registry(name="default")
+        _last_recovery_var.set(None)
+
+    @pytest.mark.asyncio
+    async def test_contextvar_visible_across_call_next_recovered_outcome(
+        self, temp_log_dir
+    ):
+        """AC1 Assumption + AC2 ('recovered' branch): the contextvar set
+        inside the tool callable is visible to on_call_tool's finally block
+        after call_next returns, and emits the recovery:<tool> start/end
+        pair via emit_start/emit_end using the contextvar's own duration_ms.
+        """
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        @cisternal_tool
+        def dummy_recovered_tool(x: int) -> int:
+            _last_recovery_var.set(
+                {
+                    "tool": "dummy_recovered_tool",
+                    "outcome": "recovered",
+                    "duration_ms": 12.5,
+                    "exc": None,
+                    "started_at": time.monotonic_ns(),
+                }
+            )
+            return x * 2
+
+        server = fastmcp.FastMCP("test-recovery-bridge-recovered")
+        wire(server)
+        server.add_middleware(
+            CisternalMiddleware(adapter=PassthroughAdapter(), reraise=True)
+        )
+
+        result = await server.call_tool("dummy_recovered_tool", {"x": 21})
+        assert result.structured_content == {"result": 42}
+
+        time.sleep(0.1)
+
+        start_records = [r for r in shadow.records if r.name == "mcp.call_start"]
+        end_records = [r for r in shadow.records if r.name == "mcp.call_end"]
+
+        recovery_starts = [
+            r for r in start_records if r.fields["tool"] == "recovery:dummy_recovered_tool"
+        ]
+        recovery_ends = [
+            r for r in end_records if r.fields["tool"] == "recovery:dummy_recovered_tool"
+        ]
+        assert len(recovery_starts) == 1, (
+            f"Expected exactly one recovery:<tool> start event, got: {start_records}"
+        )
+        assert len(recovery_ends) == 1, (
+            f"Expected exactly one recovery:<tool> end event, got: {end_records}"
+        )
+        assert recovery_ends[0].fields["duration_ms"] == 12.5
+        assert (
+            recovery_ends[0].fields["request_id"] == recovery_starts[0].fields["request_id"]
+        ), "AC2: recovery telemetry reuses the original call's own request_id"
+
+        # The original call's own mcp.call_start/mcp.call_end must also be
+        # present and distinct from the synthetic recovery:<tool> pair (AC2's
+        # note: deliberately a distinct `tool` value, not a collision).
+        original_starts = [r for r in start_records if r.fields["tool"] == "dummy_recovered_tool"]
+        assert len(original_starts) == 1
+
+        # AC3: the contextvar is cleared once the finally block completes.
+        assert _last_recovery_var.get() is None
+
+    @pytest.mark.asyncio
+    async def test_contextvar_visible_across_call_next_failed_outcome(self, temp_log_dir):
+        """AC2 ('failed' branch): emits emit_error using the contextvar's exc."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        boom = RuntimeError("recover() blew up")
+
+        @cisternal_tool
+        def dummy_failed_recovery_tool(x: int) -> int:
+            _last_recovery_var.set(
+                {
+                    "tool": "dummy_failed_recovery_tool",
+                    "outcome": "failed",
+                    "duration_ms": 3.0,
+                    "exc": boom,
+                    "started_at": time.monotonic_ns(),
+                }
+            )
+            return x
+
+        server = fastmcp.FastMCP("test-recovery-bridge-failed")
+        wire(server)
+        server.add_middleware(
+            CisternalMiddleware(adapter=PassthroughAdapter(), reraise=True)
+        )
+
+        result = await server.call_tool("dummy_failed_recovery_tool", {"x": 5})
+        assert result.structured_content == {"result": 5}
+
+        time.sleep(0.1)
+
+        error_records = [r for r in shadow.records if r.name == "mcp.tool_error"]
+        recovery_errors = [
+            r for r in error_records if r.fields["tool"] == "recovery:dummy_failed_recovery_tool"
+        ]
+        assert len(recovery_errors) == 1, (
+            f"Expected exactly one recovery:<tool> error event, got: {error_records}"
+        )
+        assert recovery_errors[0].fields["exc_type"] == "RuntimeError"
+        assert "recover() blew up" in recovery_errors[0].fields["exc_msg"]
+
+        # AC3: cleared afterward.
+        assert _last_recovery_var.get() is None
+
+    @pytest.mark.asyncio
+    async def test_no_middleware_contextvar_silently_unread(self, temp_log_dir):
+        """AC4: without CisternalMiddleware installed, the contextvar is set
+        but nothing reads or clears it -- the tool call still succeeds
+        (Spec A's mechanism is independent of Spec B); only the telemetry
+        signal is silently absent, no crash."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.05)
+
+        @cisternal_tool
+        def unwatched_tool(x: int) -> int:
+            _last_recovery_var.set(
+                {
+                    "tool": "unwatched_tool",
+                    "outcome": "recovered",
+                    "duration_ms": 1.0,
+                    "exc": None,
+                    "started_at": time.monotonic_ns(),
+                }
+            )
+            return x + 1
+
+        server = fastmcp.FastMCP("test-recovery-bridge-no-middleware")
+        wire(server)
+        # Deliberately no CisternalMiddleware installed.
+
+        result = await server.call_tool("unwatched_tool", {"x": 9})
+        assert result.structured_content == {"result": 10}
+
+        time.sleep(0.05)
+        # AC4: no middleware -> nothing reads the contextvar -> no mcp.*
+        # (in particular no recovery:<tool>) telemetry at all. `heartbeat`
+        # records are unrelated self-observation background noise (from
+        # init()'s heartbeat_interval) and are excluded from this check.
+        non_heartbeat = [r for r in shadow.records if r.name != "heartbeat"]
+        assert non_heartbeat == [], (
+            "AC4: with no middleware installed, no recovery:<tool> (or any "
+            f"other) tool telemetry should be emitted, got: {non_heartbeat}"
+        )

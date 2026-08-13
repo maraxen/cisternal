@@ -25,6 +25,20 @@ request_id_var: ContextVar[str | None] = ContextVar("cisternal.request_id", defa
 session_id_var: ContextVar[str | None] = ContextVar("cisternal.session_id", default=None)
 phase_var: ContextVar[str | None] = ContextVar("cisternal.phase", default=None)
 
+# Recovery-telemetry bridge (companion spec 260805_nlm-adapter-recovery-
+# telemetry-bridge.md, Spec B AC1). Set by the composed MCP callable's
+# recovery branch (cisternal.registration.compose, only when `recovery=` is
+# supplied to wire()/compose_mcp_callable) as a cross-boundary signal for
+# CisternalMiddleware.on_call_tool to read/emit/clear (Spec B AC2/AC3). A
+# plain ContextVar is a signal, not a telemetry *call*, so setting it does
+# not violate wire()'s HARD INVARIANT (C5) -- see compose.py's module
+# docstring. Payload shape: {tool, outcome, duration_ms, exc, started_at} |
+# None -- see compose.py's _set_recovery_context for the producer and
+# v3_middleware.py's on_call_tool for the consumer.
+_last_recovery_var: ContextVar[dict | None] = ContextVar(
+    "cisternal.last_recovery", default=None
+)
+
 
 def _build_record(name: str, ts: float | None = None, **fields) -> Record | None:
     """Build a Record by snapshotting contextvars on the PRODUCER thread.

@@ -21,10 +21,111 @@ propagates normally.
 
 from abc import ABC, abstractmethod
 import json
+import re
 import sys
 from typing import Any
 
 from cisternal import emit_event
+
+
+# ---------------------------------------------------------------------------
+# Defense-in-depth telemetry redaction (security review, 260805
+# nlm-adapter-recovery-telemetry-bridge spec).
+#
+# emit_error() forwards str(exc) into whatever telemetry sink is configured
+# (JSONL file, and optionally OTLP network egress via
+# CISTERNAL_OTLP_ENDPOINT -- see telemetry/otlp_exporter.py). No confirmed
+# live secret leak exists today, but at least one consumer wrapping a
+# Google-auth-backed client embeds live session identifiers directly in
+# request URLs (``f.sid=<value>``) and cookie-shaped auth tokens. A future
+# exception type (in that consumer, or any other cisternal consumer) letting
+# one of those raw values escape into str(exc) would otherwise be silently
+# persisted/exported with nothing to catch it. This scrub runs once, here,
+# so it applies uniformly regardless of which exporter is configured.
+#
+# Deliberately narrow: named, secret-shaped patterns only -- no generic
+# high-entropy-token catch-all -- to avoid mangling ordinary error messages
+# for cisternal's OTHER consumers (myxcel, xperiri, contemplex, bathos),
+# whose exceptions have nothing to do with Google auth. A message with none
+# of these patterns must pass through byte-identical.
+# ---------------------------------------------------------------------------
+
+_REDACTED = "[REDACTED]"
+
+# Known Google auth cookie names (matches the consumer's own
+# ESSENTIAL_COOKIES convention in notebooklm_tools/mcp/tools/_utils.py).
+# Matched case-sensitively -- these are canonically upper/mixed-case; a
+# case-insensitive match here would widen the blast radius for no benefit.
+_GOOGLE_AUTH_COOKIE_NAMES = (
+    "__Secure-1PAPISID",
+    "__Secure-3PAPISID",
+    "__Secure-1PSIDCC",
+    "__Secure-3PSIDCC",
+    "__Secure-1PSIDTS",
+    "__Secure-3PSIDTS",
+    "__Secure-OSID",
+    "__Secure-1PSID",
+    "__Secure-3PSID",
+    "SAPISID",
+    "APISID",
+    "SIDCC",
+    "HSID",
+    "SSID",
+    "OSID",
+    "SID",
+)
+
+# Order within the alternation doesn't need to be longest-first: each
+# alternative is anchored on a leading \b and a trailing literal "=", so
+# e.g. "HSID=" can't spuriously match the "SID" alternative (no \b between
+# H and S) and "SIDCC=" backtracks past the "SID" alternative (no "=" right
+# after "SID") to match "SIDCC" instead.
+_COOKIE_NAME_VALUE_RE = re.compile(
+    r"\b(" + "|".join(re.escape(n) for n in _GOOGLE_AUTH_COOKIE_NAMES) + r")=([^;,\s\"']+)"
+)
+
+# `f.sid=<value>` / `sid=<value>` query-string session params (case-insensitive
+# per the consumer's own URL construction, which lowercases these keys).
+_SID_PARAM_RE = re.compile(r"\b(f\.sid|sid)=([^&\s\"'<>]+)", re.IGNORECASE)
+
+# `Cookie: <...>` header values. Requires an "=" somewhere on the rest of
+# the line so an unrelated message like "Cookie: header missing" (no "=")
+# passes through unchanged rather than being over-redacted.
+_COOKIE_HEADER_RE = re.compile(r"(?i)\bCookie:\s*(?=[^\r\n]*=)[^\r\n]+")
+
+# `Authorization: Bearer <token>` -- redact the whole header value.
+_AUTHORIZATION_BEARER_RE = re.compile(r"(?i)\bAuthorization:\s*Bearer\s+\S+")
+
+# Bare `Bearer <token>` without an "Authorization:" prefix.
+_BEARER_RE = re.compile(r"(?i)\bBearer\s+\S+")
+
+
+def _redact_secrets(text: str) -> str:
+    """Scrub known secret-shaped substrings from *text* (defense in depth).
+
+    Covers: Authorization/Bearer tokens, Cookie header values, named Google
+    auth cookie NAME=value pairs, and sid/f.sid URL query params. Leaves
+    the rest of the message intact for debuggability -- only the matched
+    secret material is replaced with ``[REDACTED]``.
+
+    A message containing none of these patterns is returned unchanged
+    (byte-identical), by construction: each regex only fires on an actual
+    pattern match, so no substitution occurs when nothing matches.
+
+    Args:
+        text: The candidate string (typically ``str(exc)``).
+
+    Returns:
+        The scrubbed string, safe to hand to a telemetry exporter.
+    """
+    if not text:
+        return text
+    redacted = _AUTHORIZATION_BEARER_RE.sub(f"Authorization: {_REDACTED}", text)
+    redacted = _BEARER_RE.sub(_REDACTED, redacted)
+    redacted = _COOKIE_HEADER_RE.sub(f"Cookie: {_REDACTED}", redacted)
+    redacted = _COOKIE_NAME_VALUE_RE.sub(lambda m: f"{m.group(1)}={_REDACTED}", redacted)
+    redacted = _SID_PARAM_RE.sub(lambda m: f"{m.group(1)}={_REDACTED}", redacted)
+    return redacted
 
 
 class AdapterBase(ABC):
@@ -80,6 +181,13 @@ class AdapterBase(ABC):
     def emit_error(self, tool_name: str, request_id: str, exc: BaseException) -> None:
         """Emit mcp.tool_error event.
 
+        ``exc_msg`` is passed through ``_redact_secrets`` before it reaches
+        ``emit_event`` (and therefore any configured exporter -- JSONL and/or
+        OTLP network egress) -- defense in depth against a future exception
+        type letting a live secret (session id, auth cookie, bearer token)
+        escape into ``str(exc)``. See module docstring above
+        ``_redact_secrets`` for the full rationale.
+
         Args:
             tool_name: Name of the tool that raised.
             request_id: The request ID from emit_start.
@@ -93,7 +201,7 @@ class AdapterBase(ABC):
             tool=tool_name,
             request_id=request_id,
             exc_type=type(exc).__name__,
-            exc_msg=str(exc),
+            exc_msg=_redact_secrets(str(exc)),
         )
 
     @abstractmethod
