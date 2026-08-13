@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cisternal.assets.bundle import AgentAsset, AssetBundle, BundleMetadata
+from cisternal.assets.bundle import AgentAsset, AssetBundle, BundleMetadata, SkillAsset
 from cisternal.assets.manifest import ManifestAssetSource
 from cisternal.export.cursor import CursorEmitter
 
@@ -23,6 +23,7 @@ def test_cursor_emit_manifest_minimal_fixture() -> None:
     assert ".cursor/hooks.json" in files
     assert "agents/recon.agent.md" in files
     assert "skills/demo-skill/SKILL.md" in files
+    assert ".cursor/skills/demo-skill/SKILL.md" in files
 
     plugin = json.loads(files[".cursor-plugin/plugin.json"])
     assert plugin["name"] == "fixture-plugin"
@@ -36,6 +37,7 @@ def test_cursor_emit_manifest_minimal_fixture() -> None:
 
     assert "Agent body for tests" in files["agents/recon.agent.md"]
     assert "Skill content" in files["skills/demo-skill/SKILL.md"]
+    assert files[".cursor/skills/demo-skill/SKILL.md"] == files["skills/demo-skill/SKILL.md"]
 
 
 def test_cursor_fail_closed_omits_agents_key_without_body() -> None:
@@ -55,6 +57,29 @@ def test_cursor_fail_closed_omits_agents_key_without_body() -> None:
     assert plugin["agents"] == ["present"]
     assert "agents/present.agent.md" in files
     assert "agents/ghost.agent.md" not in files
+
+
+def test_cursor_skill_also_emitted_under_dot_cursor_for_cli_discovery() -> None:
+    """L22: cursor-agent CLI only auto-discovers skills under .cursor/skills/,
+    not a plugin bundle's own skills/ dir (verified live 260813) — skills with
+    a body must land at both paths, byte-identical, and a bodyless skill must
+    be omitted from both.
+    """
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        skills=(
+            SkillAsset(name="ghost", description="Ghost", body=""),
+            SkillAsset(name="present", description="Here", body="Skill body\n"),
+        ),
+    )
+
+    files = CursorEmitter().emit(bundle)
+
+    assert "skills/present/SKILL.md" in files
+    assert ".cursor/skills/present/SKILL.md" in files
+    assert files[".cursor/skills/present/SKILL.md"] == files["skills/present/SKILL.md"]
+    assert "skills/ghost/SKILL.md" not in files
+    assert ".cursor/skills/ghost/SKILL.md" not in files
 
 
 def test_cursor_omits_agents_and_skills_keys_when_all_empty() -> None:

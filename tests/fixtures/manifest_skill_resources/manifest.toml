@@ -1,0 +1,9 @@
+[plugin]
+name = "fixture-resources"
+version = "1.0.0"
+description = "Fixture for skill sibling-resource bundling"
+requires_praxia = "0.0.0"
+
+[[plugin.skills]]
+name = "demo-skill"
+path = "skills/demo-skill/SKILL.md"

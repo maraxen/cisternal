@@ -3,6 +3,18 @@
 Port of praxia ``bundle_cursor.rs`` with L17 fail-closed: ``agents`` and
 ``skills`` keys are omitted from ``plugin.json`` when corresponding files are
 not emitted (non-empty body required).
+
+L22 (260813 amendment): ``cursor-agent`` (the standalone CLI) does not load
+skills from a plugin bundle's own ``skills/`` directory — verified live
+against an authenticated CLI session with ``--plugin-dir`` and with a real
+local plugin install under ``~/.cursor/plugins/local/``; neither surfaced the
+skill. The CLI's actual skill-discovery path is directory convention only:
+``.cursor/skills/<name>/SKILL.md`` relative to the workspace root (or
+``~/.cursor/skills/`` for a user-wide install) — confirmed live the same way.
+Skills are therefore emitted at *both* paths: ``skills/<name>/SKILL.md`` for
+IDE plugin installation (unchanged, per the official Cursor plugin template's
+directory-convention discovery) and ``.cursor/skills/<name>/SKILL.md`` so a
+bundle exported to a project root is immediately CLI-loadable.
 """
 
 from __future__ import annotations
@@ -67,7 +79,9 @@ class CursorEmitter(Emitter):
             files[f"agents/{agent.name}.agent.md"] = format_agent_markdown(agent)
 
         for skill in emit_skills:
-            files[f"skills/{skill.name}/SKILL.md"] = format_skill_markdown(skill)
+            skill_md = format_skill_markdown(skill)
+            files[f"skills/{skill.name}/SKILL.md"] = skill_md
+            files[f".cursor/skills/{skill.name}/SKILL.md"] = skill_md
 
         if bundle.mcp_servers:
             mcp_obj = {
