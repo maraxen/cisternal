@@ -12,6 +12,7 @@ from cisternal.assets.bridge import (
     resolve_bundle_hash_bin,
     rust_surface_digest,
 )
+from cisternal.assets.bundle import AssetBundle, BundleMetadata, McpAsset
 from cisternal.assets.load import load_asset_report
 from cisternal.assets.validate_golden import (
     emit_claude_rust_parity_files,
@@ -19,7 +20,9 @@ from cisternal.assets.validate_golden import (
     surface_digest_rust_parity,
 )
 from cisternal.export._hash import bundle_sha256, bundle_sha256_rust
+from cisternal.export._rust_emit import compact_json, mcp_servers_json
 from cisternal.export.claude import ClaudeEmitter
+from cisternal.export.claude_rust import emit_claude_rust_parity
 
 _MANIFEST = conformance_manifest_path()
 
@@ -98,3 +101,52 @@ def test_rust_parity_golden_path_layout() -> None:
         / "claude"
         / "digest.sha256"
     )
+
+
+# ---------------------------------------------------------------------------
+# mcp_servers_json field-order regression (round 2 fix): bundle_claude.rs
+# builds server_obj as json!({"command": .., "env": ..}) then conditionally
+# appends "args" last — literal insertion order, NOT alphabetical. praxia's
+# workspace-wide serde_json is compiled with the preserve_order feature
+# (pulled in transitively via praxia-core's Cargo.toml), so its Map is
+# insertion-ordered. compact_json() does not sort_keys, so dict equality
+# (which ignores insertion order) can't catch an order regression here —
+# this test asserts on the literal serialized string instead.
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_servers_json_field_order_matches_bundle_claude_rs() -> None:
+    """compact_json(mcp_servers_json(...)) must serialize as command, env, args
+    (in that literal order) for a multi-element command, matching
+    bundle_claude.rs's insertion order exactly — not alphabetical.
+    """
+    bundle_mcp = (
+        McpAsset(
+            name="pull-books",
+            command=("uv", "run", "--project", "/path", "pull-books", "mcp"),
+            env=(),
+        ),
+    )
+    rendered = compact_json({"mcpServers": mcp_servers_json(bundle_mcp)})
+
+    expected_server_obj = (
+        '"command":"uv","env":{},'
+        '"args":["run","--project","/path","pull-books","mcp"]'
+    )
+    assert expected_server_obj in rendered, (
+        f"Expected literal command,env,args insertion order in {rendered!r}"
+    )
+
+
+def test_claude_rust_parity_mcp_json_field_order_end_to_end() -> None:
+    """emit_claude_rust_parity's .mcp.json preserves command,env,args order
+    for a multi-element command (end-to-end, not just the helper function).
+    """
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        mcp_servers=(
+            McpAsset(name="my_server", command=("python", "-m", "server"), env=()),
+        ),
+    )
+    files = emit_claude_rust_parity(bundle)
+    assert '"command":"python","env":{},"args":["-m","server"]' in files[".mcp.json"]

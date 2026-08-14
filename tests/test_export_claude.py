@@ -20,6 +20,7 @@ from cisternal.assets.bundle import (
     AssetBundle,
     BundleMetadata,
     CommandAsset,
+    MarketplaceAsset,
     McpAsset,
 )
 from cisternal.assets.manifest import ManifestAssetSource
@@ -201,8 +202,36 @@ def test_mcp_json_present_when_non_empty() -> None:
     assert ".mcp.json" in files
     mcp_doc = json.loads(files[".mcp.json"])
     srv = mcp_doc["mcpServers"]["my_server"]
-    assert srv["command"] == ["python", "-m", "server"]
+    # Claude Code's real .mcp.json schema wants a single executable string in
+    # "command" and a separate "args" array — NOT the whole argv crammed into
+    # "command" (that shape is rejected: "command: expected string, received
+    # array"). See git history for the confirmed production failure.
+    assert srv["command"] == "python"
+    assert srv["args"] == ["-m", "server"]
     assert srv["env"] == {"API_KEY": "secret", "DEBUG": "1"}
+
+
+def test_mcp_json_single_element_command_omits_args() -> None:
+    """A single-element argv (no arguments) still yields a string command.
+
+    "args" is omitted entirely rather than emitted as an empty list, mirroring
+    this emitter's sparse-field conventions elsewhere (e.g. optional
+    marketplace owner fields, optional plugin.json keys).
+    """
+    bundle = _bundle(
+        mcp_servers=(
+            McpAsset(name="solo_server", command=("python",), env=()),
+        )
+    )
+    files = ClaudeEmitter().emit(bundle)
+
+    assert ".mcp.json" in files
+    mcp_doc = json.loads(files[".mcp.json"])
+    srv = mcp_doc["mcpServers"]["solo_server"]
+    assert srv["command"] == "python"
+    assert isinstance(srv["command"], str)
+    assert "args" not in srv
+    assert srv["env"] == {}
 
 
 def test_empty_bundle_produces_valid_manifest_no_error() -> None:
@@ -346,3 +375,37 @@ def test_claude_fail_closed_omits_agent_file_without_body() -> None:
 
     assert "agents/present.md" in files
     assert "agents/ghost.md" not in files
+
+
+# ---------------------------------------------------------------------------
+# Marketplace.json emission (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def test_emit_includes_marketplace_json_when_set() -> None:
+    bundle = AssetBundle(
+        metadata=_meta(name="pull-books"),
+        marketplace=MarketplaceAsset(name="pull-books-marketplace", owner_name="Marielle Russo"),
+    )
+    files = ClaudeEmitter().emit(bundle)
+    assert ".claude-plugin/marketplace.json" in files
+    marketplace = json.loads(files[".claude-plugin/marketplace.json"])
+    assert marketplace["name"] == "pull-books-marketplace"
+    assert marketplace["owner"]["name"] == "Marielle Russo"
+    assert marketplace["plugins"] == [{"name": "pull-books", "source": "./"}]
+
+
+def test_emit_omits_marketplace_json_when_unset() -> None:
+    files = ClaudeEmitter().emit(_bundle())
+    assert ".claude-plugin/marketplace.json" not in files
+
+
+def test_marketplace_json_covered_by_provenance_digest() -> None:
+    bundle = AssetBundle(
+        metadata=_meta(name="pull-books"),
+        marketplace=MarketplaceAsset(name="pull-books-marketplace"),
+    )
+    files_a = ClaudeEmitter().emit(bundle)
+    files_b = ClaudeEmitter().emit(bundle)
+    assert files_a == files_b
+    assert files_a[_PROVENANCE_PATH] == files_b[_PROVENANCE_PATH]

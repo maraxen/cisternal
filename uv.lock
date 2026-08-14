@@ -215,6 +215,7 @@ dependencies = [
     { name = "cyclopts" },
     { name = "fastmcp" },
     { name = "opentelemetry-api" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -247,6 +248,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = ">=1.42.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'otlp'", specifier = ">=1.42.1" },
     { name = "opentelemetry-semantic-conventions", marker = "extra == 'otlp'", specifier = ">=0.63b1" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 provides-extras = ["otlp"]
 

@@ -7,6 +7,8 @@ Subcommand tree:
     cisternal assets export [OPTIONS]
     cisternal assets inspect [OPTIONS]
     cisternal assets validate [OPTIONS]
+    cisternal assets install [OPTIONS]
+    cisternal assets publish-shared [OPTIONS]
     cisternal telemetry doctor
 
 This module is FASTMCP-FREE by design (spec M4): importing ``cisternal.cli``
@@ -37,9 +39,11 @@ import importlib
 import importlib.metadata
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -130,6 +134,65 @@ def telemetry_doctor(
 # ---------------------------------------------------------------------------
 
 
+def _load_export_bundle(
+    *,
+    manifest: Path | None,
+    registry: str,
+    name: str | None,
+    version: str | None,
+):
+    # No return-type annotation: AssetBundle is imported lazily inside this
+    # function (matches the existing fastmcp-free lazy-import style in this
+    # module), so a module-level type reference isn't available to annotate with.
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, CommandAsset  # noqa: PLC0415
+
+    if manifest is not None:
+        from cisternal.assets.load import load_asset_report  # noqa: PLC0415
+
+        metadata_override: BundleMetadata | None = None
+        if name is not None or version is not None:
+            pre = load_asset_report(manifest=manifest, registry=registry)
+            metadata_override = BundleMetadata(
+                name=name or pre.bundle.metadata.name,
+                version=version or pre.bundle.metadata.version,
+                description=pre.bundle.metadata.description,
+            )
+        report = load_asset_report(
+            manifest=manifest,
+            registry=registry,
+            metadata=metadata_override,
+        )
+        bundle = report.bundle
+        for warning in report.warnings:
+            _log.warning("cisternal.cli: %s", warning)
+        for conflict in report.conflicts:
+            _log.warning("cisternal.cli: conflict: %s", conflict)
+        return bundle
+
+    # Import registry_assets via fastmcp-free path (spec M4).
+    from cisternal.assets.source import registry_assets  # noqa: PLC0415
+
+    snapshot = registry_assets(registry)
+    if len(snapshot) == 0:
+        _log.warning(
+            "cisternal.cli: registry %r is empty; emitting empty bundle",
+            registry,
+        )
+    resolved_name = name or "cisternal"
+    if version is not None:
+        resolved_version = version
+    else:
+        try:
+            resolved_version = importlib.metadata.version("cisternal")
+        except importlib.metadata.PackageNotFoundError:
+            resolved_version = "0.0.0"
+    metadata = BundleMetadata(name=resolved_name, version=resolved_version, description="")
+    commands = tuple(
+        CommandAsset(name=spec.name, description=spec.description) for spec in snapshot
+    )
+    return AssetBundle(metadata=metadata, commands=commands)
+
+
 @assets_app.command(name="export")
 def export(
     *,
@@ -217,61 +280,7 @@ def export(
         except Exception:
             _log.warning("cisternal.cli: could not import %r; skipping", m, exc_info=True)
 
-    from cisternal.assets.bundle import AssetBundle, BundleMetadata, CommandAsset  # noqa: PLC0415
-
-    if manifest is not None:
-        from cisternal.assets.load import load_asset_report  # noqa: PLC0415
-
-        metadata_override: BundleMetadata | None = None
-        if name is not None or version is not None:
-            pre = load_asset_report(manifest=manifest, registry=registry)
-            metadata_override = BundleMetadata(
-                name=name or pre.bundle.metadata.name,
-                version=version or pre.bundle.metadata.version,
-                description=pre.bundle.metadata.description,
-            )
-        report = load_asset_report(
-            manifest=manifest,
-            registry=registry,
-            metadata=metadata_override,
-        )
-        bundle = report.bundle
-        for warning in report.warnings:
-            _log.warning("cisternal.cli: %s", warning)
-        for conflict in report.conflicts:
-            _log.warning("cisternal.cli: conflict: %s", conflict)
-    else:
-        # Import registry_assets via fastmcp-free path (spec M4).
-        from cisternal.assets.source import registry_assets  # noqa: PLC0415
-
-        snapshot = registry_assets(registry)
-
-        if len(snapshot) == 0:
-            _log.warning(
-                "cisternal.cli: registry %r is empty; emitting empty bundle",
-                registry,
-            )
-
-        # Resolve bundle metadata.
-        resolved_name = name or "cisternal"
-        if version is not None:
-            resolved_version = version
-        else:
-            try:
-                resolved_version = importlib.metadata.version("cisternal")
-            except importlib.metadata.PackageNotFoundError:
-                resolved_version = "0.0.0"
-
-        metadata = BundleMetadata(
-            name=resolved_name,
-            version=resolved_version,
-            description="",
-        )
-        commands = tuple(
-            CommandAsset(name=spec.name, description=spec.description)
-            for spec in snapshot
-        )
-        bundle = AssetBundle(metadata=metadata, commands=commands)
+    bundle = _load_export_bundle(manifest=manifest, registry=registry, name=name, version=version)
 
     # Emit.
     from cisternal.export.registry import get_emitter, list_emitter_surfaces  # noqa: PLC0415
@@ -300,6 +309,373 @@ def export(
     if dry_run:
         for path, sha256 in result.files:
             print(f"{path}  {sha256}")
+
+
+@assets_app.command(name="install")
+def install(
+    *,
+    manifest: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Path to manifest.toml. Must define [plugin.marketplace].",
+        ),
+    ] = None,
+    registry: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--registry"],
+            help="Registry partition name (default: 'default').",
+        ),
+    ] = "default",
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--out"],
+            help="Directory to write the plugin bundle to (default: '.').",
+        ),
+    ] = Path("."),
+    name: Annotated[
+        str | None,
+        cyclopts.Parameter(name=["--name"], help="Bundle name override."),
+    ] = None,
+    version: Annotated[
+        str | None,
+        cyclopts.Parameter(name=["--version"], help="Bundle version override."),
+    ] = None,
+    marketplace_name: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--marketplace-name"],
+            help="Marketplace name override (default: manifest's [plugin.marketplace].name).",
+        ),
+    ] = None,
+    scope: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--scope"],
+            help="Install scope: user, project, or local (default: 'project').",
+        ),
+    ] = "project",
+    claude_bin: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--claude-bin"],
+            help="Path to the claude CLI binary (default: 'claude').",
+        ),
+    ] = "claude",
+    dry_run: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--dry-run"],
+            help="Print the files and commands that would run; do nothing.",
+        ),
+    ] = False,
+) -> None:
+    """Export a plugin bundle and register+install it as a real Claude Code plugin.
+
+    Requires --manifest with a [plugin.marketplace] table. Writes the bundle
+    to --out, then runs `claude plugin marketplace add <out>` and `claude
+    plugin install <name>@<marketplace> --scope <scope>` as subprocesses.
+    Both underlying commands are idempotent as of claude 2.1.227 — re-running
+    install is safe.
+
+    This makes the bundle its own standalone, single-plugin marketplace
+    (`source: "./"`) — the right tool for "give me this one tool". To
+    instead add this plugin to an existing marketplace that already lists
+    other tools (a shared, multi-tool marketplace like the
+    praxia/myxcel/cisternal family's), use `assets publish-shared` — it
+    merges into that marketplace's entry list rather than replacing it.
+
+    Unlike export/inspect/validate, install exits non-zero on real failure:
+    it mutates live Claude Code state (marketplace registration, installed-
+    plugin config), so a failure here must be visible, not swallowed.
+    """
+    if manifest is None:
+        _log.error("cisternal.cli: assets install requires --manifest")
+        raise SystemExit(2)
+
+    bundle = _load_export_bundle(manifest=manifest, registry=registry, name=name, version=version)
+
+    if bundle.marketplace is None:
+        _log.error(
+            "cisternal.cli: manifest %s has no [plugin.marketplace] table; "
+            "assets install requires one",
+            manifest,
+        )
+        raise SystemExit(2)
+
+    resolved_marketplace_name = marketplace_name or bundle.marketplace.name
+    if marketplace_name and marketplace_name != bundle.marketplace.name:
+        bundle = replace(bundle, marketplace=replace(bundle.marketplace, name=marketplace_name))
+
+    from cisternal.export.claude import ClaudeEmitter  # noqa: PLC0415
+    from cisternal.export.write import write_bundle  # noqa: PLC0415
+
+    files = ClaudeEmitter().emit(bundle)
+    plugin_id = f"{bundle.metadata.name}@{resolved_marketplace_name}"
+    # `claude plugin marketplace add` rejects bare relative paths like "." (though
+    # it accepts "./"), so always pass an absolute path to avoid that footgun.
+    out_abs = out.resolve()
+
+    if dry_run:
+        for path in sorted(files):
+            print(path)
+        print(f"would run: {claude_bin} plugin marketplace add {out_abs}")
+        print(f"would run: {claude_bin} plugin install {plugin_id} --scope {scope}")
+        return
+
+    write_bundle(files, out, dry_run=False)
+
+    if not (out / ".claude-plugin" / "plugin.json").is_file() or not (
+        out / ".claude-plugin" / "marketplace.json"
+    ).is_file():
+        _log.error(
+            "cisternal.cli: bundle write to %s appears incomplete "
+            "(missing .claude-plugin/plugin.json or .claude-plugin/marketplace.json); "
+            "refusing to run claude",
+            out,
+        )
+        raise SystemExit(1)
+
+    add_result = _run_claude(
+        [claude_bin, "plugin", "marketplace", "add", str(out_abs)], claude_bin=claude_bin
+    )
+    if add_result.returncode != 0:
+        _log.error(
+            "cisternal.cli: `claude plugin marketplace add` failed (exit %d): %s",
+            add_result.returncode,
+            add_result.stderr.strip(),
+        )
+        raise SystemExit(1)
+
+    install_result = _run_claude(
+        [claude_bin, "plugin", "install", plugin_id, "--scope", scope], claude_bin=claude_bin
+    )
+    if install_result.returncode != 0:
+        _log.error(
+            "cisternal.cli: `claude plugin install` failed (exit %d): %s",
+            install_result.returncode,
+            install_result.stderr.strip(),
+        )
+        raise SystemExit(1)
+
+    print(f"Installed {plugin_id} (scope={scope})")
+
+
+def _run_claude(argv: list[str], *, claude_bin: str) -> subprocess.CompletedProcess[str]:
+    """Run a `claude` subprocess, converting binary-not-found into SystemExit(1).
+
+    Every other install() failure path logs via _log.error + raises
+    SystemExit(1); without this, a missing/non-executable claude_bin would
+    instead propagate as a raw, unhandled Python traceback.
+    """
+    try:
+        return subprocess.run(argv, capture_output=True, text=True)
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        _log.error("cisternal.cli: could not run %r: %s", claude_bin, exc)
+        raise SystemExit(1) from exc
+
+
+# ---------------------------------------------------------------------------
+# cisternal assets publish-shared
+# ---------------------------------------------------------------------------
+
+
+@assets_app.command(name="publish-shared")
+def publish_shared(
+    *,
+    manifest: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Path to manifest.toml (default: .praxia/manifest.toml).",
+        ),
+    ] = Path(".praxia/manifest.toml"),
+    registry: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--registry"],
+            help="Registry partition name to export (default: 'default').",
+        ),
+    ] = "default",
+    name: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--name"],
+            help="Plugin name (default: manifest's plugin.name).",
+        ),
+    ] = None,
+    description: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--description"],
+            help="Marketplace entry description (default: manifest's plugin.description).",
+        ),
+    ] = None,
+    marketplace: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--marketplace"],
+            help="Marketplace root (default: ~/.cisternal/claude-plugin-marketplace).",
+        ),
+    ] = Path("~/.cisternal/claude-plugin-marketplace").expanduser(),
+) -> None:
+    """Export this manifest's Claude plugin bundle into a SHARED, multi-tool marketplace.
+
+    Not the same job as ``assets install``: that command makes a bundle its
+    own standalone, single-plugin marketplace (``source: "./"``) and
+    registers it via the real ``claude`` CLI — the right tool for installing
+    one repo's plugin for yourself. This command instead publishes into an
+    existing marketplace that already lists other tools (e.g.
+    ``~/.cisternal/claude-plugin-marketplace``, shared across the
+    praxia/myxcel/cisternal-family), merging its entry alongside theirs
+    rather than replacing the marketplace file. Use ``assets install`` for
+    "give me this one tool"; use this command for "add this tool to the
+    shared family marketplace everyone already has registered."
+
+    Publishes to ``<marketplace>/plugins/<name>/`` (scrubbing stale files first,
+    since the asset writer does not prune) and merges a
+    ``<marketplace>/.claude-plugin/marketplace.json`` entry under an flock'd,
+    atomic read-modify-write — safe for concurrent publishes from other
+    cisternal-family tools sharing the same marketplace.
+
+    The published version is the manifest's version suffixed with a content
+    digest of the emitted bundle, so Claude Code's version-keyed plugin cache
+    is busted exactly when — and only when — the bundle actually changes.
+
+    After this command, register the marketplace once per machine with
+    ``/plugin marketplace add <marketplace>`` inside Claude Code, then
+    ``/plugin install <name>@<marketplace-name>`` to install.
+    """
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata  # noqa: PLC0415
+    from cisternal.assets.load import load_asset_report  # noqa: PLC0415
+    from cisternal.export.marketplace import (  # noqa: PLC0415
+        content_version,
+        default_seed,
+        merge_marketplace_entry,
+        plugin_output_dir,
+    )
+    from cisternal.export.registry import get_emitter  # noqa: PLC0415
+    from cisternal.export.write import write_bundle  # noqa: PLC0415
+
+    report = load_asset_report(manifest=manifest, registry=registry)
+    if report.conflicts:
+        _log.error("cisternal.cli: publish-shared failed — conflicts: %s", report.conflicts)
+        raise SystemExit(1)
+    if report.warnings:
+        _log.error("cisternal.cli: publish-shared failed — warnings: %s", report.warnings)
+        raise SystemExit(1)
+
+    resolved_name = name or report.bundle.metadata.name
+    resolved_description = description or report.bundle.metadata.description
+    base_bundle = AssetBundle(
+        metadata=BundleMetadata(
+            name=resolved_name,
+            version=report.bundle.metadata.version,
+            description=resolved_description,
+        ),
+        agents=report.bundle.agents,
+        skills=report.bundle.skills,
+        commands=report.bundle.commands,
+        hook_specs=report.bundle.hook_specs,
+        mcp_servers=report.bundle.mcp_servers,
+    )
+
+    emitter = get_emitter("claude")
+    if emitter is None:
+        _log.error("cisternal.cli: publish-shared failed — claude emitter is not registered")
+        raise SystemExit(2)
+
+    # Two passes: the first (base version) derives a content digest; the
+    # second bakes the final, cache-busting version into plugin.json.
+    version = content_version(
+        base_bundle.metadata.version,
+        emitter.emit(base_bundle),
+    )
+    versioned_bundle = AssetBundle(
+        metadata=BundleMetadata(
+            name=resolved_name,
+            version=version,
+            description=resolved_description,
+        ),
+        agents=base_bundle.agents,
+        skills=base_bundle.skills,
+        commands=base_bundle.commands,
+        hook_specs=base_bundle.hook_specs,
+        mcp_servers=base_bundle.mcp_servers,
+    )
+    files = emitter.emit(versioned_bundle)
+
+    out = plugin_output_dir(marketplace, resolved_name)
+
+    # write_bundle does not prune stale files, so scrub any previous export
+    # of this same plugin before writing the fresh one.
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
+
+    write_bundle(files, out)
+
+    entry: dict[str, object] = {
+        "name": resolved_name,
+        "source": f"./plugins/{resolved_name}",
+        "description": resolved_description,
+    }
+    merge_marketplace_entry(
+        marketplace,
+        entry,
+        seed=default_seed(),
+        readme_template=_MARKETPLACE_README_TEMPLATE,
+    )
+
+    print(f"published {resolved_name}@{version} -> {out}")
+    print(f"marketplace: {marketplace}")
+
+
+_MARKETPLACE_README_TEMPLATE = """\
+# Cisternal Local Plugin Marketplace
+
+This is a shared Claude Code marketplace for locally built plugins from the
+cisternal tool family (praxia, myxcel, bathos, and related tools).
+
+## Registering the Marketplace (One Time)
+
+Register this marketplace once in Claude Code, and every listed plugin
+becomes installable:
+
+```
+/plugin marketplace add ~/.cisternal/claude-plugin-marketplace
+```
+
+After registering, install any plugin with:
+
+```
+/plugin install <tool>@cisternal-local
+```
+
+## Publishing a Tool
+
+From the tool's own repo:
+
+```
+cisternal assets publish-shared --manifest .praxia/manifest.toml
+```
+
+This scrubs the destination plugin directory, exports a fresh bundle at a
+content-derived version, and merges the marketplace entry under an flock'd
+atomic read-modify-write — safe to run concurrently with other tools
+publishing to the same marketplace.
+
+## Known Gaps
+
+- **No cross-machine sync.** This marketplace is local to one machine.
+- **Manual refresh.** Run `/plugin marketplace update cisternal-local` in
+  Claude Code after publishing if you want the listing to refresh immediately.
+- **MCP server name collisions.** Before installing a plugin, check whether
+  its `.mcp.json` declares a server name already registered globally
+  (`claude mcp list`) — installing would otherwise create a confusing
+  plugin-namespaced duplicate.
+"""
 
 
 # ---------------------------------------------------------------------------

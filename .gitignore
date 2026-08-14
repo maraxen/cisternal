@@ -14,6 +14,7 @@ logs/
 
 # Claude Code harness worktrees
 .claude/
+.worktrees/
 
 # Praxia code-index cache (local analyzer DB)
 .praxia/cache/

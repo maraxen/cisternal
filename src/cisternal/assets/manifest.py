@@ -11,6 +11,7 @@ from cisternal.assets.bundle import (
     BundleMetadata,
     HookSpecAsset,
     LoadReport,
+    MarketplaceAsset,
     McpAsset,
     SkillAsset,
 )
@@ -52,6 +53,7 @@ class ManifestAssetSource:
         agents = _load_agents(plugin, self._root, warnings)
         hook_specs = _load_hook_specs(plugin, self._root, warnings)
         mcp_servers = _load_mcp(plugin, name)
+        marketplace = _load_marketplace(plugin, name)
         commands = load_export_commands(plugin, self._root, warnings)
         warnings.extend(validate_extension_sections(plugin, self._root))
 
@@ -62,6 +64,7 @@ class ManifestAssetSource:
             skills=skills,
             agents=agents,
             hook_specs=hook_specs,
+            marketplace=marketplace,
         )
         return LoadReport(bundle=bundle, warnings=tuple(warnings))
 
@@ -77,6 +80,37 @@ def _read_text(path: Path, warnings: list[str], label: str) -> str | None:
     except OSError as exc:
         warnings.append(f"{label}: missing or unreadable: {path}: {exc}")
         return None
+
+
+_SKILL_RESOURCE_DIRS = ("references", "scripts", "assets")
+
+
+def _load_skill_resources(skill_dir: Path, name: str, warnings: list[str]) -> tuple[tuple[str, str], ...]:
+    """Walk a skill's ``references/``/``scripts/``/``assets/`` sibling dirs.
+
+    Returns ``(relative_path, content)`` pairs, forward-slash paths, sorted
+    for determinism. Non-UTF-8 files are skipped with a warning rather than
+    raising (fail-open, matching ``_read_text``'s convention) — a binary
+    asset (e.g. a real image) isn't supported by this text-only bundle
+    format yet, but one bad file shouldn't drop the rest of the skill.
+    """
+    resources: list[tuple[str, str]] = []
+    for subdir_name in _SKILL_RESOURCE_DIRS:
+        subdir = skill_dir / subdir_name
+        if not subdir.is_dir():
+            continue
+        for path in sorted(subdir.rglob("*")):
+            if not path.is_file():
+                continue
+            if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                warnings.append(f"skill {name!r}: unreadable resource {path}: {exc}")
+                continue
+            resources.append((path.relative_to(skill_dir).as_posix(), content))
+    return tuple(resources)
 
 
 def _load_skills(
@@ -96,7 +130,8 @@ def _load_skills(
         if not name or not rel:
             warnings.append(f"skill entry missing name or path: {entry!r}")
             continue
-        text = _read_text(root / rel, warnings, f"skill {name!r}")
+        skill_path = root / rel
+        text = _read_text(skill_path, warnings, f"skill {name!r}")
         raw = text if text is not None else ""
 
         # Strip any existing SKILL.md frontmatter (mirrors _load_agents /
@@ -112,12 +147,15 @@ def _load_skills(
         if isinstance(manifest_triggers, list) and manifest_triggers:
             triggers = tuple(str(t) for t in manifest_triggers)
 
+        resources = _load_skill_resources(skill_path.parent, name, warnings)
+
         skills.append(
             SkillAsset(
                 name=name,
                 description=description,
                 body=body,
                 triggers=triggers,
+                resources=resources,
             )
         )
     return tuple(skills)
@@ -215,6 +253,27 @@ def _load_mcp(plugin: dict[str, object], plugin_name: str) -> tuple[McpAsset, ..
         return ()
     argv = tuple(str(part) for part in command)
     return (McpAsset(name=plugin_name or "mcp", command=argv),)
+
+
+def _load_marketplace(plugin: dict[str, object], plugin_name: str) -> MarketplaceAsset | None:
+    marketplace = plugin.get("marketplace")
+    if not isinstance(marketplace, dict):
+        return None
+    name = str(marketplace.get("name") or plugin_name or "")
+    if not name:
+        return None
+    owner = marketplace.get("owner")
+    owner_name = owner_email = owner_url = ""
+    if isinstance(owner, dict):
+        owner_name = str(owner.get("name") or "")
+        owner_email = str(owner.get("email") or "")
+        owner_url = str(owner.get("url") or "")
+    return MarketplaceAsset(
+        name=name,
+        owner_name=owner_name,
+        owner_email=owner_email,
+        owner_url=owner_url,
+    )
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:

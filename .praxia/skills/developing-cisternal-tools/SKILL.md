@@ -29,7 +29,9 @@ There are two different questions here, and they get different answers.
 
 **If the user has told you how to scope this — that instruction wins, full stop.** "We don't have time for the library today, just patch the consumer" is not one factor to weigh against "fix at the root" — it's the answer. The "bug found through one consumer will eventually bite every consumer" reasoning is true, but it's an argument for *why upstream is usually better when the choice is yours to make*, not a license to override someone who has already made the call for a stated reason (time pressure, a freeze, wanting to batch several fixes into one release later). Talking yourself into the full upstream cycle anyway — "the time-pressure argument didn't really hold up" — is answering a question nobody asked. When you honor a deferred/scoped request, your job shifts from "decide whether to patch upstream" to "make sure the workaround doesn't silently erase the fact that a shared-library bug exists": leave a code comment, a commit message note, or a stated follow-up that says what the real defect is and where it lives, so it doesn't quietly become permanent or blindside the next consumer who hits it.
 
-**If the user hasn't specified — then you're the one deciding, and the default is to prefer cisternal.** Fix it in the consumer instead when: the behavior is genuinely project-specific (not something a second consumer would ever want), the "fix" would require cisternal to know about a consumer's internals (breaks the substrate/consumer boundary), or you have good reason to believe a release cycle isn't warranted yet and the workaround is trivially removable later. Same rule applies here too: leave a trace of the real defect rather than letting the workaround read as a coincidental rename.
+**A comment/commit-message trace living only in the consumer's repo is not enough — file it where the *cisternal* side can see it too.** A past eval run of this exact scenario surfaced the failure mode directly: the workaround was fully documented in the consumer repo (in-code comment, commit message, a written note), but that trace is invisible to anyone who isn't specifically digging through that one consumer's history — including another consumer about to hit the identical bug, or a maintainer looking at cisternal itself. Whenever you defer an upstream fix, also create a durable, cisternal-side-discoverable record — a tech-debt item via `mcp__core__debt`/`mcp__plugin_praxia_core__debt` (`action: "add"`, scoped to the cisternal repo) or a `gh issue create` against `maraxen/cisternal` — not just local comments. The consumer-side trace documents *what you did*; the cisternal-side record is what stops the same defect from being independently rediscovered by the next consumer.
+
+**If the user hasn't specified — then you're the one deciding, and the default is to prefer cisternal.** Fix it in the consumer instead when: the behavior is genuinely project-specific (not something a second consumer would ever want), the "fix" would require cisternal to know about a consumer's internals (breaks the substrate/consumer boundary), or you have good reason to believe a release cycle isn't warranted yet and the workaround is trivially removable later. Same rule applies here too: leave a trace of the real defect — cisternal-side, not just consumer-side — rather than letting the workaround read as a coincidental rename.
 
 ## Asking before bypassing friction
 
@@ -47,20 +49,6 @@ footprint — its MCP tools, plus any skills/agents/hooks it ships — into a re
 installable plugin bundle (Claude Code, Cursor, Copilot, or Antigravity). Reach for this
 whenever a consumer wants to be distributed as a plugin, not just consumed as a library.
 
-Two sources combine into one bundle:
-
-- **The wired MCP registry** (`--registry <name> --import <module that calls wire()>`)
-  contributes *commands only* — one per tool, sourced from the registry snapshot. This is
-  the same registry a consumer already populates via `@cisternal.tool(registry=...)`.
-- **A `.praxia/manifest.toml`** (`--manifest path/to/manifest.toml`) declares everything a
-  registry can't: `[plugin]` metadata, `[plugin.mcp]` (the MCP server launch command),
-  `[[plugin.skills]]`, `[[plugin.agents]]`, `[[plugin.hook_specs]]`.
-
-Passing both (`CompositeAssetSource`) merges them: manifest-declared commands win by name on
-conflict, registry-derived commands fill in the rest. Passing only `--registry` (no
-manifest) exports commands alone; passing only `--manifest` exports without any tool
-commands. For a full bundle — the common case — pass both.
-
 ```bash
 cisternal assets export \
   --manifest .praxia/manifest.toml --registry <consumer-registry-name> \
@@ -68,48 +56,11 @@ cisternal assets export \
   --surface claude --out <output-dir>
 ```
 
-### The manifest-path gotcha (a real bug this session hit)
-
-`ManifestAssetSource` resolves every `path = "..."` in the manifest **relative to the
-manifest file's own directory**, not the repo root. A manifest at `.praxia/manifest.toml`
-declaring `path = "agent_assets/skills/foo/SKILL.md"` will look for
-`.praxia/agent_assets/skills/foo/SKILL.md` — almost never what you meant. Paths need a
-`../` prefix to climb back out of `.praxia/` to the repo root (e.g.
-`../agent_assets/skills/foo/SKILL.md`). Verify with `--dry-run` before trusting any path in
-a manifest you didn't just write yourself.
-
-### It fails open, not closed — read stderr, don't just check the exit code
-
-`cisternal assets export` **always exits 0** (a deliberate never-raise convention) and
-reports every problem as a stderr warning instead: an unreadable path, a missing skill body,
-an unrecognized manifest table. The emitters (`ClaudeEmitter` et al.) are themselves
-fail-closed on top of that — a skill or agent with an empty `body` (because its file failed
-to load) is **silently dropped from the bundle**, not substituted with a placeholder or
-flagged as an error in the output itself. The combined effect: a badly-pathed manifest
-produces a bundle that *looks* successful (valid `plugin.json`, exit code 0) while quietly
-missing half its assets. Treat any non-empty stderr from an export run as a real failure to
-investigate, exactly like the "diagnose against real installed code, not assumptions"
-principle above — don't infer correctness from the exit code or from the presence of
-*some* output files.
-
-### `[plugin.export_command]` is not a shell command
-
-This table's values are lists of **markdown file paths** — each becomes a `CommandAsset`
-named after the file's stem, meant for a consumer that has literal slash-command body files
-to bundle. It is easy to mistake this for "the CLI invocation used to run export" (a shell
-argv array) — that's a different, unrelated concept, and cisternal's loader will interpret
-argv tokens as bogus file paths, producing a wall of "missing or unreadable" warnings for
-`bth`, `export`, `--surface`, etc. If a consumer has no real command markdown files (e.g.
-its "commands" are just its MCP tools, already covered by the registry side), leave this
-table out entirely rather than repurposing it.
-
-### Don't let the bundle's version drift from the package's
-
-A manifest's own `version` field is easy to forget to bump and will happily ship a stale
-version string in `plugin.json` forever if nothing overrides it. Pass `--name`/`--version`
-explicitly at export time, sourced from the actual installed package
-(`importlib.metadata.version(...)` or the package's own `__version__`), so the manifest's
-hand-maintained field becomes a fallback rather than the source of truth.
+See **`references/agent-asset-export.md`** for the full workflow (how the registry and
+manifest sources combine) and its specific gotchas: manifest paths resolving relative to
+the manifest's own directory, the fail-open/silent-drop export behavior, why
+`[plugin.export_command]` is not a shell command, keeping the bundle version in sync with
+the package, and why an exported skill can't carry its own `references/`.
 
 ## Common commands
 
@@ -128,9 +79,7 @@ curl -sf https://pypi.org/pypi/<package>/json | python3 -c \
 # (pyproject.toml, DEV-ONLY — revert before committing):
 #   [tool.uv.sources]
 #   cisternal = { path = "../relative/path/to/cisterna", editable = true }
-
-# Dry-run a consumer's plugin export before trusting any file paths in its manifest
-cisternal assets export \
-  --manifest .praxia/manifest.toml --registry <name> --import <module> \
-  --surface claude --dry-run
 ```
+
+For the manifest/plugin-export dry-run command, see
+`references/agent-asset-export.md`.

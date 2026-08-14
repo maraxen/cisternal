@@ -43,6 +43,7 @@ Fields:
         skills:      Tuple of SkillAsset, sorted by name at construction.
         agents:      Tuple of AgentAsset, sorted by name at construction.
         hook_specs:  Tuple of HookSpecAsset, sorted by (event, matcher, script).
+        marketplace: Optional MarketplaceAsset (from [plugin.marketplace]).
 
     LoadReport:
         bundle:     Loaded AssetBundle.
@@ -92,12 +93,23 @@ class SkillAsset:
     the manifest declares. Empty by default — most SKILL.md sources don't set
     it, and omitting it from the exported frontmatter entirely (rather than
     emitting ``triggers: []``) matches existing agent/skill export behavior.
+
+    ``resources`` carries sibling ``references/``, ``scripts/``, and
+    ``assets/`` files found next to the manifest-declared SKILL.md, as
+    ``(relative_path, content)`` pairs (e.g. ``("references/foo.md", "...")``).
+    Previously an emitter wrote only the single SKILL.md body and silently
+    dropped everything else in a skill's directory — a documented gap
+    (myxcel's marketplace README, "sibling-file export limitation"). Text
+    files only: a resource that fails UTF-8 decoding is skipped with a
+    warning by the loader rather than raising, matching the rest of this
+    module's fail-open convention.
     """
 
     name: str
     description: str = ""
     body: str = ""
     triggers: tuple[str, ...] = ()
+    resources: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +145,22 @@ class HookSpecAsset:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketplaceAsset:
+    """Local Claude Code marketplace metadata for self-installing a plugin.
+
+    When present on a bundle, ``ClaudeEmitter`` renders a
+    ``.claude-plugin/marketplace.json`` alongside the plugin bundle, listing
+    the plugin itself via ``source: "./"`` — a single-repo, self-contained
+    marketplace+plugin pair, installable via ``cisternal assets install``.
+    """
+
+    name: str
+    owner_name: str = ""
+    owner_email: str = ""
+    owner_url: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class AssetBundle:
     """Complete asset bundle with canonical sort invariants at construction.
 
@@ -147,6 +175,7 @@ class AssetBundle:
     skills: tuple[SkillAsset, ...] = ()
     agents: tuple[AgentAsset, ...] = ()
     hook_specs: tuple[HookSpecAsset, ...] = ()
+    marketplace: MarketplaceAsset | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(

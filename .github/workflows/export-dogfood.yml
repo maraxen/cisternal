@@ -82,6 +82,14 @@ jobs:
 
   rust-parity:
     runs-on: ubuntu-latest
+    # Disabled (260730): checks out maraxen/praxia, which is a private repo --
+    # the default GITHUB_TOKEN has no cross-repo access, so this job has
+    # always failed with "Repository not found" (confirmed: every run in the
+    # visible history, unrelated to any other change). Re-enable once
+    # cross-repo auth is wired up (a PAT/deploy-key with read access to
+    # praxia, passed via `with: token:` on the second actions/checkout step
+    # below, or praxia made public).
+    if: false
     env:
       CISTERNAL_PRAXIA_ASSETS_REV: 04bb683f11d6e879dcfc5dafbedfed426254985a
     steps:
