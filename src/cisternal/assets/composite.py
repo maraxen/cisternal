@@ -44,7 +44,7 @@ class CompositeAssetSource:
 
         # Registry contributes commands only (L13); other kinds from manifest.
         bundle = AssetBundle(
-            metadata=manifest_report.bundle.metadata,
+            metadata=registry_meta,
             commands=commands,
             mcp_servers=manifest_report.bundle.mcp_servers,
             skills=manifest_report.bundle.skills,
