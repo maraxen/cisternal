@@ -22,13 +22,6 @@ path = "agents/validate-helper.md"
 description = "Documents validate, inspect, and export CLI usage"
 tools = []
 
-[[plugin.hook_specs]]
-event = "PreToolUse"
-matcher = "Bash"
-script = "hooks/pre-export.sh"
-tier = "essential"
-surfaces = ["claude", "cursor"]
-
 [plugin.export_command]
 claude_code = ["commands/export.md", "commands/validate.md"]
 cursor = ["commands/export.md"]
