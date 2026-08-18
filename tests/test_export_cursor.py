@@ -10,7 +10,7 @@ from cisternal.assets.manifest import ManifestAssetSource
 from cisternal.export.cursor import CursorEmitter
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 
 

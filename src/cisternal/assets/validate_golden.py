@@ -21,21 +21,33 @@ _RUST_PARITY_EMITTERS: dict[str, type[Emitter]] = {
 }
 
 _PROVENANCE_FRAGMENT = "cisternal-provenance.json"
-_GOLDEN_ROOT = Path(__file__).resolve().parents[3] / "tests" / "golden"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_GOLDEN_ROOT = _REPO_ROOT / "tests" / "golden"
 _RUST_PARITY_GOLDEN_ROOT = _GOLDEN_ROOT / "rust_parity"
+_SELF_MANIFEST = (_REPO_ROOT / ".praxia" / "manifest.toml").resolve()
 
 
 def resolve_golden_slug(manifest: Path | None) -> str | None:
-    """Map a manifest path to a golden tree slug, or None if unknown."""
+    """Map a manifest path to a golden tree slug, or None if unknown.
+
+    Canonical layout is ``<plugin_root>/.praxia/manifest.toml``. Fixture
+    plugin roots named ``manifest_minimal`` and ``manifest_dogfood_praxia``
+    map to ``legacy`` and ``dogfood_praxia``. Only this repo's
+    ``.praxia/manifest.toml`` maps to ``self_manifest``; any other
+    ``.praxia`` tree (tmp_path plugins included) returns ``None``.
+    """
     if manifest is None:
         return "legacy"
     resolved = manifest.resolve()
-    parent_name = resolved.parent.name
-    if parent_name == "manifest_minimal":
+    parent = resolved.parent
+    if parent.name != ".praxia":
+        return None
+    grandparent_name = parent.parent.name
+    if grandparent_name == "manifest_minimal":
         return "legacy"
-    if parent_name == "manifest_dogfood_praxia":
+    if grandparent_name == "manifest_dogfood_praxia":
         return "dogfood_praxia"
-    if parent_name == ".praxia":
+    if resolved == _SELF_MANIFEST:
         return "self_manifest"
     return None
 

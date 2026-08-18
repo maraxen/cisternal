@@ -25,10 +25,6 @@ script = "hooks/pre-tool.sh"
 tier = "essential"
 surfaces = ["claude", "cursor"]
 
-[plugin.export_command]
-claude_code = ["commands/claude-export.md"]
-cursor = ["commands/cursor-sync.md"]
-
 [[plugin.workflows]]
 name = "sprint-plan"
 path = "workflows/sprint-plan.toml"

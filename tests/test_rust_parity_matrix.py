@@ -18,8 +18,8 @@ from cisternal.assets.validate_golden import (
 )
 
 _TESTS = Path(__file__).parent
-_LEGACY_MANIFEST = _TESTS / "fixtures" / "manifest_minimal" / "manifest.toml"
-_DOGFOOD_MANIFEST = _TESTS / "fixtures" / "manifest_dogfood_praxia" / "manifest.toml"
+_LEGACY_MANIFEST = _TESTS / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
+_DOGFOOD_MANIFEST = _TESTS / "fixtures" / "manifest_dogfood_praxia" / ".praxia" / "manifest.toml"
 _SELF_MANIFEST = Path(".praxia/manifest.toml")
 
 _BUILTIN_SURFACES = ("antigravity", "claude", "copilot", "cursor")

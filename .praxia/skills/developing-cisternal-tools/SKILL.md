@@ -57,10 +57,11 @@ cisternal assets export \
 ```
 
 See **`references/agent-asset-export.md`** for the full workflow (how the registry and
-manifest sources combine) and its specific gotchas: manifest paths resolving relative to
-the manifest's own directory, the fail-open/silent-drop export behavior, why
-`[plugin.export_command]` is not a shell command, keeping the bundle version in sync with
-the package, and why an exported skill can't carry its own `references/`.
+manifest sources combine) and its specific gotchas: paths are plugin-root-relative
+(praxia parent-of-parent — not the manifest file's directory), the fail-open/silent-drop
+export behavior, why `[plugin.export_command]` is praxia argv rather than markdown paths,
+keeping the bundle version in sync with the package, and why an exported skill can't carry
+its own `references/`.
 
 ## Common commands
 

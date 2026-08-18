@@ -10,11 +10,69 @@ from cisternal.assets.manifest import ManifestAssetSource
 from cisternal.assets.source import registry_bundle
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "manifest_minimal"
-MANIFEST = FIXTURE_ROOT / "manifest.toml"
+MANIFEST = FIXTURE_ROOT / ".praxia" / "manifest.toml"
 
 
-def test_manifest_loads_skills_agents_hooks_commands() -> None:
-    """AC-M31a-1: manifest loads IR kinds without raising."""
+def test_manifest_resolves_paths_from_repo_root(tmp_path: Path) -> None:
+    """Asset paths are relative to the parent of ``.praxia/`` (praxia parent-of-parent)."""
+    plugin_root = tmp_path / "plugin"
+    praxia = plugin_root / ".praxia"
+    skill_dir = plugin_root / "skills" / "demo"
+    praxia.mkdir(parents=True)
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("root-relative skill body\n", encoding="utf-8")
+    (praxia / "manifest.toml").write_text(
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.skills]]
+name = "demo"
+path = "skills/demo/SKILL.md"
+""".strip(),
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(praxia / "manifest.toml").load()
+    assert report.warnings == ()
+    assert report.bundle.skills[0].body == "root-relative skill body\n"
+
+
+def test_export_command_argv_is_not_command_files(tmp_path: Path) -> None:
+    """``[plugin.export_command]`` is praxia argv; it must not become CommandAssets."""
+    plugin_root = tmp_path / "plugin"
+    praxia = plugin_root / ".praxia"
+    praxia.mkdir(parents=True)
+    (praxia / "manifest.toml").write_text(
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[plugin.export_command]
+claude_code = ["bth", "--export"]
+""".strip(),
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(praxia / "manifest.toml").load()
+    assert report.bundle.commands == ()
+    assert not any("missing or unreadable" in w for w in report.warnings)
+
+
+def _praxia_manifest(plugin_root: Path, contents: str) -> Path:
+    praxia = plugin_root / ".praxia"
+    praxia.mkdir(parents=True)
+    path = praxia / "manifest.toml"
+    path.write_text(contents.strip() + "\n", encoding="utf-8")
+    return path
+
+
+def test_manifest_loads_skills_agents_hooks() -> None:
+    """AC-M31a-1: manifest loads IR kinds without raising; commands come from registry."""
     report = ManifestAssetSource(MANIFEST).load()
     bundle = report.bundle
     assert bundle.metadata.name == "fixture-plugin"
@@ -25,9 +83,7 @@ def test_manifest_loads_skills_agents_hooks_commands() -> None:
     assert bundle.agents[0].name == "recon"
     assert len(bundle.hook_specs) == 1
     assert bundle.hook_specs[0].event == "PreToolUse"
-    assert len(bundle.commands) == 1
-    assert bundle.commands[0].name == "foo"
-    assert "Manifest command" in bundle.commands[0].body
+    assert bundle.commands == ()
 
 
 def test_manifest_agent_default_tools_from_frontmatter() -> None:
@@ -58,40 +114,33 @@ def test_registry_bundle_commands_only() -> None:
     assert bundle.mcp_servers == ()
 
 
-def test_composite_manifest_wins_on_command_conflict(tmp_path: Path) -> None:
-    """AC-M31a-2: manifest command wins; conflict recorded when bodies differ."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "commands").mkdir()
-    (manifest_dir / "commands" / "foo.md").write_text("manifest body\n", encoding="utf-8")
-    (manifest_dir / "manifest.toml").write_text(
+def test_composite_registry_commands_pass_through(tmp_path: Path) -> None:
+    """Manifest has no command files; registry commands pass through with no conflict."""
+    manifest = _praxia_manifest(
+        tmp_path / "plugin",
         """
 [plugin]
 name = "p"
 version = "1.0.0"
 description = ""
 requires_praxia = "0.0.0"
-
-[plugin.export_command]
-claude_code = ["commands/foo.md"]
-""".strip(),
-        encoding="utf-8",
+""",
     )
 
     @cisternal.tool
     def foo() -> None:
         """Registry foo."""
 
-    report = CompositeAssetSource(manifest_dir / "manifest.toml").load()
-    assert report.bundle.commands[0].body == "manifest body\n"
-    assert any("foo" in c for c in report.conflicts)
+    report = CompositeAssetSource(manifest).load()
+    by_name = {c.name: c for c in report.bundle.commands}
+    assert "foo" in by_name
+    assert report.conflicts == ()
 
 
-def test_manifest_missing_file_warns_never_raises(tmp_path: Path) -> None:
-    """Missing command path produces warning, not exception."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "manifest.toml").write_text(
+def test_manifest_missing_skill_file_warns_never_raises(tmp_path: Path) -> None:
+    """Missing skill path produces warning, not exception."""
+    manifest = _praxia_manifest(
+        tmp_path / "plugin",
         """
 [plugin]
 name = "p"
@@ -99,26 +148,26 @@ version = "1.0.0"
 description = ""
 requires_praxia = "0.0.0"
 
-[plugin.export_command]
-claude_code = ["commands/missing.md"]
-""".strip(),
-        encoding="utf-8",
+[[plugin.skills]]
+name = "missing"
+path = "skills/missing/SKILL.md"
+""",
     )
-    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
-    assert report.bundle.commands[0].name == "missing"
-    assert report.bundle.commands[0].body == ""
+    report = ManifestAssetSource(manifest).load()
+    assert report.bundle.skills[0].name == "missing"
+    assert report.bundle.skills[0].body == ""
     assert any("missing" in w for w in report.warnings)
 
 
 def test_manifest_hook_spec_path_loads_content(tmp_path: Path) -> None:
     """M13.2: hook_specs entry with a path key populates HookSpecAsset.content."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "hooks").mkdir()
-    (manifest_dir / "hooks" / "pre.sh").write_text(
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text(
         "#!/bin/bash\necho pre\n", encoding="utf-8"
     )
-    (manifest_dir / "manifest.toml").write_text(
+    manifest = _praxia_manifest(
+        plugin_root,
         """
 [plugin]
 name = "p"
@@ -131,10 +180,9 @@ event = "PreToolUse"
 matcher = "Bash"
 script = "pre.sh"
 path = "hooks/pre.sh"
-""".strip(),
-        encoding="utf-8",
+""",
     )
-    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    report = ManifestAssetSource(manifest).load()
     spec = report.bundle.hook_specs[0]
     assert spec.script == "pre.sh"
     assert spec.content == "#!/bin/bash\necho pre\n"
@@ -149,9 +197,8 @@ def test_manifest_hook_spec_no_path_leaves_content_empty() -> None:
 
 def test_manifest_hook_spec_missing_path_warns_never_raises(tmp_path: Path) -> None:
     """M13.2: a path pointing at a missing file warns, doesn't raise; content stays empty."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "manifest.toml").write_text(
+    manifest = _praxia_manifest(
+        tmp_path / "plugin",
         """
 [plugin]
 name = "p"
@@ -164,10 +211,9 @@ event = "PreToolUse"
 matcher = "Bash"
 script = "pre.sh"
 path = "hooks/missing.sh"
-""".strip(),
-        encoding="utf-8",
+""",
     )
-    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    report = ManifestAssetSource(manifest).load()
     assert report.bundle.hook_specs[0].content == ""
     assert any("pre.sh" in w for w in report.warnings)
 

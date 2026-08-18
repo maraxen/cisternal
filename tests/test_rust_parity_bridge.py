@@ -10,13 +10,13 @@ from cisternal.assets.bridge import (
     load_conformance_bundle_json,
     normalize_praxia_json,
 )
-from cisternal.assets.load import load_asset_report
+from cisternal.assets.manifest import ManifestAssetSource
 
 
 def test_bridge_matches_conformance_fixture() -> None:
     """AC-M12-1c: manifest_minimal bridge JSON matches conformance fixture."""
-    manifest = Path("tests/fixtures/manifest_minimal/manifest.toml")
-    report = load_asset_report(manifest=manifest)
+    manifest = Path("tests/fixtures/manifest_minimal/.praxia/manifest.toml")
+    report = ManifestAssetSource(manifest).load()
     bridged = normalize_praxia_json(asset_bundle_to_praxia_json(report.bundle))
     expected = normalize_praxia_json(load_conformance_bundle_json())
     assert bridged == expected

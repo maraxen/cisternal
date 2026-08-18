@@ -21,7 +21,7 @@ def test_validate_rust_parity_missing_bin_exit_one(
     monkeypatch.delenv("CISTERNAL_PRAXIA_ASSETS_BIN", raising=False)
     from cisternal.cli import app
 
-    manifest = Path("tests/fixtures/manifest_minimal/manifest.toml")
+    manifest = Path("tests/fixtures/manifest_minimal/.praxia/manifest.toml")
     with pytest.raises(SystemExit) as exc_info:
         app(
             [
@@ -51,7 +51,7 @@ def test_validate_rust_parity_manifest_minimal_exit_zero(
     monkeypatch.setenv("CISTERNAL_PRAXIA_ASSETS_BIN", bin_path)
     from cisternal.cli import app
 
-    manifest = Path("tests/fixtures/manifest_minimal/manifest.toml")
+    manifest = Path("tests/fixtures/manifest_minimal/.praxia/manifest.toml")
     with pytest.raises(SystemExit) as exc_info:
         app(
             [

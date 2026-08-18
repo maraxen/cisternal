@@ -11,6 +11,7 @@ FIXTURE_MANIFEST = (
     / "tests"
     / "fixtures"
     / "manifest_minimal"
+    / ".praxia"
     / "manifest.toml"
 )
 

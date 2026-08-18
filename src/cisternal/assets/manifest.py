@@ -15,15 +15,16 @@ from cisternal.assets.bundle import (
     McpAsset,
     SkillAsset,
 )
-from cisternal.assets.manifest_commands import load_export_commands
 from cisternal.assets.manifest_extensions import validate_extension_sections
+
 
 class ManifestAssetSource:
     """Load assets from a praxia-style ``.praxia/manifest.toml`` file."""
 
     def __init__(self, manifest_path: Path | str) -> None:
         self._manifest_path = Path(manifest_path)
-        self._root = self._manifest_path.parent
+        # Praxia: <plugin_root>/.praxia/manifest.toml — paths are plugin-root-relative.
+        self._root = self._manifest_path.parent.parent
 
     def load(self) -> LoadReport:
         warnings: list[str] = []
@@ -47,14 +48,17 @@ class ManifestAssetSource:
         if not name:
             warnings.append("plugin.name is empty")
 
-        metadata = BundleMetadata(name=name or "unknown", version=version, description=description)
+        metadata = BundleMetadata(
+            name=name or "unknown", version=version, description=description
+        )
 
         skills = _load_skills(plugin, self._root, warnings)
         agents = _load_agents(plugin, self._root, warnings)
         hook_specs = _load_hook_specs(plugin, self._root, warnings)
         mcp_servers = _load_mcp(plugin, name)
         marketplace = _load_marketplace(plugin, name)
-        commands = load_export_commands(plugin, self._root, warnings)
+        # [plugin.export_command] is praxia session argv, not command-file paths.
+        commands = ()
         warnings.extend(validate_extension_sections(plugin, self._root))
 
         bundle = AssetBundle(
@@ -314,7 +318,7 @@ def _parse_scalar_field(frontmatter: str, field: str) -> str:
     for line in frontmatter.splitlines():
         stripped = line.strip()
         if stripped.startswith(prefix):
-            value = stripped[len(prefix):].strip()
+            value = stripped[len(prefix) :].strip()
             return value.strip("'\"")
     return ""
 

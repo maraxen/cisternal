@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 
 
@@ -118,9 +118,9 @@ def test_validate_unknown_surface_exits_two() -> None:
 
 def test_validate_cursor_missing_skill_path_exits_one(tmp_path: Path) -> None:
     """AC-M31b-7: missing skill path → validate exit 1 on cursor surface."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "manifest.toml").write_text(
+    praxia = tmp_path / "plugin" / ".praxia"
+    praxia.mkdir(parents=True)
+    (praxia / "manifest.toml").write_text(
         """
 [plugin]
 name = "p"
@@ -131,7 +131,8 @@ requires_praxia = "0.0.0"
 [[plugin.skills]]
 name = "missing-skill"
 path = "skills/missing/SKILL.md"
-""".strip(),
+""".strip()
+        + "\n",
         encoding="utf-8",
     )
 
@@ -140,7 +141,7 @@ path = "skills/missing/SKILL.md"
             "assets",
             "validate",
             "--manifest",
-            str(manifest_dir / "manifest.toml"),
+            str(praxia / "manifest.toml"),
             "--surface",
             "cursor",
         ],
@@ -148,11 +149,11 @@ path = "skills/missing/SKILL.md"
     )
 
 
-def test_validate_missing_command_path_exits_one(tmp_path: Path) -> None:
-    """AC-M31a-8: missing manifest command path → validate exit 1."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "manifest.toml").write_text(
+def test_validate_missing_skill_path_exits_one(tmp_path: Path) -> None:
+    """Missing skill path → validate exit 1 on claude surface."""
+    praxia = tmp_path / "plugin" / ".praxia"
+    praxia.mkdir(parents=True)
+    (praxia / "manifest.toml").write_text(
         """
 [plugin]
 name = "p"
@@ -160,9 +161,11 @@ version = "1.0.0"
 description = ""
 requires_praxia = "0.0.0"
 
-[plugin.export_command]
-claude_code = ["commands/missing.md"]
-""".strip(),
+[[plugin.skills]]
+name = "missing-skill"
+path = "skills/missing/SKILL.md"
+""".strip()
+        + "\n",
         encoding="utf-8",
     )
 
@@ -171,7 +174,7 @@ claude_code = ["commands/missing.md"]
             "assets",
             "validate",
             "--manifest",
-            str(manifest_dir / "manifest.toml"),
+            str(praxia / "manifest.toml"),
             "--surface",
             "claude",
         ],
