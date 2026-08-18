@@ -14,7 +14,7 @@ from cisternal.assets.manifest import ManifestAssetSource
 from cisternal.export.claude import ClaudeEmitter
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_skill_resources" / "manifest.toml"
+    Path(__file__).parent / "fixtures" / "manifest_skill_resources" / ".praxia" / "manifest.toml"
 )
 
 
@@ -43,7 +43,7 @@ def test_manifest_minimal_fixture_has_no_resources() -> None:
     """Regression guard: a skill with no references//scripts/ dirs must not
     gain a spurious `resources` tuple, so unrelated golden digests stay put.
     """
-    minimal = Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    minimal = Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
     report = ManifestAssetSource(minimal).load()
     skill = report.bundle.skills[0]
     assert skill.resources == ()
