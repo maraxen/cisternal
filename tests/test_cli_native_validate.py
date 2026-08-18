@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 SELF_MANIFEST = Path(".praxia/manifest.toml")
 _SURFACES = ("claude", "cursor", "copilot", "antigravity")

@@ -6,26 +6,22 @@ requires_praxia = "0.0.0"
 
 [[plugin.skills]]
 name = "export-trust"
-path = "skills/export-trust/SKILL.md"
+path = ".praxia/skills/export-trust/SKILL.md"
 
 [[plugin.skills]]
 name = "run-cisternal"
-path = "skills/run-cisternal/SKILL.md"
+path = ".praxia/skills/run-cisternal/SKILL.md"
 
 [[plugin.skills]]
 name = "customizing-tools"
-path = "skills/customizing-tools/SKILL.md"
+path = ".praxia/skills/customizing-tools/SKILL.md"
 
 [[plugin.agents]]
 name = "validate-helper"
-path = "agents/validate-helper.md"
+path = ".praxia/agents/validate-helper.md"
 description = "Documents validate, inspect, and export CLI usage"
 tools = []
 
-[plugin.export_command]
-claude_code = ["commands/export.md", "commands/validate.md"]
-cursor = ["commands/export.md"]
-
 [[plugin.workflows]]
 name = "export-dogfood"
-path = "workflows/export-dogfood.toml"
+path = ".praxia/workflows/export-dogfood.toml"

@@ -11,7 +11,7 @@ from cisternal.export.claude import ClaudeEmitter
 from cisternal.export.registry import get_emitter, list_emitter_surfaces
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 
 

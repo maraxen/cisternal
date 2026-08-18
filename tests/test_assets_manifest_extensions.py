@@ -9,21 +9,34 @@ import pytest
 from cisternal.assets.manifest import ManifestAssetSource
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    Path(__file__).parent
+    / "fixtures"
+    / "manifest_minimal"
+    / ".praxia"
+    / "manifest.toml"
 )
+
+
+def _praxia_manifest(plugin_root: Path, contents: str) -> Path:
+    praxia = plugin_root / ".praxia"
+    praxia.mkdir(parents=True)
+    path = praxia / "manifest.toml"
+    path.write_text(contents.strip() + "\n", encoding="utf-8")
+    return path
 
 
 def test_manifest_minimal_unchanged_no_extension_warnings() -> None:
     """AC-M33d-1: manifest_minimal has no L14 warnings."""
     report = ManifestAssetSource(FIXTURE_MANIFEST).load()
-    assert not any("workflow" in w or "pipeline" in w or "snippet" in w for w in report.warnings)
+    assert not any(
+        "workflow" in w or "pipeline" in w or "snippet" in w for w in report.warnings
+    )
 
 
 def test_workflow_missing_path_warns(tmp_path: Path) -> None:
     """AC-M33d-2: missing workflow path → load warning (validate exit 1)."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "manifest.toml").write_text(
+    manifest = _praxia_manifest(
+        tmp_path / "plugin",
         """
 [plugin]
 name = "p"
@@ -34,22 +47,21 @@ requires_praxia = "0.0.0"
 [[plugin.workflows]]
 name = "wf"
 path = "workflows/missing.toml"
-""".strip(),
-        encoding="utf-8",
+""",
     )
-    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    report = ManifestAssetSource(manifest).load()
     assert report.bundle.commands == ()
     assert any("workflows" in w and "missing" in w for w in report.warnings)
 
 
 def test_snippet_invalid_scope_warns(tmp_path: Path) -> None:
     """AC-M33d-3: invalid snippet scope → warning."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    snippets = manifest_dir / "snippets"
-    snippets.mkdir()
+    plugin_root = tmp_path / "plugin"
+    snippets = plugin_root / "snippets"
+    snippets.mkdir(parents=True)
     (snippets / "s.toml").write_text("", encoding="utf-8")
-    (manifest_dir / "manifest.toml").write_text(
+    manifest = _praxia_manifest(
+        plugin_root,
         """
 [plugin]
 name = "p"
@@ -61,18 +73,16 @@ requires_praxia = "0.0.0"
 name = "s"
 path = "snippets/s.toml"
 scope = "invalid"
-""".strip(),
-        encoding="utf-8",
+""",
     )
-    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    report = ManifestAssetSource(manifest).load()
     assert any("invalid scope" in w for w in report.warnings)
 
 
 def test_validate_workflow_warning_exits_one(tmp_path: Path) -> None:
     """AC-M33d-4: validate fails when L14 extension path missing."""
-    manifest_dir = tmp_path / "plugin"
-    manifest_dir.mkdir()
-    (manifest_dir / "manifest.toml").write_text(
+    manifest = _praxia_manifest(
+        tmp_path / "plugin",
         """
 [plugin]
 name = "p"
@@ -83,8 +93,7 @@ requires_praxia = "0.0.0"
 [[plugin.pipelines]]
 name = "pipe"
 path = "pipelines/nope.toml"
-""".strip(),
-        encoding="utf-8",
+""",
     )
 
     from cisternal.cli import app
@@ -95,7 +104,7 @@ path = "pipelines/nope.toml"
                 "assets",
                 "validate",
                 "--manifest",
-                str(manifest_dir / "manifest.toml"),
+                str(manifest),
             ]
         )
     assert exc_info.value.code == 1

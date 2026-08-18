@@ -27,18 +27,16 @@ cisternal assets export \
   --surface claude --out <output-dir>
 ```
 
-## The manifest-path gotcha (a real bug this session hit)
+## Manifest paths are plugin-root-relative (praxia parent-of-parent)
 
-`ManifestAssetSource` resolves every `path = "..."` in the manifest **relative to the
-manifest file's own directory**, not the repo root. A manifest at `.praxia/manifest.toml`
-declaring `path = "agent_assets/skills/foo/SKILL.md"` will look for
-`.praxia/agent_assets/skills/foo/SKILL.md` — almost never what you meant. Paths need a
-`../` prefix to climb back out of `.praxia/` to the repo root (e.g.
-`../agent_assets/skills/foo/SKILL.md`). Verify with `--dry-run` before trusting any path in
-a manifest you didn't just write yourself. A skill declared with a correct, same-directory
-path (e.g. `skills/foo/SKILL.md` for a skill living right next to the manifest under
-`.praxia/skills/foo/`) needs no `../` — the gotcha only bites when the target lives outside
-the manifest's own directory tree.
+`ManifestAssetSource` resolves every `path = "..."` against the **plugin root** — the
+directory that *contains* `.praxia/`, not the directory that contains `manifest.toml`.
+That matches praxia (`<repo>/.praxia/manifest.toml` → `<repo>`). A skill at
+`agent_assets/skills/foo/SKILL.md` is declared as `path = "agent_assets/skills/foo/SKILL.md"`.
+A skill that lives *inside* `.praxia/` must include that prefix:
+`path = ".praxia/skills/foo/SKILL.md"`. Do **not** use a `../` climb out of `.praxia/` —
+that would resolve *above* the plugin root. Verify with `cisternal assets inspect` /
+`validate` (and stderr) before trusting any path in a manifest you didn't just write.
 
 ## It fails open, not closed — read stderr, don't just check the exit code
 
@@ -54,16 +52,16 @@ investigate, exactly like the "diagnose against real installed code, not assumpt
 principle in the main skill — don't infer correctness from the exit code or from the
 presence of *some* output files.
 
-## `[plugin.export_command]` is not a shell command
+## `[plugin.export_command]` is praxia argv, not slash-command files
 
-This table's values are lists of **markdown file paths** — each becomes a `CommandAsset`
-named after the file's stem, meant for a consumer that has literal slash-command body files
-to bundle. It is easy to mistake this for "the CLI invocation used to run export" (a shell
-argv array) — that's a different, unrelated concept, and cisternal's loader will interpret
-argv tokens as bogus file paths, producing a wall of "missing or unreadable" warnings for
-`bth`, `export`, `--surface`, etc. If a consumer has no real command markdown files (e.g.
-its "commands" are just its MCP tools, already covered by the registry side), leave this
-table out entirely rather than repurposing it.
+This table is `Option<Vec<String>>` in praxia's schema and is executed as a subprocess
+argv after export (`session.rs`). Cisternal must **not** treat those strings as markdown
+paths: argv and a path list are the same TOML type, so a misread produces no parse error
+— only missing-file warnings and empty `CommandAsset` bodies. Commands in a cisternal
+bundle come from the Python registry, not from this table. If a plugin has no post-export
+command for praxia to run, omit the table entirely. Do not put `.md` paths here (praxia
+would try to exec them). A vendor path-list for slash-command files would be a new praxia
+schema key, not a reinterpretation of `export_command`.
 
 ## Don't let the bundle's version drift from the package's
 

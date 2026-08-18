@@ -8,12 +8,7 @@
       "tools": ["read", "search"]
     }
   ],
-  "commands": [
-    {
-      "body": "# Foo command\n\nManifest command body.\n",
-      "name": "foo"
-    }
-  ],
+  "commands": [],
   "hook_specs": [
     {
       "event": "PreToolUse",

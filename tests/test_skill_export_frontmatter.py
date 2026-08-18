@@ -44,7 +44,9 @@ def _write_manifest(tmp_path: Path, *, description: str, triggers: list[str]) ->
     )
 
     triggers_toml = ", ".join(f'"{t}"' for t in triggers)
-    (manifest_dir / "manifest.toml").write_text(
+    praxia = manifest_dir / ".praxia"
+    praxia.mkdir(parents=True)
+    (praxia / "manifest.toml").write_text(
         f"""
 [plugin]
 name = "p"
@@ -57,10 +59,11 @@ name = "demo-skill"
 path = "skills/demo-skill/SKILL.md"
 description = "{description}"
 triggers = [{triggers_toml}]
-""".strip(),
+""".strip()
+        + "\n",
         encoding="utf-8",
     )
-    return manifest_dir / "manifest.toml"
+    return praxia / "manifest.toml"
 
 
 def test_manifest_description_and_triggers_plumbed_through(tmp_path: Path) -> None:
@@ -88,7 +91,9 @@ def test_manifest_missing_description_falls_back_to_frontmatter(
     (manifest_dir / "skills" / "demo-skill" / "SKILL.md").write_text(
         SOURCE_SKILL_MD, encoding="utf-8"
     )
-    (manifest_dir / "manifest.toml").write_text(
+    praxia = manifest_dir / ".praxia"
+    praxia.mkdir(parents=True)
+    (praxia / "manifest.toml").write_text(
         """
 [plugin]
 name = "p"
@@ -99,10 +104,11 @@ requires_praxia = "0.0.0"
 [[plugin.skills]]
 name = "demo-skill"
 path = "skills/demo-skill/SKILL.md"
-""".strip(),
+""".strip()
+        + "\n",
         encoding="utf-8",
     )
-    report = ManifestAssetSource(manifest_dir / "manifest.toml").load()
+    report = ManifestAssetSource(praxia / "manifest.toml").load()
     skill = report.bundle.skills[0]
 
     assert skill.description == "source-file-own-description"

@@ -14,7 +14,7 @@ from cisternal.export._hash import bundle_sha256
 from cisternal.export.claude import ClaudeEmitter
 
 FIXTURE_MANIFEST = (
-    Path(__file__).parent / "fixtures" / "manifest_minimal" / "manifest.toml"
+    Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 _PLUGIN_JSON = ".claude-plugin/plugin.json"
 _PROVENANCE = ".claude-plugin/cisternal-provenance.json"
@@ -109,8 +109,10 @@ def test_export_manifest_writes_fixture_plugin(tmp_path: Path) -> None:
     assert "commands" not in manifest
 
 
-def test_export_manifest_emit_command_bodies(tmp_path: Path) -> None:
-    """export --manifest --emit-command-bodies writes commands/foo.md."""
+def test_export_manifest_emit_command_bodies_has_no_fixture_commands(
+    tmp_path: Path,
+) -> None:
+    """export --manifest --emit-command-bodies does not invent command files from argv."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
@@ -129,7 +131,4 @@ def test_export_manifest_emit_command_bodies(tmp_path: Path) -> None:
             ]
         )
     assert exc_info.value.code == 0
-
-    body_path = out_dir / "commands" / "foo.md"
-    assert body_path.is_file()
-    assert "Manifest command" in body_path.read_text(encoding="utf-8")
+    assert not (out_dir / "commands").exists()

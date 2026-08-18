@@ -14,7 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CONFORMANCE_ROOT = _REPO_ROOT / "tests" / "conformance"
 _EXPECTED_DIR = _CONFORMANCE_ROOT / "expected"
 _MANIFEST_MINIMAL_FIXTURE = (
-    _REPO_ROOT / "tests" / "fixtures" / "manifest_minimal" / "manifest.toml"
+    _REPO_ROOT / "tests" / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 
 
