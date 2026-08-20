@@ -134,12 +134,22 @@ uv run pytest -m "not golden_matrix and not integration"
   warning — the exit code and the presence of *some* output files both
   look successful. Treat any non-empty stderr as a real failure; don't
   infer correctness from `$?` or from `ls` on the output dir.
-- **Manifest `path = "..."` entries resolve relative to the manifest
-  file's own directory, not the repo root.** `.praxia/manifest.toml`
-  declaring `path = "skills/run-cisternal/SKILL.md"` resolves to
-  `.praxia/skills/run-cisternal/SKILL.md` — correct here because the
-  skill lives right next to the manifest. A manifest declaring a path
-  meant to reach outside `.praxia/` needs an explicit `../` prefix.
+- **Manifest `path = "..."` entries resolve relative to the plugin root
+  (the directory that *contains* `.praxia/`), not the manifest file's own
+  directory — `ManifestAssetSource` takes `.praxia/manifest.toml`'s
+  parent-of-parent, not its parent (fixed praxia-conformant in #25,
+  0.1.1a4; see `developing-cisternal-tools`'s `agent-asset-export.md`
+  reference for the full rule).** This repo's own manifest declares
+  `path = ".praxia/skills/run-cisternal/SKILL.md"` — **with** the
+  `.praxia/` prefix, because paths are resolved from the plugin root
+  down, the same as a skill outside `.praxia/` (e.g.
+  `path = "agent_assets/skills/foo/SKILL.md"`). Do **not** climb out
+  with `../` — that resolves *above* the plugin root under this
+  convention, one level too far. A caller that still assumes the old
+  manifest-directory-relative rule and works around it with a shallower
+  symlink will get every asset silently dropped (see the Gotcha above)
+  with no error above stderr — this bit contemplex's own
+  `plugin_export.py` integration exactly this way.
 - **`~/.cisternal/logs` can report `writable: no` in `telemetry doctor`
   purely from sandboxing, not a real permissions problem.** Under this
   harness's default Bash sandbox, `$HOME/.cisternal` isn't on the
