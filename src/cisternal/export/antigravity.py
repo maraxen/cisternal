@@ -44,11 +44,17 @@ Output files (non-rust-parity mode):
         Claude's ``{"command": [...]}`` array-only shape. ``env`` is present
         only when non-empty.
 
+    ``rules/AGENTS.md``
+        Emitted when ``bundle.metadata.description`` is non-empty.
+
+    ``skills/<bundle_name>_subagents/SKILL.md`` & ``references/<agent>.md``
+        When ``bundle.agents`` contains agent definitions, they are synthesized
+        into a subagents skill directory structure so Antigravity agents can
+        inspect and dynamically instantiate them.
+
 NOT emitted, intentionally:
-    - ``agents/`` — Antigravity has no file-based agent/subagent registration.
-      Confirmed both by praxia's adapter (a dedicated test asserts agents are
-      never written even when the bundle has them) and by direct testing.
-    - A rules directory — Antigravity rules live outside the plugin system.
+    - Raw ``agents/`` directory at root — Antigravity has no native root file-based agent registration.
+      Agent identities are synthesized into ``skills/<bundle_name>_subagents/`` instead.
 
 M13.2 resolved two gaps left open by M13.1, deliberately diverging from
 praxia's current WIP reference rather than copying it as-is — flagging both
@@ -124,6 +130,64 @@ class AntigravityEmitter(Emitter):
         for skill in bundle.skills:
             if skill.body:
                 files[f"skills/{skill.name}/SKILL.md"] = format_skill_markdown(skill)
+                for resource_path, content in skill.resources:
+                    files[f"skills/{skill.name}/{resource_path}"] = content
+
+        if bundle.metadata.description:
+            files["rules/AGENTS.md"] = (
+                f"# {bundle.metadata.name}\n\n{bundle.metadata.description}\n"
+            )
+
+        valid_agents = tuple(a for a in bundle.agents if a.body or a.description)
+        if valid_agents:
+            subagents_skill_name = f"{bundle.metadata.name}_subagents"
+            skill_dir = f"skills/{subagents_skill_name}"
+
+            agent_bullets: list[str] = []
+            for agent in valid_agents:
+                ref_rel_path = f"references/{agent.name}.md"
+                ref_file_path = f"{skill_dir}/{ref_rel_path}"
+                tools_str = (
+                    ", ".join(f"`{t}`" for t in agent.tools)
+                    if agent.tools
+                    else "default tools"
+                )
+                model_str = agent.model or "inherit"
+
+                ref_content = (
+                    f"# Subagent Specification: {agent.name}\n\n"
+                    f"- **Name**: `{agent.name}`\n"
+                    f"- **Description**: {agent.description or 'N/A'}\n"
+                    f"- **Recommended Model**: `{model_str}`\n"
+                    f"- **Configured Tools**: {tools_str}\n\n"
+                    f"## System Prompt\n\n"
+                    f"{agent.body or '(No custom system prompt)'}\n"
+                )
+                files[ref_file_path] = ref_content
+
+                desc = agent.description or "Specialized subagent"
+                agent_bullets.append(
+                    f"- **{agent.name}**: {desc} (Specification: [references/{agent.name}.md](./{ref_rel_path}))"
+                )
+
+            bullets_markdown = "\n".join(agent_bullets)
+
+            skill_md_content = (
+                f"---\n"
+                f"name: {subagents_skill_name}\n"
+                f"description: >-\n"
+                f"  Subagent identities and specifications for {bundle.metadata.name}. Use this skill to inspect available specialized subagent roles, system prompts, model preferences, and tool requirements for dynamic subagent creation.\n"
+                f"---\n\n"
+                f"# Subagent Specifications for {bundle.metadata.name}\n\n"
+                f"This skill defines available subagent roles, system prompts, model preferences, and tool requirements for {bundle.metadata.name}.\n\n"
+                f"## Available Subagents\n\n"
+                f"{bullets_markdown}\n\n"
+                f"## Dynamic Subagent Creation Guidance\n\n"
+                f"When an agent task requires a specialized subagent listed above:\n"
+                f"1. Read the agent's full specification and system prompt in `[references/<agent_name>.md](./references/<agent_name>.md)`.\n"
+                f"2. Use `define_subagent` or `invoke_subagent` to dynamically launch or configure the subagent using the system prompt and tool requirements specified in the reference file.\n"
+            )
+            files[f"{skill_dir}/SKILL.md"] = skill_md_content
 
         hook_specs = hooks_for_surface(bundle.hook_specs, "antigravity")
         if hook_specs:

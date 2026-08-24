@@ -318,7 +318,7 @@ def install(
         Path | None,
         cyclopts.Parameter(
             name=["--manifest"],
-            help="Path to manifest.toml. Must define [plugin.marketplace].",
+            help="Path to manifest.toml.",
         ),
     ] = None,
     registry: Annotated[
@@ -357,6 +357,13 @@ def install(
             help="Install scope: user, project, or local (default: 'project').",
         ),
     ] = "project",
+    surface: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--surface"],
+            help="Install target surface: claude or antigravity (default: 'claude').",
+        ),
+    ] = "claude",
     claude_bin: Annotated[
         str,
         cyclopts.Parameter(
@@ -372,35 +379,49 @@ def install(
         ),
     ] = False,
 ) -> None:
-    """Export a plugin bundle and register+install it as a real Claude Code plugin.
+    """Export a plugin bundle and register+install it as a real Claude Code or Antigravity plugin.
 
-    Requires --manifest with a [plugin.marketplace] table. Writes the bundle
-    to --out, then runs `claude plugin marketplace add <out>` and `claude
-    plugin install <name>@<marketplace> --scope <scope>` as subprocesses.
-    Both underlying commands are idempotent as of claude 2.1.227 — re-running
-    install is safe.
-
-    This makes the bundle its own standalone, single-plugin marketplace
-    (`source: "./"`) — the right tool for "give me this one tool". To
-    instead add this plugin to an existing marketplace that already lists
-    other tools (a shared, multi-tool marketplace like the
-    praxia/myxcel/cisternal family's), use `assets publish-shared` — it
-    merges into that marketplace's entry list rather than replacing it.
-
-    Unlike export/inspect/validate, install exits non-zero on real failure:
-    it mutates live Claude Code state (marketplace registration, installed-
-    plugin config), so a failure here must be visible, not swallowed.
+    Requires --manifest with a [plugin.marketplace] table (for claude) or [plugin] table (for antigravity).
+    Writes the bundle to --out or target plugin directory, then registers and installs it.
     """
     if manifest is None:
         _log.error("cisternal.cli: assets install requires --manifest")
         raise SystemExit(2)
 
+    if surface not in {"claude", "antigravity"}:
+        _log.error("cisternal.cli: unsupported install surface %r (expected 'claude' or 'antigravity')", surface)
+        raise SystemExit(2)
+
     bundle = _load_export_bundle(manifest=manifest, registry=registry, name=name, version=version)
+
+    if surface == "antigravity":
+        from cisternal.export.antigravity import AntigravityEmitter  # noqa: PLC0415
+        from cisternal.export.write import write_bundle  # noqa: PLC0415
+
+        files = AntigravityEmitter().emit(bundle)
+        if out != Path("."):
+            target_dir = out
+        elif scope in {"user", "global"}:
+            target_dir = Path.home() / ".gemini" / "config" / "plugins" / bundle.metadata.name
+        else:
+            target_dir = Path(".agents") / "plugins" / bundle.metadata.name
+
+        target_abs = target_dir.resolve()
+        if dry_run:
+            for path in sorted(files):
+                print(path)
+            print(f"would write antigravity plugin bundle to {target_abs}")
+            return
+
+        write_bundle(files, target_dir, dry_run=False)
+        _log.info("cisternal.cli: installed Antigravity plugin %s to %s", bundle.metadata.name, target_abs)
+        print(f"Installed Antigravity plugin {bundle.metadata.name} (scope={scope}) to {target_abs}")
+        return
 
     if bundle.marketplace is None:
         _log.error(
             "cisternal.cli: manifest %s has no [plugin.marketplace] table; "
-            "assets install requires one",
+            "assets install for claude surface requires one",
             manifest,
         )
         raise SystemExit(2)
