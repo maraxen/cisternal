@@ -43,20 +43,144 @@ def test_antigravity_emit_manifest_minimal_fixture() -> None:
     assert entry["hooks"] == [{"type": "command", "command": "hooks/pre.sh"}]
 
 
-def test_antigravity_agents_never_emitted() -> None:
-    """Antigravity has no file-based agent registration — agents must never appear."""
+def test_antigravity_agents_bundled_into_subagents_skill() -> None:
+    """Antigravity synthesizes agents into a skills/{bundle}_subagents directory."""
     from cisternal.assets.bundle import AgentAsset, AssetBundle, BundleMetadata
 
     bundle = AssetBundle(
-        metadata=BundleMetadata(name="p", version="1.0.0"),
+        metadata=BundleMetadata(name="mytool", version="1.0.0"),
         agents=(
-            AgentAsset(name="agent-x", description="Agent X", body="Agent body"),
+            AgentAsset(
+                name="agent-x",
+                description="Agent X role",
+                tools=("read_file", "write_to_file"),
+                model="flash",
+                body="Agent X prompt body",
+            ),
         ),
     )
 
     files = AntigravityEmitter().emit(bundle)
 
+    # Raw agents/ directory is never emitted at root
     assert not any(path.startswith("agents/") for path in files)
+
+    # Synthesized subagents skill
+    skill_md_path = "skills/mytool_subagents/SKILL.md"
+    ref_path = "skills/mytool_subagents/references/agent-x.md"
+
+    assert skill_md_path in files
+    assert ref_path in files
+
+    assert "name: mytool_subagents" in files[skill_md_path]
+    assert "agent-x" in files[skill_md_path]
+    assert "references/agent-x.md" in files[skill_md_path]
+
+    ref_content = files[ref_path]
+    assert "# Subagent Specification: agent-x" in ref_content
+    assert "Agent X prompt body" in ref_content
+    assert "`read_file`, `write_to_file`" in ref_content
+
+
+def test_antigravity_rules_emitted_when_description_present() -> None:
+    """Antigravity plugin emits rules/AGENTS.md when bundle description is present."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(
+            name="p", version="1.0.0", description="Plugin level guidelines"
+        )
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+
+    assert "rules/AGENTS.md" in files
+    assert "Plugin level guidelines" in files["rules/AGENTS.md"]
+
+
+def test_antigravity_skill_resources_emitted() -> None:
+    """Antigravity plugin emits sibling resources of skills."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, SkillAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        skills=(
+            SkillAsset(
+                name="my-skill",
+                body="Skill body",
+                resources=(("references/guide.md", "# Guide"),),
+            ),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+
+    assert "skills/my-skill/SKILL.md" in files
+    assert "skills/my-skill/references/guide.md" in files
+    assert files["skills/my-skill/references/guide.md"] == "# Guide"
+
+
+def test_antigravity_subagents_fallback_fields() -> None:
+    """Antigravity subagents skill uses clean fallback strings for omitted agent fields."""
+    from cisternal.assets.bundle import AgentAsset, AssetBundle, BundleMetadata
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="mytool", version="1.0.0"),
+        agents=(
+            AgentAsset(name="sparse-agent", description="A sparse agent"),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+    ref_path = "skills/mytool_subagents/references/sparse-agent.md"
+    assert ref_path in files
+
+    ref_content = files[ref_path]
+    assert "- **Recommended Model**: `inherit`" in ref_content
+    assert "- **Configured Tools**: default tools" in ref_content
+    assert "(No custom system prompt)" in ref_content
+
+
+def test_antigravity_mcp_single_token_no_args() -> None:
+    """Single token MCP command emits without args key."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, McpAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        mcp_servers=(
+            McpAsset(name="single-mcp", command=("my-server",)),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+    server = json.loads(files["mcp_config.json"])["mcpServers"]["single-mcp"]
+    assert server["command"] == "my-server"
+    assert "args" not in server
+
+
+def test_antigravity_hook_matcher_aggregation() -> None:
+    """Multiple hooks sharing a matcher aggregate into a single entry list."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(
+            HookSpecAsset(event="PreToolUse", matcher="Bash", script="pre1.sh"),
+            HookSpecAsset(event="PreToolUse", matcher="Bash", script="pre2.sh"),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+    hooks = json.loads(files["hooks.json"])
+    pre_tool = hooks["p"]["PreToolUse"]
+
+    # Remapped to run_command and aggregated into one matcher entry
+    assert len(pre_tool) == 1
+    assert pre_tool[0]["matcher"] == "run_command"
+    assert pre_tool[0]["hooks"] == [
+        {"type": "command", "command": "pre1.sh"},
+        {"type": "command", "command": "pre2.sh"},
+    ]
 
 
 def test_antigravity_mcp_command_args_split() -> None:
