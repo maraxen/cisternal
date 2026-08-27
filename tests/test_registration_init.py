@@ -86,6 +86,14 @@ class TestTopLevelExports:
         assert "CisternalWireError" in cisternal.__all__
         assert "clear_registry" in cisternal.__all__
 
+    def test_wire_visible_in_dir(self):
+        """Issue #18: `wire` (and other __getattr__-lazy-loaded symbols) must
+        show up in dir(cisternal), not just __all__ -- the default dir(module)
+        only reflects real __dict__ entries, silently omitting anything that
+        only resolves via module-level __getattr__."""
+        assert "wire" in dir(cisternal)
+        assert "WiredRegistry" in dir(cisternal)
+
     def test_all_preserves_m1_symbols(self):
         """__all__ still includes all M1 telemetry public symbols."""
         assert "init" in cisternal.__all__

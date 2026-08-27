@@ -572,3 +572,34 @@ class TestCLISignatureInjection:
         assert "times" in params
         # 'times' has a default of 3 — verify it round-trips through the injection.
         assert params["times"].default == 3
+
+
+class TestServerNoneCliOnlyWiring:
+    """Issue #18: wire(None, app) must skip the MCP surface cleanly instead of
+    raising AttributeError partway through — mirroring the existing app=None
+    ("skip the CLI surface") guard, not treating it as an error."""
+
+    def test_wire_with_server_none_does_not_raise(self):
+        @tool
+        def ping(x: int = 1) -> int:
+            """Trivial tool."""
+            return x
+
+        app = App(name="demo")
+        registry_result = wire(None, app)
+
+        assert registry_result.mcp_tools == []
+        assert registry_result.cli_commands == ["ping"]
+        # The CLI surface must still have been wired correctly despite server=None.
+        assert app["ping"].default_command is not None  # type: ignore[attr-defined]
+
+    def test_wire_with_both_none_returns_empty_registry(self):
+        @tool
+        def ping(x: int = 1) -> int:
+            """Trivial tool."""
+            return x
+
+        registry_result = wire(None, None)
+
+        assert registry_result.mcp_tools == []
+        assert registry_result.cli_commands == []

@@ -174,17 +174,22 @@ def wire(
             entry.fn, recovery=recovery, tool_name=entry.name
         )
 
-        # Explicitly name the registered Tool as entry.name (AC-M2-15). A bare
-        # callable falls back to FastMCP's own name inference, which reads
-        # mcp_callable.__name__ (== entry.fn.__name__ via compose's
-        # functools.update_wrapper) -- NOT entry.name. Whenever a consumer's
-        # wrapper function name differs from the name= override passed to
-        # @cisternal.tool, that fallback silently exposes the wrong tool name.
-        from fastmcp.tools import Tool
+        # server=None means "skip the MCP surface", mirroring app=None below
+        # (issue #18) -- not an error, and the fastmcp import + Tool
+        # construction shouldn't run at all for a CLI-only wiring.
+        if server is not None:
+            # Explicitly name the registered Tool as entry.name (AC-M2-15). A
+            # bare callable falls back to FastMCP's own name inference, which
+            # reads mcp_callable.__name__ (== entry.fn.__name__ via compose's
+            # functools.update_wrapper) -- NOT entry.name. Whenever a
+            # consumer's wrapper function name differs from the name=
+            # override passed to @cisternal.tool, that fallback silently
+            # exposes the wrong tool name.
+            from fastmcp.tools import Tool
 
-        fastmcp_tool = Tool.from_function(mcp_callable, name=entry.name)
-        server.add_tool(fastmcp_tool)
-        mcp_tool_names.append(entry.name)
+            fastmcp_tool = Tool.from_function(mcp_callable, name=entry.name)
+            server.add_tool(fastmcp_tool)
+            mcp_tool_names.append(entry.name)
 
         # Register CLI command if app is supplied.
         # F1 dual error contract (CLI path):
