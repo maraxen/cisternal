@@ -174,10 +174,21 @@ def _load_export_bundle(
 
     snapshot = registry_assets(registry)
     if len(snapshot) == 0:
-        _log.warning(
-            "cisternal.cli: registry %r is empty; emitting empty bundle",
+        # (#28) No --manifest was given AND the in-process tool registry is
+        # empty -- there is nothing to export. This used to warn and emit an
+        # empty-but-valid bundle at exit 0 (AC-M3-8b), which looked like a
+        # successful handoff downstream while actually producing nothing;
+        # reversed per #28 in favor of a loud failure naming the likely cause
+        # (forgetting --manifest, or exporting before any @cisternal.tool
+        # registration / --import has happened).
+        _log.error(
+            "cisternal.cli: export failed — registry %r is empty and no "
+            "--manifest was given; nothing to export. Pass --manifest, or "
+            "register tools via @cisternal.tool (directly, or via --import) "
+            "before calling export.",
             registry,
         )
+        raise SystemExit(1)
     resolved_name = name or "cisternal"
     if version is not None:
         resolved_version = version
