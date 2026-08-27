@@ -14,12 +14,11 @@ import asyncio
 import functools
 import time
 import uuid
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable
 
 from cisternal.telemetry.context import mcp_request_id_var
 from cisternal.adapters.base import AdapterBase
-
-T = TypeVar("T")
+from cisternal._typed_callable import NamedCallable
 
 
 def _reset_request_token(token: Any) -> None:
@@ -32,7 +31,7 @@ def _reset_request_token(token: Any) -> None:
 
 def traced_tool(
     adapter: AdapterBase,
-) -> Callable[[Callable[..., T]], Callable[..., Any]]:
+) -> Callable[[NamedCallable], Callable[..., Any]]:
     """Decorator to wrap a FastMCP v2 tool with telemetry.
 
     Usage:
@@ -51,7 +50,7 @@ def traced_tool(
         Decorator function that wraps the tool (sync or async).
     """
 
-    def decorator(fn: Callable[..., T]) -> Callable[..., Any]:
+    def decorator(fn: NamedCallable) -> Callable[..., Any]:
         if asyncio.iscoroutinefunction(fn):
 
             @functools.wraps(fn)

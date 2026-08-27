@@ -33,8 +33,9 @@ holds) and does not affect ``asyncio.iscoroutinefunction``.
 
 from __future__ import annotations
 
-from typing import Any, Callable, overload
+from typing import Any, Callable, cast, overload
 
+from cisternal._typed_callable import NamedCallable, TaggedCallable
 from cisternal.registration.registry import register
 
 
@@ -43,7 +44,7 @@ from cisternal.registration.registry import register
 # ---------------------------------------------------------------------------
 
 @overload
-def tool(fn: Callable[..., Any]) -> Callable[..., Any]: ...  # @tool (bare)
+def tool(fn: NamedCallable) -> NamedCallable: ...  # @tool (bare)
 
 
 @overload
@@ -52,11 +53,11 @@ def tool(
     *,
     registry: str = "default",
     name: str | None = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...  # @tool(...)
+) -> Callable[[NamedCallable], NamedCallable]: ...  # @tool(...)
 
 
 def tool(
-    fn: Callable[..., Any] | None = None,
+    fn: NamedCallable | None = None,
     *,
     registry: str = "default",
     name: str | None = None,
@@ -80,10 +81,10 @@ def tool(
     Returns:
         The original *fn* (not a wrapper).
     """
-    def _register_and_return(f: Callable[..., Any]) -> Callable[..., Any]:
+    def _register_and_return(f: NamedCallable) -> NamedCallable:
         register(f, registry=registry, name=name)
         # Benign marker attr — does NOT change callable identity.
-        f.__cisternal_tool__ = True  # type: ignore[attr-defined]
+        cast(TaggedCallable, f).__cisternal_tool__ = True
         return f
 
     if fn is not None:

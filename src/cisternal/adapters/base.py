@@ -20,6 +20,7 @@ propagates normally.
 """
 
 from abc import ABC, abstractmethod
+import importlib
 import json
 import re
 import sys
@@ -334,12 +335,13 @@ class ContemplexAdapter(AdapterBase):
         Tries to import contemplex.errors; if unavailable, returns basic dict.
         """
         try:
-            from contemplex.errors import ErrorCode, err_envelope
-
-            return err_envelope(ErrorCode.INTERNAL, f"{type(exc).__name__}: {exc}")
+            contemplex_errors = importlib.import_module("contemplex.errors")
         except ImportError:
             # Fallback if contemplex is not available
             return {"ok": False, "error_code": "INTERNAL", "error": str(exc)}
+        return contemplex_errors.err_envelope(
+            contemplex_errors.ErrorCode.INTERNAL, f"{type(exc).__name__}: {exc}"
+        )
 
 
 class XpeririAdapter(AdapterBase):

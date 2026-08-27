@@ -6,10 +6,10 @@ import json
 
 import yaml
 
-from cisternal.assets.bundle import AgentAsset, SkillAsset
+from cisternal.assets.bundle import AgentAsset, CommandAsset, SkillAsset
 
 
-def _yaml_scalar(value: str) -> str:
+def _yaml_scalar(value: object) -> str:
     """Render ``value`` as a YAML frontmatter scalar, quoting only if unsafe.
 
     Bug (cisternal/fix-description-yaml-escaping): the export formatters used
@@ -36,17 +36,23 @@ def _yaml_scalar(value: str) -> str:
     Unicode, e.g. emoji, as a single escape/codepoint rather than a split
     UTF-16 surrogate pair that YAML's escape scanner won't recombine).
     """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return str(value)
     try:
-        safe = yaml.safe_load(value) == value
-    except yaml.YAMLError:
+        safe = yaml.safe_load(f"k: {value}") == {"k": value}
+    except Exception:
         safe = False
     if safe:
         return value
     return json.dumps(value, ensure_ascii=False)
 
 
+
+
 def format_agent_markdown(agent: AgentAsset) -> str:
-    lines = ["---", f"name: {agent.name}"]
+    lines = ["---", f"name: {_yaml_scalar(agent.name)}"]
     if agent.description:
         lines.append(f"description: {_yaml_scalar(agent.description)}")
     if agent.tools:
@@ -54,16 +60,16 @@ def format_agent_markdown(agent: AgentAsset) -> str:
         for tool in agent.tools:
             lines.append(f"  - {_yaml_scalar(tool)}")
     if agent.model:
-        lines.append(f"model: {agent.model}")
+        lines.append(f"model: {_yaml_scalar(agent.model)}")
     lines.append("---")
-    body = agent.body
+    body = agent.body or ""
     if body and not body.startswith("\n"):
         lines.append("")
     return "\n".join(lines) + body
 
 
 def format_skill_markdown(skill: SkillAsset) -> str:
-    lines = ["---", f"name: {skill.name}"]
+    lines = ["---", f"name: {_yaml_scalar(skill.name)}"]
     if skill.description:
         lines.append(f"description: {_yaml_scalar(skill.description)}")
     if skill.triggers:
@@ -71,7 +77,21 @@ def format_skill_markdown(skill: SkillAsset) -> str:
         for trigger in skill.triggers:
             lines.append(f"  - {_yaml_scalar(trigger)}")
     lines.append("---")
-    body = skill.body
+    body = skill.body or ""
     if body and not body.startswith("\n"):
         lines.append("")
     return "\n".join(lines) + body
+
+
+def format_command_markdown(command: CommandAsset) -> str:
+    lines = ["---", f"name: {_yaml_scalar(command.name)}"]
+    if command.description:
+        lines.append(f"description: {_yaml_scalar(command.description)}")
+    lines.append("---")
+    body = command.body or ""
+    if body and not body.startswith("\n"):
+        lines.append("")
+    return "\n".join(lines) + body
+
+
+

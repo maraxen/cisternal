@@ -174,10 +174,21 @@ def _load_export_bundle(
 
     snapshot = registry_assets(registry)
     if len(snapshot) == 0:
-        _log.warning(
-            "cisternal.cli: registry %r is empty; emitting empty bundle",
+        # (#28) No --manifest was given AND the in-process tool registry is
+        # empty -- there is nothing to export. This used to warn and emit an
+        # empty-but-valid bundle at exit 0 (AC-M3-8b), which looked like a
+        # successful handoff downstream while actually producing nothing;
+        # reversed per #28 in favor of a loud failure naming the likely cause
+        # (forgetting --manifest, or exporting before any @cisternal.tool
+        # registration / --import has happened).
+        _log.error(
+            "cisternal.cli: export failed — registry %r is empty and no "
+            "--manifest was given; nothing to export. Pass --manifest, or "
+            "register tools via @cisternal.tool (directly, or via --import) "
+            "before calling export.",
             registry,
         )
+        raise SystemExit(1)
     resolved_name = name or "cisternal"
     if version is not None:
         resolved_version = version
@@ -261,9 +272,13 @@ def export(
         str,
         cyclopts.Parameter(
             name=["--surface"],
-            help="Emit surface: claude, cursor, copilot, or antigravity (default: claude).",
+            help=(
+                "Emit surface: antigravity, claude, copilot, cursor, "
+                "jcode, opencode, or pi (default: claude)."
+            ),
         ),
     ] = "claude",
+
 ) -> None:
     """Export agent assets to a plugin bundle for the selected surface.
 
@@ -724,12 +739,17 @@ def inspect_assets(
     from cisternal.assets.load import load_asset_report  # noqa: PLC0415
 
     report = load_asset_report(manifest=manifest, registry=registry)
-    payload = report_to_dict(
-        report,
-        resolve_tools_flag=resolve_tools,
-        surface=surface,
-    )
+    try:
+        payload = report_to_dict(
+            report,
+            resolve_tools_flag=resolve_tools,
+            surface=surface,
+        )
+    except ValueError as exc:
+        _log.error("cisternal.cli: inspect failed — %s", exc)
+        raise SystemExit(2) from exc
     print(json.dumps(payload, indent=2, sort_keys=True))
+
 
 
 @assets_app.command(name="validate")
@@ -833,7 +853,14 @@ def validate_assets(
             )
             raise SystemExit(1)
         if manifest is not None and manifest.resolve() == conformance_manifest_path().resolve():
-            expected = conformance_expected_path(surface).read_text(encoding="utf-8").strip()
+            expected_file = conformance_expected_path(surface)
+            if not expected_file.is_file():
+                _log.error(
+                    "cisternal.cli: validate failed — missing conformance digest: %s",
+                    expected_file,
+                )
+                raise SystemExit(1)
+            expected = expected_file.read_text(encoding="utf-8").strip()
             if actual != expected:
                 _log.error(
                     "cisternal.cli: validate failed — rust parity mismatch "
@@ -844,14 +871,48 @@ def validate_assets(
                 raise SystemExit(1)
         raise SystemExit(0)
 
+    if surface != "claude" and emit_command_bodies:
+        _log.warning(
+            "cisternal.cli: --emit-command-bodies ignored for surface %r",
+            surface,
+        )
+        emit_command_bodies = False
+
     mode = "with_command_bodies" if emit_command_bodies else "names_only"
 
-    if resolve_golden_slug(manifest) is None:
+    # (#28) A manifest resolving to zero skills/agents/commands/mcp_servers
+    # is a real failure regardless of golden-slug status -- checked here,
+    # before the golden-slug skip below, so it can't be masked by (and isn't
+    # conflated with) "this is an external manifest cisternal has no golden
+    # digest for." Note this is a bundle-content check, not an emitted-file
+    # count: every surface's plugin manifest wrapper (e.g. claude's
+    # plugin.json) gets emitted even for a genuinely empty bundle, so "zero
+    # files" never actually happens and isn't a usable signal here.
+    bundle = report.bundle
+    if not (bundle.skills or bundle.agents or bundle.commands or bundle.mcp_servers):
         _log.error(
-            "cisternal.cli: validate failed — unknown manifest for golden: %s",
-            manifest,
+            "cisternal.cli: validate failed — manifest has no skills, "
+            "agents, commands, or mcp_servers (empty bundle)"
         )
         raise SystemExit(1)
+
+    golden_slug = resolve_golden_slug(manifest)
+    if golden_slug is None:
+        # (#28) An external manifest isn't one of cisternal's own known
+        # fixtures/self-manifest -- there's no golden digest cisternal could
+        # possibly have pre-computed for it, so this was never a real
+        # failure. Structural checks (conflicts/warnings) already passed
+        # above; skip the golden-digest comparison and report success rather
+        # than exit-1, matching how --rust-parity already only compares
+        # against a golden digest for cisternal's own conformance manifest
+        # and skips the comparison (without failing) otherwise.
+        _log.info(
+            "cisternal.cli: validate skipping golden-digest comparison for "
+            "external manifest %s (not one of cisternal's own known "
+            "fixtures) — structural checks passed",
+            manifest,
+        )
+        raise SystemExit(0)
 
     try:
         golden_path = golden_digest_path(surface, mode, manifest=manifest)

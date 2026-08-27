@@ -19,6 +19,7 @@ jobs:
           CISTERNAL_TELEMETRY: all
         run: uv run cisternal telemetry doctor --json --strict
       - run: uv run ruff check .
+      - run: uv run ty check src/
       - run: uv run pytest -q
       - name: Shadow telemetry parity (bathos + contemplex patterns)
         run: uv run pytest tests/shadow/ -q
@@ -41,7 +42,7 @@ jobs:
       - run: uv sync
       - name: Native CLI parity (self-manifest, all surfaces)
         run: |
-          for surface in claude cursor copilot antigravity; do
+          for surface in claude cursor copilot antigravity jcode opencode pi; do
             uv run cisternal assets validate \
               --manifest .praxia/manifest.toml --surface "$surface" --use-native-cli
           done

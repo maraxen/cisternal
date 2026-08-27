@@ -7,8 +7,10 @@ from .context import (
     request_id_var,
     session_id_var,
     phase_var,
+    get_git_state,
     _build_record,
 )
+from .git_state import GitState, capture_git_state
 from .record import Record
 from .exporter import ExporterBase, JsonlExporter, ShadowExporter
 from .pipeline import EventPipeline, init_pipeline, get_pipeline, shutdown_pipeline
@@ -22,7 +24,10 @@ __all__ = [
     "request_id_var",
     "session_id_var",
     "phase_var",
+    "get_git_state",
     "_build_record",
+    "GitState",
+    "capture_git_state",
     "Record",
     "ExporterBase",
     "JsonlExporter",
