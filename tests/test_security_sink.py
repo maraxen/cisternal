@@ -20,7 +20,7 @@ def test_file_writer_sink_blocks_path_traversal(tmp_path: Path) -> None:
     }
 
     sink = FileWriterSink()
-    result = sink.write(malicious_files, out_dir, dry_run=False)
+    sink.write(malicious_files, out_dir, dry_run=False)
 
     # Valid file was written
     assert (out_dir / "valid.txt").is_file()
@@ -61,7 +61,7 @@ def test_file_writer_sink_never_raises_on_non_string_or_surrogates(tmp_path: Pat
 
     sink = FileWriterSink()
     # Must never raise
-    result = sink.write(files, out_dir, dry_run=False)
+    sink.write(files, out_dir, dry_run=False)
     assert (out_dir / "none.txt").is_file()
     assert (out_dir / "number.txt").is_file()
     assert (out_dir / "surrogate.txt").is_file()
