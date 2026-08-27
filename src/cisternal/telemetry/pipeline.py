@@ -16,13 +16,29 @@ import sys
 import threading
 from pathlib import Path
 
+from .context import _set_git_state
 from .exporter import ExporterBase, JsonlExporter
+from .git_state import capture_git_state
 from .otlp_exporter import maybe_create_otlp_exporter
 from .record import Record
 
 # Global pipeline instance for init()/emit_event()
 _global_pipeline = None
 _pipeline_lock = threading.Lock()
+
+
+def _capture_git_state_in_background() -> None:
+    """Run capture_git_state() off the init() critical path (spec 260827).
+
+    capture_git_state() itself never raises, but this still wraps it --
+    an uncaught exception in a background thread's target just prints a
+    traceback to stderr and dies silently rather than affecting anything
+    else, but there's no reason to rely on that instead of being explicit.
+    """
+    try:
+        _set_git_state(capture_git_state())
+    except Exception:
+        pass
 
 
 class _QueueListenerThread(threading.Thread):
@@ -290,6 +306,19 @@ def init_pipeline(
             exporters.append(otlp_exporter)
 
         _global_pipeline = EventPipeline(exporters=exporters)
+
+        # Capture git provenance once per process (spec 260827), in a
+        # background thread. Measured at ~70ms in a dirty repo (several git
+        # subprocess spawns) -- doing this synchronously here delayed
+        # heartbeat startup enough to break heartbeat-timing tests (which
+        # assume init() returns near-instantly). Any Record built before this
+        # completes just gets None git fields (see git_state.py / Record's
+        # docstrings) -- a valid, already-designed degraded state, not a bug.
+        threading.Thread(
+            target=_capture_git_state_in_background,
+            daemon=True,
+            name="cisternal-git-state-capture",
+        ).start()
 
         # Start heartbeat daemon thread (CH-12) for liveness detection
         from .self_obs import _start_heartbeat

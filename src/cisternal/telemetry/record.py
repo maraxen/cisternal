@@ -39,3 +39,23 @@ class Record:
 
     fields: dict[str, Any]
     """Caller-supplied fields (tool name, duration_ms, arg_keys, etc.)."""
+
+    git_hash: str | None = None
+    """Snapshot of cisternal.telemetry.context.git_state_var.hash at build
+    time (spec 260827). None until init() has run; "nogit"/"unknown" are the
+    captured-but-degraded sentinels -- see telemetry.git_state.GitState."""
+
+    git_branch: str | None = None
+    """Snapshot of git_state_var.branch. Same None-vs-sentinel distinction as
+    git_hash."""
+
+    git_dirty: bool | None = None
+    """Snapshot of git_state_var.dirty. None until init() has run."""
+
+    git_dirty_content_id: str | None = None
+    """Snapshot of git_state_var.dirty_content_id. None when the tree wasn't
+    dirty, computation was skipped, or init() hasn't run."""
+
+    git_provenance_source: str | None = None
+    """Snapshot of git_state_var.provenance_source ("git" | "nogit" |
+    "unavailable"). None until init() has run."""
