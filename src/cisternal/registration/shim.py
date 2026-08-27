@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from cisternal._typed_callable import NamedCallable
 from cisternal.registration.errors import CisternalWireError
 
 
@@ -78,7 +79,7 @@ def is_async(fn: Callable[..., Any]) -> bool:
     return asyncio.iscoroutinefunction(fn)
 
 
-def cli_dispatch(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+def cli_dispatch(fn: NamedCallable, *args: Any, **kwargs: Any) -> Any:
     """CLI-path helper: run *fn* from a synchronous context.
 
     For sync originals: calls ``fn(*args, **kwargs)`` directly and returns

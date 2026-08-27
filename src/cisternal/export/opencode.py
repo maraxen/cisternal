@@ -47,7 +47,7 @@ class OpenCodeEmitter(Emitter):
                         "url": first_cmd,
                     }
                 else:
-                    server_entry = {
+                    server_entry: dict[str, object] = {
                         "type": "local",
                         "command": list(srv.command),
                     }

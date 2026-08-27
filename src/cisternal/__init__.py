@@ -86,7 +86,7 @@ def init(
         heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
     """
     init_pipeline(
-        log_dir=log_dir,
+        log_dir=Path(log_dir) if log_dir is not None else None,
         max_bytes=max_bytes,
         backup_count=backup_count,
         exporters=exporters,

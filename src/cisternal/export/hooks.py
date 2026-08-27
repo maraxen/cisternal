@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import cast
 
 from cisternal.assets.bundle import HookSpecAsset
 
@@ -83,7 +84,7 @@ def build_antigravity_hooks(
 
         existing = next((e for e in bucket if e["matcher"] == matcher), None)
         if existing is not None:
-            existing["hooks"].append(hook_cmd)  # type: ignore[union-attr]
+            cast("list[dict[str, str]]", existing["hooks"]).append(hook_cmd)
         else:
             bucket.append({"matcher": matcher, "hooks": [hook_cmd]})
 

@@ -156,7 +156,14 @@ def _probe_jsonl_file() -> None:
                 return
 
             # Size growth alone is sufficient (coarse-mtime filesystems may not update mtime)
-            if size > _last_stat["size"] or mtime > _last_stat["mtime"]:
+            # Both are set together with "mtime" at line ~152-153 above (the
+            # first-stat baseline case, which returns early), so by this point
+            # neither is None.
+            last_size = _last_stat["size"]
+            last_mtime = _last_stat["mtime"]
+            assert last_size is not None
+            assert last_mtime is not None
+            if size > last_size or mtime > last_mtime:
                 # File has grown; consumer is alive
                 _last_stat["mtime"] = mtime
                 _last_stat["size"] = size

@@ -64,8 +64,9 @@ import asyncio
 import functools
 import inspect
 import time
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
+from cisternal._typed_callable import NamedCallable, TaggedCallable
 from cisternal.registration.shim import cli_dispatch, dispatch
 from cisternal.telemetry.context import _last_recovery_var
 
@@ -145,7 +146,7 @@ def compose_mcp_callable(
     # Step 2: explicitly set __signature__ to the original's signature (H1).
     # This is the ONLY way to preserve Annotated[] parameters and return
     # annotations for introspection by FastMCP and other tools.
-    _mcp_callable.__signature__ = original_sig  # type: ignore[attr-defined]
+    cast(TaggedCallable, _mcp_callable).__signature__ = original_sig
 
     return _mcp_callable
 
@@ -262,7 +263,7 @@ def _recover_sync(call: Callable[[], Any], recovery: RecoveryHooks) -> Any:
 
 
 def apply_recovery_sync(
-    fn: Callable[..., Any],
+    fn: NamedCallable,
     recovery: RecoveryHooks | None,
     *args: Any,
     **kwargs: Any,

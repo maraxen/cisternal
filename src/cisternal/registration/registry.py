@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from cisternal._typed_callable import NamedCallable
+
 # ---------------------------------------------------------------------------
 # ToolEntry
 # ---------------------------------------------------------------------------
@@ -103,7 +105,7 @@ def _snapshot(name: str = "default") -> dict[str, ToolEntry]:
 
 
 def register(
-    fn: Callable[..., Any],
+    fn: NamedCallable,
     *,
     registry: str = "default",
     name: str | None = None,

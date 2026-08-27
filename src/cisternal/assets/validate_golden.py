@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from cisternal.assets.bundle import AssetBundle
 from cisternal.export._hash import bundle_sha256, bundle_sha256_rust
@@ -13,7 +14,11 @@ from cisternal.export.cursor import CursorEmitter
 from cisternal.export.base import Emitter
 from cisternal.export.registry import get_emitter
 
-_RUST_PARITY_EMITTERS: dict[str, type[Emitter]] = {
+# Each of these constructors accepts `rust_parity: bool = False` (ClaudeEmitter
+# additionally accepts `emit_command_bodies`); `type[Emitter]` erases that, so
+# this is typed as the constructor signature actually used at the call site
+# below rather than the common base class.
+_RUST_PARITY_EMITTERS: dict[str, Callable[..., Emitter]] = {
     "antigravity": AntigravityEmitter,
     "claude": ClaudeEmitter,
     "copilot": CopilotEmitter,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from typing import Any
+from typing import Any, cast
 
 from cisternal.assets.bundle import AssetBundle, LoadReport
 from cisternal.assets.capability import resolve_tools
@@ -37,7 +37,9 @@ def report_to_dict(
 
 
 def _serialize_bundle(bundle: AssetBundle) -> dict[str, Any]:
-    return _serialize_value(bundle)  # type: ignore[return-value]
+    # AssetBundle is always a dataclass instance, so _serialize_value always
+    # takes the dataclass branch here and returns a dict.
+    return cast(dict[str, Any], _serialize_value(bundle))
 
 
 def _resolved_tools_for_bundle(bundle: AssetBundle, surface: str) -> dict[str, list[str]]:
