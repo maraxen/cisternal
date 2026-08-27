@@ -326,15 +326,52 @@ def test_modules_importable_with_fastmcp_masked(
     module_name: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Spec M4: verify module imports succeed even when fastmcp is not installed."""
+    """Spec M4: verify module imports succeed even when fastmcp is not installed.
+
+    Forcing a fresh import has TWO places that need restoring afterward, not
+    one -- a bare `sys.modules.pop()` (or even `monkeypatch.delitem` on just
+    `sys.modules`) permanently orphans other code's already-bound references:
+
+    1. `sys.modules[module_name]` itself -- reverted via monkeypatch.delitem,
+       which correctly restores the dict entry at teardown.
+    2. The PARENT package's submodule attribute (e.g. `cisternal.export`'s
+       own `.registry` attribute) -- import machinery sets this as a side
+       effect of every import, and monkeypatch.delitem on `sys.modules`
+       does NOT touch it. This matters because `monkeypatch.setattr` on a
+       dotted string path (used throughout test_export_registry.py) resolves
+       its target via ATTRIBUTE WALKING from the top-level package
+       (`_pytest.monkeypatch.resolve`: `__import__("cisternal")` then
+       `getattr(.., "export")` then `getattr(.., "registry")`) -- it never
+       consults `sys.modules` directly. Left unreverted, that attribute
+       keeps pointing at this test's orphaned fresh module forever after,
+       so later `monkeypatch.setattr("cisternal.export.registry.X", ...)`
+       calls silently patch a module nothing else references, while
+       already-imported code (e.g. `from cisternal.export.registry import
+       get_emitter`, bound at test_export_registry.py's own collection
+       time) keeps using the stale, unpatched original -- a real,
+       hard-to-diagnose cross-file test-isolation bug, only visible when
+       running the full suite (confirmed by isolating it to this exact
+       mechanism with a minimal repro).
+    """
     import sys
 
     monkeypatch.setitem(sys.modules, "fastmcp", None)
     monkeypatch.setitem(sys.modules, "fastmcp.server", None)
     monkeypatch.setitem(sys.modules, "fastmcp.server.middleware", None)
 
-    # Force fresh import
-    sys.modules.pop(module_name, None)
+    parent_name, _, submodule_attr = module_name.rpartition(".")
+    parent = sys.modules.get(parent_name) if parent_name else None
+    original_attr = getattr(parent, submodule_attr, None) if parent is not None else None
+
+    # Force fresh import; the sys.modules entry is restored at teardown.
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
     mod = importlib.import_module(module_name)
     assert mod is not None
+
+    if parent is not None and original_attr is not None:
+        # Plain setattr, NOT monkeypatch.setattr: this restoration must be
+        # permanent. monkeypatch.setattr would instead schedule ITS OWN
+        # teardown to revert back to whatever was present at the moment of
+        # this call -- the orphaned fresh module -- undoing the fix.
+        setattr(parent, submodule_attr, original_attr)
 
