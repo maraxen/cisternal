@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -211,19 +212,23 @@ def test_validate_jcode_golden() -> None:
     )
 
 
-def test_validate_non_claude_emit_command_bodies_warns(capsys: pytest.CaptureFixture[str]) -> None:
+def test_validate_non_claude_emit_command_bodies_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Validate --emit-command-bodies on non-claude surface resets bodies to False."""
-    _invoke_app(
-        [
-            "assets",
-            "validate",
-            "--manifest",
-            str(FIXTURE_MANIFEST),
-            "--surface",
-            "opencode",
-            "--emit-command-bodies",
-        ]
-    )
+    with caplog.at_level(logging.WARNING, logger="cisternal.cli"):
+        _invoke_app(
+            [
+                "assets",
+                "validate",
+                "--manifest",
+                str(FIXTURE_MANIFEST),
+                "--surface",
+                "opencode",
+                "--emit-command-bodies",
+            ]
+        )
+    assert "--emit-command-bodies ignored for surface 'opencode'" in caplog.text
 
 
 def test_validate_unknown_manifest_slug_exits_one(tmp_path: Path) -> None:

@@ -25,11 +25,15 @@ FIXTURE_MANIFEST = (
 def test_entry_points_register_builtins() -> None:
     """Entry points expose the 7 built-in emitters."""
     names = {ep.name for ep in entry_points(group="cisternal.emitters")}
-    # In test environments without editable reinstall, entry points might reflect
-    # the previously installed metadata or current; check builtin factories if entry points subset
-    expected = {"antigravity", "claude", "copilot", "cursor", "jcode", "opencode", "pi"}
-    if names:
-        assert names.issubset(expected)
+    assert names == {
+        "antigravity",
+        "claude",
+        "copilot",
+        "cursor",
+        "jcode",
+        "opencode",
+        "pi",
+    }
 
 
 def test_list_emitter_surfaces_sorted() -> None:

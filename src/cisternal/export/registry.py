@@ -108,8 +108,6 @@ def get_emitter(surface: str, *, emit_command_bodies: bool = False) -> Emitter |
     if factory is None:
         return None
     try:
-        if surface == "claude":
-            return factory(emit_command_bodies=emit_command_bodies)
         try:
             return factory(emit_command_bodies=emit_command_bodies)
         except TypeError:

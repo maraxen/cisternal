@@ -44,10 +44,12 @@ class JCodeEmitter(Emitter):
         if emit_agents:
             plugin_obj["agents"] = [a.name for a in emit_agents]
 
+        mcp_servers_obj: dict[str, object] = {}
         if bundle.mcp_servers:
-            plugin_obj["mcpServers"] = {
+            mcp_servers_obj = {
                 srv.name: _mcp_server_obj(srv) for srv in bundle.mcp_servers
             }
+            plugin_obj["mcpServers"] = mcp_servers_obj
 
         files[_PLUGIN_JSON_PATH] = json.dumps(plugin_obj, sort_keys=True, indent=2)
 
@@ -60,11 +62,7 @@ class JCodeEmitter(Emitter):
                 files[f"skills/{skill.name}/{resource_path}"] = content
 
         if bundle.mcp_servers:
-            mcp_obj = {
-                "mcpServers": {
-                    srv.name: _mcp_server_obj(srv) for srv in bundle.mcp_servers
-                }
-            }
+            mcp_obj = {"mcpServers": mcp_servers_obj}
             files[_MCP_JSON_PATH] = json.dumps(mcp_obj, sort_keys=True, indent=2)
 
         if bundle.marketplace is not None:

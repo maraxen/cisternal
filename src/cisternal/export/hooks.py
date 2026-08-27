@@ -6,10 +6,6 @@ from collections import defaultdict
 
 from cisternal.assets.bundle import HookSpecAsset
 
-_EMIT_SURFACES = frozenset(
-    {"antigravity", "claude", "copilot", "cursor", "jcode", "opencode", "pi"}
-)
-
 
 def hooks_for_surface(
     hook_specs: tuple[HookSpecAsset, ...] | None,
