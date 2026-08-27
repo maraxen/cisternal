@@ -261,9 +261,13 @@ def export(
         str,
         cyclopts.Parameter(
             name=["--surface"],
-            help="Emit surface: claude, cursor, copilot, or antigravity (default: claude).",
+            help=(
+                "Emit surface: antigravity, claude, copilot, cursor, "
+                "jcode, opencode, or pi (default: claude)."
+            ),
         ),
     ] = "claude",
+
 ) -> None:
     """Export agent assets to a plugin bundle for the selected surface.
 
@@ -724,12 +728,17 @@ def inspect_assets(
     from cisternal.assets.load import load_asset_report  # noqa: PLC0415
 
     report = load_asset_report(manifest=manifest, registry=registry)
-    payload = report_to_dict(
-        report,
-        resolve_tools_flag=resolve_tools,
-        surface=surface,
-    )
+    try:
+        payload = report_to_dict(
+            report,
+            resolve_tools_flag=resolve_tools,
+            surface=surface,
+        )
+    except ValueError as exc:
+        _log.error("cisternal.cli: inspect failed — %s", exc)
+        raise SystemExit(2) from exc
     print(json.dumps(payload, indent=2, sort_keys=True))
+
 
 
 @assets_app.command(name="validate")
@@ -833,7 +842,14 @@ def validate_assets(
             )
             raise SystemExit(1)
         if manifest is not None and manifest.resolve() == conformance_manifest_path().resolve():
-            expected = conformance_expected_path(surface).read_text(encoding="utf-8").strip()
+            expected_file = conformance_expected_path(surface)
+            if not expected_file.is_file():
+                _log.error(
+                    "cisternal.cli: validate failed — missing conformance digest: %s",
+                    expected_file,
+                )
+                raise SystemExit(1)
+            expected = expected_file.read_text(encoding="utf-8").strip()
             if actual != expected:
                 _log.error(
                     "cisternal.cli: validate failed — rust parity mismatch "
@@ -844,7 +860,15 @@ def validate_assets(
                 raise SystemExit(1)
         raise SystemExit(0)
 
+    if surface != "claude" and emit_command_bodies:
+        _log.warning(
+            "cisternal.cli: --emit-command-bodies ignored for surface %r",
+            surface,
+        )
+        emit_command_bodies = False
+
     mode = "with_command_bodies" if emit_command_bodies else "names_only"
+
 
     if resolve_golden_slug(manifest) is None:
         _log.error(

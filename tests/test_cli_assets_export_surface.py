@@ -67,6 +67,75 @@ def test_export_surface_antigravity_writes_layout(tmp_path: Path) -> None:
     assert not (out_dir / "gemini-extension.json").exists()
 
 
+def test_export_surface_opencode_writes_layout(tmp_path: Path) -> None:
+    """Export --surface opencode writes OpenCode config and skills."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    _invoke_app(
+        [
+            "assets",
+            "export",
+            "--surface",
+            "opencode",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert (out_dir / "opencode.json").is_file()
+    assert (out_dir / ".opencode" / "skills" / "demo-skill" / "SKILL.md").is_file()
+    assert (out_dir / ".opencode" / "agents" / "recon.md").is_file()
+
+
+def test_export_surface_pi_writes_layout(tmp_path: Path) -> None:
+    """Export --surface pi writes Pi package manifest, skills, and AGENTS.md."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    _invoke_app(
+        [
+            "assets",
+            "export",
+            "--surface",
+            "pi",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert (out_dir / "package.json").is_file()
+    assert (out_dir / "skills" / "demo-skill" / "SKILL.md").is_file()
+    assert (out_dir / "AGENTS.md").is_file()
+
+
+def test_export_surface_jcode_writes_layout(tmp_path: Path) -> None:
+    """Export --surface jcode writes JCode plugin manifest, skills, and agents."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    _invoke_app(
+        [
+            "assets",
+            "export",
+            "--surface",
+            "jcode",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert (out_dir / "plugin.json").is_file()
+    assert (out_dir / "skills" / "demo-skill" / "SKILL.md").is_file()
+    assert (out_dir / "agents" / "recon.md").is_file()
+
+
 def test_export_unknown_surface_exits_two(tmp_path: Path) -> None:
     """L33: unknown export surface exits 2."""
     out_dir = tmp_path / "out"
@@ -84,3 +153,4 @@ def test_export_unknown_surface_exits_two(tmp_path: Path) -> None:
         ],
         exit_code=2,
     )
+

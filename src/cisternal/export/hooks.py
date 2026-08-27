@@ -6,20 +6,18 @@ from collections import defaultdict
 
 from cisternal.assets.bundle import HookSpecAsset
 
-_EMIT_SURFACES = frozenset({"claude", "cursor", "copilot", "antigravity"})
+_EMIT_SURFACES = frozenset(
+    {"antigravity", "claude", "copilot", "cursor", "jcode", "opencode", "pi"}
+)
 
 
 def hooks_for_surface(
-    hook_specs: tuple[HookSpecAsset, ...],
+    hook_specs: tuple[HookSpecAsset, ...] | None,
     surface: str,
 ) -> tuple[HookSpecAsset, ...]:
-    """Return hook specs that apply to *surface* per L15."""
-    if surface not in _EMIT_SURFACES:
-        msg = f"unsupported emit surface: {surface!r}"
-        raise ValueError(msg)
-
+    """Return hook specs that apply to *surface* per L15 (pure, never-raise)."""
     selected: list[HookSpecAsset] = []
-    for spec in hook_specs:
+    for spec in hook_specs or ():
         if not spec.surfaces:
             selected.append(spec)
         elif surface in spec.surfaces:
@@ -27,36 +25,22 @@ def hooks_for_surface(
     return tuple(selected)
 
 
+
 def build_claude_style_hooks(
     hook_specs: tuple[HookSpecAsset, ...],
 ) -> dict[str, list[dict[str, object]]]:
     """Claude-shaped nested hooks (praxia build_claude_hooks bundle adapter)."""
     events: dict[str, list[dict[str, object]]] = defaultdict(list)
-    pre_tool: list[dict[str, object]] = []
-    post_tool: list[dict[str, object]] = []
-
     for spec in hook_specs:
         hook_cmd: dict[str, str] = {"type": "command", "command": spec.script}
         entry: dict[str, object] = {
             "matcher": spec.matcher,
             "hooks": [hook_cmd],
         }
-
-        if spec.event == "PreToolUse":
-            pre_tool.append(entry)
-            continue
-        if spec.event == "PostToolUse":
-            post_tool.append(entry)
-            continue
-
         events[spec.event].append(entry)
 
-    root: dict[str, list[dict[str, object]]] = dict(sorted(events.items()))
-    if pre_tool:
-        root["PreToolUse"] = pre_tool
-    if post_tool:
-        root["PostToolUse"] = post_tool
-    return root
+    return dict(sorted(events.items()))
+
 
 
 _ANTIGRAVITY_MATCHER_REMAP = {"Bash": "run_command"}

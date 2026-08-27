@@ -88,3 +88,20 @@ def test_inspect_resolve_tools_requires_surface() -> None:
         ],
         exit_code=2,
     )
+
+
+def test_inspect_resolve_tools_invalid_surface_exits_two() -> None:
+    """--resolve-tools with invalid --surface exits 2."""
+    _invoke_app(
+        [
+            "assets",
+            "inspect",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--resolve-tools",
+            "--surface",
+            "invalid_vendor",
+        ],
+        exit_code=2,
+    )
+

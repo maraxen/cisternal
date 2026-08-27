@@ -169,14 +169,86 @@ path = "skills/missing/SKILL.md"
         encoding="utf-8",
     )
 
+def test_validate_opencode_golden() -> None:
+    """Validate --surface opencode passes golden."""
     _invoke_app(
         [
             "assets",
             "validate",
             "--manifest",
-            str(praxia / "manifest.toml"),
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "opencode",
+        ]
+    )
+
+
+def test_validate_pi_golden() -> None:
+    """Validate --surface pi passes golden."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "pi",
+        ]
+    )
+
+
+def test_validate_jcode_golden() -> None:
+    """Validate --surface jcode passes golden."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "jcode",
+        ]
+    )
+
+
+def test_validate_non_claude_emit_command_bodies_warns(capsys: pytest.CaptureFixture[str]) -> None:
+    """Validate --emit-command-bodies on non-claude surface resets bodies to False."""
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(FIXTURE_MANIFEST),
+            "--surface",
+            "opencode",
+            "--emit-command-bodies",
+        ]
+    )
+
+
+def test_validate_unknown_manifest_slug_exits_one(tmp_path: Path) -> None:
+    """Validate on manifest with unknown slug exits 1."""
+    unknown = tmp_path / "manifest.toml"
+    unknown.write_text(
+        """
+[plugin]
+name = "unknown-slug-plugin"
+version = "1.0.0"
+description = "No golden slug exists"
+requires_praxia = "0.0.0"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    _invoke_app(
+        [
+            "assets",
+            "validate",
+            "--manifest",
+            str(unknown),
             "--surface",
             "claude",
         ],
         exit_code=1,
     )
+

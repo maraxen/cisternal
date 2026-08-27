@@ -270,3 +270,53 @@ def test_cli_importable_without_fastmcp() -> None:
     """import cisternal.cli must succeed (verified by import in-process)."""
     mod = importlib.import_module("cisternal.cli")
     assert hasattr(mod, "app"), "cisternal.cli must export 'app'"
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "cisternal.cli",
+        "cisternal.export.antigravity",
+        "cisternal.export.base",
+        "cisternal.export.claude",
+        "cisternal.export.copilot",
+        "cisternal.export.cursor",
+        "cisternal.export.hooks",
+        "cisternal.export.jcode",
+        "cisternal.export.marketplace",
+        "cisternal.export.opencode",
+        "cisternal.export.pi",
+        "cisternal.export.registry",
+        "cisternal.export.sink",
+        "cisternal.export.write",
+        "cisternal.assets.bridge",
+        "cisternal.assets.bundle",
+        "cisternal.assets.capability",
+        "cisternal.assets.composite",
+        "cisternal.assets.inspect_json",
+        "cisternal.assets.load",
+        "cisternal.assets.manifest",
+        "cisternal.assets.manifest_extensions",
+        "cisternal.assets.protocol",
+        "cisternal.assets.source",
+        "cisternal.assets.spec",
+        "cisternal.assets.validate_golden",
+    ],
+)
+
+def test_modules_importable_with_fastmcp_masked(
+    module_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec M4: verify module imports succeed even when fastmcp is not installed."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "fastmcp", None)
+    monkeypatch.setitem(sys.modules, "fastmcp.server", None)
+    monkeypatch.setitem(sys.modules, "fastmcp.server.middleware", None)
+
+    # Force fresh import
+    sys.modules.pop(module_name, None)
+    mod = importlib.import_module(module_name)
+    assert mod is not None
+

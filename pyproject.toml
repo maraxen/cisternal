@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cisternal"
-version = "0.1.1a4"
+version = "0.1.1a6"
 description = "Shared telemetry substrate and agent-asset export toolkit for the Praxia tool family"
+
 readme = "README.md"
 license = "MIT"
 authors = [
@@ -55,10 +56,14 @@ dev = [
 cisternal = "cisternal.cli:app"
 
 [project.entry-points."cisternal.emitters"]
-claude = "cisternal.export.registry:claude_factory"
-cursor = "cisternal.export.registry:cursor_factory"
-copilot = "cisternal.export.registry:copilot_factory"
 antigravity = "cisternal.export.registry:antigravity_factory"
+claude = "cisternal.export.registry:claude_factory"
+copilot = "cisternal.export.registry:copilot_factory"
+cursor = "cisternal.export.registry:cursor_factory"
+jcode = "cisternal.export.registry:jcode_factory"
+opencode = "cisternal.export.registry:opencode_factory"
+pi = "cisternal.export.registry:pi_factory"
+
 
 [tool.setuptools]
 package-dir = { "" = "src" }
