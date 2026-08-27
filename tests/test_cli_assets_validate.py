@@ -231,9 +231,28 @@ def test_validate_non_claude_emit_command_bodies_warns(
     assert "--emit-command-bodies ignored for surface 'opencode'" in caplog.text
 
 
-def test_validate_unknown_manifest_slug_exits_one(tmp_path: Path) -> None:
-    """Validate on manifest with unknown slug exits 1."""
-    unknown = tmp_path / "manifest.toml"
+def test_validate_external_manifest_skips_golden_comparison_and_exits_zero(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """(#28) A well-formed external manifest -- not one of cisternal's own
+    known fixtures/self-manifest, so there's no golden digest cisternal could
+    possibly have pre-computed for it -- skips the golden-digest comparison
+    and exits 0 (structural checks already passed), instead of the old
+    exit-1 that made `validate` unusable for any downstream consumer's own
+    manifest.
+
+    Mirrors a realistic external repo layout (<repo>/.praxia/manifest.toml)
+    with one real agent, so this exercises the golden-slug skip specifically
+    -- not the separate empty-bundle check, which has its own test.
+    """
+    praxia_dir = tmp_path / ".praxia"
+    praxia_dir.mkdir()
+    (praxia_dir / "agents").mkdir()
+    (praxia_dir / "agents" / "helper.md").write_text(
+        "---\nname: helper\n---\nYou help with things.\n", encoding="utf-8"
+    )
+    unknown = praxia_dir / "manifest.toml"
     unknown.write_text(
         """
 [plugin]
@@ -241,19 +260,25 @@ name = "unknown-slug-plugin"
 version = "1.0.0"
 description = "No golden slug exists"
 requires_praxia = "0.0.0"
+
+[[plugin.agents]]
+name = "helper"
+path = ".praxia/agents/helper.md"
 """.strip()
         + "\n",
         encoding="utf-8",
     )
-    _invoke_app(
-        [
-            "assets",
-            "validate",
-            "--manifest",
-            str(unknown),
-            "--surface",
-            "claude",
-        ],
-        exit_code=1,
-    )
+    with caplog.at_level(logging.INFO, logger="cisternal.cli"):
+        _invoke_app(
+            [
+                "assets",
+                "validate",
+                "--manifest",
+                str(unknown),
+                "--surface",
+                "claude",
+            ],
+            exit_code=0,
+        )
+    assert "skipping golden-digest comparison" in caplog.text
 

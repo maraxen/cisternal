@@ -869,13 +869,39 @@ def validate_assets(
 
     mode = "with_command_bodies" if emit_command_bodies else "names_only"
 
-
-    if resolve_golden_slug(manifest) is None:
+    # (#28) A manifest resolving to zero skills/agents/commands/mcp_servers
+    # is a real failure regardless of golden-slug status -- checked here,
+    # before the golden-slug skip below, so it can't be masked by (and isn't
+    # conflated with) "this is an external manifest cisternal has no golden
+    # digest for." Note this is a bundle-content check, not an emitted-file
+    # count: every surface's plugin manifest wrapper (e.g. claude's
+    # plugin.json) gets emitted even for a genuinely empty bundle, so "zero
+    # files" never actually happens and isn't a usable signal here.
+    bundle = report.bundle
+    if not (bundle.skills or bundle.agents or bundle.commands or bundle.mcp_servers):
         _log.error(
-            "cisternal.cli: validate failed — unknown manifest for golden: %s",
-            manifest,
+            "cisternal.cli: validate failed — manifest has no skills, "
+            "agents, commands, or mcp_servers (empty bundle)"
         )
         raise SystemExit(1)
+
+    golden_slug = resolve_golden_slug(manifest)
+    if golden_slug is None:
+        # (#28) An external manifest isn't one of cisternal's own known
+        # fixtures/self-manifest -- there's no golden digest cisternal could
+        # possibly have pre-computed for it, so this was never a real
+        # failure. Structural checks (conflicts/warnings) already passed
+        # above; skip the golden-digest comparison and report success rather
+        # than exit-1, matching how --rust-parity already only compares
+        # against a golden digest for cisternal's own conformance manifest
+        # and skips the comparison (without failing) otherwise.
+        _log.info(
+            "cisternal.cli: validate skipping golden-digest comparison for "
+            "external manifest %s (not one of cisternal's own known "
+            "fixtures) — structural checks passed",
+            manifest,
+        )
+        raise SystemExit(0)
 
     try:
         golden_path = golden_digest_path(surface, mode, manifest=manifest)
