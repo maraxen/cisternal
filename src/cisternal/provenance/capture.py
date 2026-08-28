@@ -24,6 +24,17 @@ path (never raises -- degrades to a null/`"unavailable"` field plus a logged
 reason), EXCEPT `resolve_git_commit`/`aresolve_git_commit` themselves, which
 support `strict=True` to raise instead when a caller actually wants to know
 about a failure rather than silently degrade.
+
+Deliberately NOT delegated to `cisternal.telemetry.git_state` (unlike
+`channels.py`'s live-git tier, which does): `resolve_git_commit(strict=True)`
+needs to raise with the real git error text, but telemetry's always-degrade
+design discards that detail by construction. And a standalone dirty-content-
+id-only call here (the common case: only invoked when a prior cheap check
+already found the tree dirty) would pay for a second, redundant hash/branch/
+status capture if it went through telemetry's coarser all-in-one API. The
+async variants here have no telemetry equivalent to delegate to at all --
+that module is sync-only by design (captured once per process, never
+per-event).
 """
 
 from __future__ import annotations

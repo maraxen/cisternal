@@ -11,18 +11,34 @@ myxcel's writer produces, with no shared code enforcing the two agree.
 `capture_git_state()` never raises (C6 of the spec): every caller-visible
 failure degrades to the `_UNKNOWN` sentinel, because a provenance-capture
 failure must never fail the run it's attached to.
+
+The "no channel data, just ask git directly" tier below delegates to
+`cisternal.telemetry.git_state.capture_git_state()` rather than shelling out
+to git itself. That module was merged into `main` (PR #29) while this one was
+still on a feature branch, built independently for the same purpose -- its
+own docstring calls it "the shared substrate other Praxia-family tools
+delegate their local-shellout tier to, rather than each maintaining a
+slightly-different subprocess-calling implementation of the same thing."
+Maintaining a second implementation of that exact tier here, inside the very
+module meant to be the canonical one, would be the same class of duplication
+this whole provenance migration exists to eliminate -- just relocated one
+level down. See `capture.py`'s module docstring for why `resolve_git_commit`/
+`compute_dirty_content_id` do NOT also delegate here (different contract:
+`strict=True` needs real error detail telemetry's always-degrade design
+doesn't expose, and standalone dirty-id-only calls would otherwise pay for a
+redundant full re-capture).
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import warnings as _warnings
 from dataclasses import dataclass
 from pathlib import Path
 
-from .capture import compute_dirty_content_id
+from cisternal.telemetry.git_state import capture_git_state as _capture_live_git_state
+
 from .record import PROVENANCE_FILENAME, _VALID_PROVENANCE_STATUSES
 
 
@@ -136,52 +152,12 @@ def _same_root(a: str | Path, b: str | Path) -> bool:
         return False
 
 
-def _legacy_git_shellout(cwd: str | Path) -> GitState | None:
-    """Plain git shellout, no channels. Returns None on any failure."""
-    try:
-        hash_ = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        dirty = bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-            ).strip()
-        )
-        return GitState(hash=hash_, branch=branch, dirty=dirty, provenance_source="git")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-
-def _git_shellout_with_toplevel(cwd: str | Path) -> tuple[str, str, bool, str] | None:
-    """Git shellout returning (hash, branch, dirty, toplevel) or None on failure."""
-    try:
-        hash_ = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        dirty = bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-            ).strip()
-        )
-        toplevel = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
-        ).strip()
-        return (hash_, branch, dirty, toplevel)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-
 def capture_git_state(cwd: Path | None = None) -> GitState:
     """Capture git provenance from multiple channels with defined precedence.
 
     D6 precedence:
-    1. Check env and sidecar channels; if neither present, use legacy git or _UNKNOWN
+    1. Check env and sidecar channels; if neither present, capture live git state
+       directly (via telemetry.git_state) or fall back to _UNKNOWN
     2. If a channel exists and a real repo exists at the same root, use the real repo
     3. Otherwise use the channel
 
@@ -200,19 +176,20 @@ def capture_git_state(cwd: Path | None = None) -> GitState:
             prov_source = "myxcel-sidecar"
 
         if prov is None:
-            result = _legacy_git_shellout(cwd_str)
-            return result if result is not None else _UNKNOWN
+            live = _capture_live_git_state(cwd)
+            if live.provenance_source != "git":
+                return _UNKNOWN
+            return GitState(
+                hash=live.hash, branch=live.branch, dirty=live.dirty,
+                dirty_content_id=live.dirty_content_id, provenance_source="git",
+            )
 
-        git_info = _git_shellout_with_toplevel(cwd_str)
-        if git_info is not None:
-            hash_, branch, dirty, toplevel = git_info
-            if _same_root(toplevel, prov.get("root") or ""):
-                dirty_content_id: str | None = None
-                if dirty:
-                    dirty_content_id = compute_dirty_content_id(Path(toplevel))
+        live = _capture_live_git_state(cwd)
+        if live.provenance_source == "git" and live.toplevel is not None:
+            if _same_root(live.toplevel, prov.get("root") or ""):
                 return GitState(
-                    hash=hash_, branch=branch, dirty=dirty, dirty_content_id=dirty_content_id,
-                    provenance_source="git",
+                    hash=live.hash, branch=live.branch, dirty=live.dirty,
+                    dirty_content_id=live.dirty_content_id, provenance_source="git",
                 )
 
         status = prov.get("provenance_status", "")
