@@ -45,7 +45,6 @@ convention, in the original design) -- nothing else in this mechanism is.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import tempfile
 from contextlib import suppress
