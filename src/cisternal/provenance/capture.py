@@ -359,16 +359,26 @@ async def _acompute_tree_oid(root: Path) -> str | None:
             add_proc = await asyncio.create_subprocess_exec(
                 "git", "-C", str(root), "add", "-A",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+                start_new_session=True,
             )
-            await asyncio.wait_for(add_proc.communicate(), timeout=_WRITE_TREE_TIMEOUT)
+            try:
+                await asyncio.wait_for(add_proc.communicate(), timeout=_WRITE_TREE_TIMEOUT)
+            except asyncio.TimeoutError:
+                await _kill_process_group(add_proc)
+                return None
             if add_proc.returncode != 0:
                 return None
 
             wt_proc = await asyncio.create_subprocess_exec(
                 "git", "-C", str(root), "write-tree",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+                start_new_session=True,
             )
-            wt_out, _wt_err = await asyncio.wait_for(wt_proc.communicate(), timeout=_WRITE_TREE_TIMEOUT)
+            try:
+                wt_out, _wt_err = await asyncio.wait_for(wt_proc.communicate(), timeout=_WRITE_TREE_TIMEOUT)
+            except asyncio.TimeoutError:
+                await _kill_process_group(wt_proc)
+                return None
             if wt_proc.returncode != 0:
                 return None
 

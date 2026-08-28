@@ -51,7 +51,10 @@ import tempfile
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from fcntl import LOCK_EX, flock
 from pathlib import Path
+
+from .capture import clean_git_env
 
 DEFAULT_RUN_REF_PREFIX = "refs/provenance/runs"
 DEFAULT_WIP_REF_PREFIX = "refs/provenance/wip"
@@ -108,7 +111,7 @@ class PinResult:
 def _git(
     *args: str, cwd: Path, env_extra: dict[str, str] | None = None, check: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, **(env_extra or {})}
+    env = {**clean_git_env(), **(env_extra or {})}
     return subprocess.run(
         ["git", *args], cwd=cwd, text=True, capture_output=True, env=env, check=check
     )
@@ -126,14 +129,15 @@ def repo_root(cwd: Path) -> Path | None:
     return Path(root) if root else None
 
 
-def ignored_provenance_paths(cwd: Path, provenance_paths: tuple[str, ...] = ()) -> tuple[str, ...]:
+def ignored_provenance_paths(cwd: Path, provenance_paths: tuple[str, ...] = (), root: Path | None = None) -> tuple[str, ...]:
     """Which of `provenance_paths` this repo is configured to IGNORE.
 
     A non-empty result is a configuration bug worth surfacing loudly: it means
     a manifest or claim written there will never be committed, so the
     artifact a run's provenance points at is silently discarded.
     """
-    root = repo_root(cwd)
+    if root is None:
+        root = repo_root(cwd)
     if root is None or not provenance_paths:
         return ()
     ignored = []
@@ -156,10 +160,14 @@ class SnapshotResult:
 
 
 def snapshot_worktree_detailed(
-    run_id: str, cwd: Path, max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES
+    run_id: str, cwd: Path, max_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES, root: Path | None = None,
+    identity_name: str = "cisternal-provenance",
+    identity_email: str = "cisternal-provenance@localhost",
+    commit_message_template: str = "cisternal provenance snapshot for run {run_id}",
 ) -> SnapshotResult:
     """Capture the working tree, degrading explicitly when it is too large to store."""
-    root = repo_root(cwd)
+    if root is None:
+        root = repo_root(cwd)
     if root is None:
         return SnapshotResult()
 
@@ -167,6 +175,13 @@ def snapshot_worktree_detailed(
     if head.returncode != 0:
         return SnapshotResult()  # unborn branch: nothing to parent a snapshot onto
     parent = head.stdout.strip()
+
+    identity_env = {
+        "GIT_AUTHOR_NAME": identity_name,
+        "GIT_AUTHOR_EMAIL": identity_email,
+        "GIT_COMMITTER_NAME": identity_name,
+        "GIT_COMMITTER_EMAIL": identity_email,
+    }
 
     with tempfile.TemporaryDirectory(prefix="cisternal-provenance-index-") as tmpdir:
         index_env = {"GIT_INDEX_FILE": str(Path(tmpdir) / "index")}
@@ -192,10 +207,11 @@ def snapshot_worktree_detailed(
         if tree_sha == _git("rev-parse", f"{parent}^{{tree}}", cwd=root).stdout.strip():
             return SnapshotResult()
 
+        commit_message = commit_message_template.format(run_id=run_id)
         commit = _git(
             "commit-tree", tree_sha, "-p", parent, "-m",
-            f"cisternal provenance snapshot for run {run_id}",
-            cwd=root, env_extra={**index_env, **_IDENTITY_ENV},
+            commit_message,
+            cwd=root, env_extra={**index_env, **identity_env},
         )
         if commit.returncode != 0:
             return SnapshotResult()
@@ -210,13 +226,14 @@ def snapshot_worktree(run_id: str, cwd: Path) -> str | None:
     return snapshot_worktree_detailed(run_id, cwd).commit or None
 
 
-def update_ref(ref: str, sha: str, cwd: Path) -> bool:
+def update_ref(ref: str, sha: str, cwd: Path, root: Path | None = None) -> bool:
     """Point `ref` at `sha`, then READ IT BACK. Returns whether the ref really resolves.
 
     Verifying rather than trusting `update-ref`'s exit code is the difference
     between recording that something is durable and knowing it is.
     """
-    root = repo_root(cwd)
+    if root is None:
+        root = repo_root(cwd)
     if root is None or not sha:
         return False
     if _git("update-ref", ref, sha, cwd=root).returncode != 0:
@@ -265,14 +282,17 @@ def append_manifest(entry: dict, cwd: Path, manifest_relpath: Path = DEFAULT_MAN
     path = root / manifest_relpath
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        lock_path = path.parent / ".manifest.lock"
+        with lock_path.open("a", encoding="utf-8") as lock_file:
+            flock(lock_file.fileno(), LOCK_EX)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
     except OSError:
         return None
     return path
 
 
-def ignored_declared_paths(paths: list[str] | tuple[str, ...], cwd: Path) -> tuple[str, ...]:
+def ignored_declared_paths(paths: list[str] | tuple[str, ...], cwd: Path, root: Path | None = None) -> tuple[str, ...]:
     """Which of the caller's DECLARED load-bearing paths this repo ignores.
 
     `git add -A` respects `.gitignore`, so a file that matters but is ignored
@@ -280,14 +300,15 @@ def ignored_declared_paths(paths: list[str] | tuple[str, ...], cwd: Path) -> tup
     WAS declared is capturable -- an undeclared input read at runtime is
     beyond what this can see.
     """
-    root = repo_root(cwd)
+    if root is None:
+        root = repo_root(cwd)
     if root is None or not paths:
         return ()
     ignored = []
     for raw in paths:
         if not raw:
             continue
-        result = _git("check-ignore", "-q", str(raw), cwd=root)
+        result = _git("check-ignore", "-q", "--no-index", str(raw), cwd=root)
         if result.returncode == 0:
             ignored.append(str(raw))
     return tuple(ignored)
@@ -306,6 +327,9 @@ def pin_run(
     run_ref_prefix: str = DEFAULT_RUN_REF_PREFIX,
     wip_ref_prefix: str = DEFAULT_WIP_REF_PREFIX,
     manifest_relpath: Path = DEFAULT_MANIFEST_RELPATH,
+    identity_name: str = "cisternal-provenance",
+    identity_email: str = "cisternal-provenance@localhost",
+    commit_message_template: str = "cisternal provenance snapshot for run {run_id}",
 ) -> PinResult:
     """Durably record one run's provenance. Never raises; degrades to a partial result.
 
@@ -322,12 +346,13 @@ def pin_run(
     names, or guess a default export directory name that only made sense for
     one tool's layout.
     """
+    computed_root = repo_root(cwd)
     result = PinResult(
-        ignored_provenance_paths=ignored_provenance_paths(cwd, provenance_paths),
-        ignored_declared_paths=ignored_declared_paths(declared_paths, cwd),
+        ignored_provenance_paths=ignored_provenance_paths(cwd, provenance_paths, root=computed_root),
+        ignored_declared_paths=ignored_declared_paths(declared_paths, cwd, root=computed_root),
     )
 
-    if repo_root(cwd) is None:
+    if computed_root is None:
         result.unpinned_reason = "not a git repository"
         return result
     if not git_hash or git_hash == "unknown":
@@ -336,14 +361,18 @@ def pin_run(
 
     pinned_sha = git_hash
     if dirty:
-        snap = snapshot_worktree_detailed(run_id, cwd, max_bytes=max_snapshot_bytes)
+        snap = snapshot_worktree_detailed(
+            run_id, cwd, max_bytes=max_snapshot_bytes, root=computed_root,
+            identity_name=identity_name, identity_email=identity_email,
+            commit_message_template=commit_message_template,
+        )
         result.snapshot_mode = snap.mode
         result.skipped_bytes = snap.skipped_bytes
         result.skipped_paths = snap.skipped_paths
         if snap.commit:
             result.wip_commit = snap.commit
             wip_ref = f"{wip_ref_prefix}/{run_id}"
-            if update_ref(wip_ref, snap.commit, cwd):
+            if update_ref(wip_ref, snap.commit, cwd, root=computed_root):
                 result.wip_ref = wip_ref
                 result.wip_ref_ok = True
             else:
@@ -355,7 +384,7 @@ def pin_run(
             )
 
     run_ref = f"{run_ref_prefix}/{run_id}"
-    if update_ref(run_ref, pinned_sha, cwd):
+    if update_ref(run_ref, pinned_sha, cwd, root=computed_root):
         result.run_ref = run_ref
         result.run_ref_ok = True
     else:

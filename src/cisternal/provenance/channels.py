@@ -22,6 +22,7 @@ import warnings as _warnings
 from dataclasses import dataclass
 from pathlib import Path
 
+from .capture import compute_dirty_content_id
 from .record import PROVENANCE_FILENAME, _VALID_PROVENANCE_STATUSES
 
 
@@ -176,7 +177,7 @@ def _git_shellout_with_toplevel(cwd: str | Path) -> tuple[str, str, bool, str] |
         return None
 
 
-def capture_git_state(cwd: Path = Path.cwd()) -> GitState:
+def capture_git_state(cwd: Path | None = None) -> GitState:
     """Capture git provenance from multiple channels with defined precedence.
 
     D6 precedence:
@@ -187,6 +188,7 @@ def capture_git_state(cwd: Path = Path.cwd()) -> GitState:
     Never raises (C6).
     """
     try:
+        cwd = cwd if cwd is not None else Path.cwd()
         cwd_str = str(cwd)
 
         env_prov = _env_channel(cwd_str)
@@ -205,8 +207,11 @@ def capture_git_state(cwd: Path = Path.cwd()) -> GitState:
         if git_info is not None:
             hash_, branch, dirty, toplevel = git_info
             if _same_root(toplevel, prov.get("root") or ""):
+                dirty_content_id: str | None = None
+                if dirty:
+                    dirty_content_id = compute_dirty_content_id(Path(toplevel))
                 return GitState(
-                    hash=hash_, branch=branch, dirty=dirty, dirty_content_id=None,
+                    hash=hash_, branch=branch, dirty=dirty, dirty_content_id=dirty_content_id,
                     provenance_source="git",
                 )
 
