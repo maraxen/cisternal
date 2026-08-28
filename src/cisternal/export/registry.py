@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 from collections.abc import Callable
 from importlib.metadata import entry_points
@@ -12,6 +13,9 @@ from cisternal.export.base import Emitter
 from cisternal.export.claude import ClaudeEmitter
 from cisternal.export.copilot import CopilotEmitter
 from cisternal.export.cursor import CursorEmitter
+from cisternal.export.jcode import JCodeEmitter
+from cisternal.export.opencode import OpenCodeEmitter
+from cisternal.export.pi import PiEmitter
 
 _log = logging.getLogger("cisternal.export.registry")
 
@@ -33,13 +37,29 @@ def antigravity_factory(**_kwargs: Any) -> AntigravityEmitter:
     return AntigravityEmitter()
 
 
+def opencode_factory(**_kwargs: Any) -> OpenCodeEmitter:
+    return OpenCodeEmitter()
+
+
+def pi_factory(**_kwargs: Any) -> PiEmitter:
+    return PiEmitter()
+
+
+def jcode_factory(**_kwargs: Any) -> JCodeEmitter:
+    return JCodeEmitter()
+
+
 def _builtin_factories() -> dict[str, Callable[..., Emitter]]:
     return {
         "antigravity": antigravity_factory,
         "claude": claude_factory,
         "copilot": copilot_factory,
         "cursor": cursor_factory,
+        "jcode": jcode_factory,
+        "opencode": opencode_factory,
+        "pi": pi_factory,
     }
+
 
 
 def _load_entry_point_factories() -> dict[str, Callable[..., Emitter]]:
@@ -47,8 +67,14 @@ def _load_entry_point_factories() -> dict[str, Callable[..., Emitter]]:
     try:
         eps = entry_points(group=_ENTRY_POINT_GROUP)
     except TypeError:
-        # Python <3.10 compatibility path not needed (requires-python >=3.13).
-        eps = entry_points().select(group=_ENTRY_POINT_GROUP)
+        try:
+            eps = importlib.metadata.entry_points().select(group=_ENTRY_POINT_GROUP)
+        except Exception:
+            _log.warning("cisternal.export.registry: entry_points failed", exc_info=True)
+            return factories
+    except Exception:
+        _log.warning("cisternal.export.registry: entry_points query failed", exc_info=True)
+        return factories
 
     for ep in eps:
         try:
@@ -82,9 +108,10 @@ def get_emitter(surface: str, *, emit_command_bodies: bool = False) -> Emitter |
     if factory is None:
         return None
     try:
-        if surface == "claude":
+        try:
             return factory(emit_command_bodies=emit_command_bodies)
-        return factory()
+        except TypeError:
+            return factory()
     except Exception:
         _log.warning(
             "cisternal.export.registry: factory for surface %r failed",
@@ -92,3 +119,4 @@ def get_emitter(surface: str, *, emit_command_bodies: bool = False) -> Emitter |
             exc_info=True,
         )
         return None
+

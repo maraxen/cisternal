@@ -20,6 +20,10 @@ def test_hooks_for_surface_empty_means_all() -> None:
     assert hooks_for_surface((spec,), "cursor") == (spec,)
     assert hooks_for_surface((spec,), "copilot") == (spec,)
     assert hooks_for_surface((spec,), "antigravity") == (spec,)
+    assert hooks_for_surface((spec,), "opencode") == (spec,)
+    assert hooks_for_surface((spec,), "pi") == (spec,)
+    assert hooks_for_surface((spec,), "jcode") == (spec,)
+
 
 
 def test_hooks_for_surface_filters_by_token() -> None:

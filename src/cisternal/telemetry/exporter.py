@@ -110,6 +110,11 @@ class JsonlExporter(ExporterBase):
                     "session_id": record.session_id,
                     "phase": record.phase,
                     "fields": record.fields,
+                    "git_hash": record.git_hash,
+                    "git_branch": record.git_branch,
+                    "git_dirty": record.git_dirty,
+                    "git_dirty_content_id": record.git_dirty_content_id,
+                    "git_provenance_source": record.git_provenance_source,
                 }
                 # Log as JSON (RotatingFileHandler will append newline)
                 json_str = json.dumps(data, default=str)

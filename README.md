@@ -5,7 +5,8 @@
 Cisternal is a shared telemetry substrate and agent-asset export toolkit for the Praxia tool family. It has two parts:
 
 - **Telemetry** — a lightweight, non-blocking event pipeline (JSONL export, OTLP export, MCP-tool registration wrapper) for instrumenting Python tools and MCP servers.
-- **Agent-asset export** — a CLI that takes a registry of MCP tools/commands and emits native plugin/config bundles for downstream coding-agent surfaces: Claude Code, Cursor, GitHub Copilot, and Antigravity.
+- **Agent-asset export** — a CLI that takes a registry of MCP tools/commands and emits native plugin/config bundles for downstream coding-agent surfaces: Claude Code, Cursor, GitHub Copilot, Antigravity, OpenCode, Pi, and JCode.
+
 
 ## Install
 
@@ -106,7 +107,8 @@ bypass). To remove it later: `claude plugin uninstall
 my-plugin@my-plugin-marketplace` and `claude plugin marketplace remove
 my-plugin-marketplace`.
 
-Supported export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**.
+Supported export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**, **OpenCode**, **Pi**, **JCode**.
+
 
 The CLI is fastmcp-free by design — `cisternal.cli` imports and runs even in environments without `fastmcp` installed; asset-export logic never depends on the telemetry/registration surface.
 

@@ -14,7 +14,16 @@ FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "manifest_minimal" / ".praxia" / "manifest.toml"
 )
 SELF_MANIFEST = Path(".praxia/manifest.toml")
-_SURFACES = ("claude", "cursor", "copilot", "antigravity")
+_SURFACES = (
+    "antigravity",
+    "claude",
+    "copilot",
+    "cursor",
+    "jcode",
+    "opencode",
+    "pi",
+)
+
 
 
 def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:

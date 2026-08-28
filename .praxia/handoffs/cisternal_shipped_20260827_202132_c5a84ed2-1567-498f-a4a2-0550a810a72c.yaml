@@ -1,0 +1,102 @@
+---
+workspace: cisternal
+session_id: c5a84ed2-1567-498f-a4a2-0550a810a72c
+status: complete
+summary: Merged PR #29 to main -- three new export surfaces (JCode/OpenCode/Pi), all 23 pre-existing `ty check src/` diagnostics fixed for real (no suppressions), GitHub issues #18 and #28 closed, a new git-provenance telemetry module (capture_git_state + Record wiring), and two CI-blocking pre-existing bugs root-caused and fixed (stale self-manifest golden digests; a real cross-file test-isolation bug in a fastmcp-masking test). Full suite: 669 passed, 0 failures. Note -- the user has a more complete version of the git-provenance work developing in a parallel session; do not extend cisternal's git_state.py further without checking that session first.
+immediately_relevant:
+- file: src/cisternal/telemetry/git_state.py
+  lines:
+  - 1
+  - 50
+  reason: New capture_git_state()/GitState -- canonical local git provenance capture (hash/branch/dirty/dirty_content_id/provenance_source/toplevel). Uses a throwaway git index (git add -A against a temp GIT_INDEX_FILE, then write-tree) so dirty_content_id reflects unstaged AND untracked changes -- a bare write-tree alone silently returns the same tree OID regardless of working-tree edits (caught by a test written against exactly that case).
+- file: .praxia/docs/specs/260827_git-provenance-telemetry.md
+  lines:
+  - 1
+  - 40
+  reason: Full spec + rollout sequence for consolidating bathos's git.py and myxcel's provenance.py to delegate their local-shellout tiers to cisternal's capture_git_state(). Not started -- read this before touching either repo, and note the parallel-session caveat above.
+- file: src/cisternal/telemetry/context.py
+  lines:
+  - 29
+  - 65
+  reason: get_git_state()/_set_git_state() -- deliberately a plain global, NOT a ContextVar, despite every other piece of context in this file being one. A ContextVar.set() from init()'s thread is invisible to _build_record() calls on every OTHER thread; caught by a cross-thread test in tests/test_core.py::TestGitProvenanceWiring.
+- file: tests/test_cli_assets.py
+  lines:
+  - 293
+  - 362
+  reason: test_modules_importable_with_fastmcp_masked -- has a two-layer sys.modules-plus-parent-attribute fix with a long docstring explaining a real, hard-to-diagnose cross-file test-isolation bug (monkeypatch.setattr resolves dotted paths via attribute-walking from the top package, not via sys.modules). Read the docstring in full before modifying this test again -- a naive fix (sys.modules-only) looks correct and silently reintroduces the bug.
+- file: src/cisternal/cli.py
+  lines:
+  - 860
+  - 900
+  reason: validate_assets's golden-slug-skip and empty-bundle-content check (issue #28), and _load_export_bundle's empty-registry error path (also #28, reverses the old AC-M3-8b warn-and-succeed behavior per explicit user decision).
+- file: src/cisternal/registration/wired.py
+  lines:
+  - 165
+  - 200
+  reason: wire()'s server=None symmetric null-check fix (issue #18) -- mirrors the existing app=None guard.
+active_dispatches: []
+task_id: 260827_cisternal-export-surfaces-and-fixes
+phase: shipped
+goal_statement: Add JCode/OpenCode/Pi agent-asset export surfaces to cisternal with full code-review and type-check hygiene, close out two open GitHub issues found relevant along the way, scope and implement git provenance in cisternal's telemetry substrate, and get the resulting PR to a clean, mergeable CI state.
+context_refs: []
+failed_attempts:
+- attempt_id: a1
+  description: capture_git_state()'s dirty_content_id used a bare `git write-tree` (no throwaway index) against the real repo index to get a content-addressable id for a dirty working tree
+  outcome: A test asserting two different uncommitted edits at the same commit produce different dirty_content_id values failed -- both edits produced the identical tree OID
+  reason_failed: git write-tree operates on the current INDEX, not the working directory; an edit that was never `git add`ed leaves the index (and thus the tree OID) unchanged regardless of what the working tree actually contains. Fixed by mirroring myxcel's algorithm -- copy the real index to a temp file, set GIT_INDEX_FILE to it, `git add -A` into the throwaway index, then write-tree against that.
+  do_not_retry: true
+  evidence_ref: tests/test_telemetry_git_state.py::test_dirty_content_id_distinguishes_different_dirty_states
+- attempt_id: a2
+  description: Stored captured git state in a ContextVar (git_state_var), matching every other piece of context in telemetry/context.py (session_id_var, task_id_var, etc.), set once by init_pipeline() on whichever thread called init()
+  outcome: A Record built by _build_record() on a DIFFERENT thread than the one that called init() had None git fields, even though init() had already run and captured real git state
+  reason_failed: ContextVars are thread/task-local by design -- correct for per-request context that must stay isolated, wrong for a process-global constant like git state. A ContextVar.set() in one thread's context is invisible to code running in any other thread's context. Fixed by using a plain module-level global (get_git_state()/_set_git_state()) instead, mirroring pipeline.py's own _global_pipeline pattern.
+  do_not_retry: true
+  evidence_ref: tests/test_core.py::TestGitProvenanceWiring::test_git_state_visible_from_a_different_thread
+- attempt_id: a3
+  description: Captured git state synchronously inside init_pipeline()'s critical section, before starting the heartbeat thread
+  outcome: Several heartbeat-timing tests in test_selfcheck.py started failing (heartbeat_alive=False when expected True, listener-death-detection false negatives) when running the git-provenance changes alongside the existing suite
+  reason_failed: capture_git_state() measured ~70ms in a dirty repo (multiple git subprocess spawns); doing this synchronously inside init_pipeline() delayed heartbeat-thread startup enough to blow past the tight sleep windows several timing-sensitive tests assume. Fixed by running the capture in a background daemon thread instead, so init_pipeline() returns promptly; a Record built before the background capture completes just gets None git fields (a valid, already-designed degraded state per AC-4).
+  do_not_retry: true
+  evidence_ref: tests/test_core.py::TestGitProvenanceWiring::test_init_returns_promptly_despite_background_capture
+- attempt_id: a4
+  description: In test_modules_importable_with_fastmcp_masked, forced a fresh module import via `sys.modules.pop(module_name, None)` to test importability with fastmcp masked
+  outcome: 4 tests in tests/test_export_registry.py and tests/test_export_write.py failed intermittently, ONLY when running the full test suite (never in isolation) -- monkeypatch.setattr calls in those files appeared to silently no-op
+  reason_failed: A bare sys.modules.pop() is never undone (no monkeypatch tracking), permanently swapping sys.modules[module_name] for a fresh module object for the rest of the test session. Worse: even after switching to monkeypatch.delitem (which DOES correctly revert the sys.modules dict entry at teardown), the bug persisted -- because monkeypatch.setattr("dotted.path", ...) resolves its target via ATTRIBUTE-WALKING from the top-level package (_pytest.monkeypatch.resolve: __import__ + getattr chain), never consulting sys.modules. The parent package's submodule attribute (e.g. cisternal.export's own .registry attribute) gets set to the fresh module as an unavoidable side effect of import machinery and is never reverted by anything, so it silently diverges from the (correctly-reverted) sys.modules entry -- any later monkeypatch.setattr on that dotted path patches the orphaned fresh module while already-imported code (bound at other files' own collection time) keeps using the stale, unpatched original.
+  do_not_retry: true
+  evidence_ref: tests/test_cli_assets.py::test_modules_importable_with_fastmcp_masked (see its full docstring)
+- attempt_id: a5
+  description: Fixed a4 by capturing the parent package's original submodule attribute, then using monkeypatch.setattr(parent, submodule_attr, original_attr) to restore it
+  outcome: Still failed -- identical symptom to a4, confirmed with a minimal 2-test repro isolating just this mechanism
+  reason_failed: monkeypatch.setattr doesn't just set the value -- it ALSO schedules its OWN teardown to revert back to whatever was there at the moment of THIS call (the orphaned fresh module), undoing the "restore" the instant the test's own monkeypatch fixture tears down. The fix must use a plain setattr() (untracked by monkeypatch) for this specific restoration, since it needs to be permanent, not itself reverted.
+  do_not_retry: true
+  evidence_ref: tests/test_cli_assets.py::test_modules_importable_with_fastmcp_masked (see its full docstring)
+open_questions:
+- Is the user's parallel-session git-provenance work going to replace or merge with cisternal's src/cisternal/telemetry/git_state.py entirely, or extend it? Check before doing any further work there.
+deferred:
+- description: Consolidate bathos's src/bathos/git.py (local-shellout tier) and myxcel's src/myxcel/provenance.py (local capture + dirty_content_id computation) to delegate to cisternal.telemetry.git_state.capture_git_state(), per the spec's rollout sequence
+  rationale: Cross-repo work in /home/marielle/projects/bathos and /home/marielle/projects/myxcel; this session's cisternal worktree could read but not safely edit those repos, and the user has since said a parallel session is developing the git-provenance feature more completely -- avoid duplicating or conflicting with that work
+  recommended_phase: null
+- description: contemplex adopting git provenance (has none currently, unlike bathos/myxcel)
+  rationale: Explicitly out of scope in the spec; flagged as a known follow-up, not requested
+  recommended_phase: null
+- description: A schema_version field on cisternal's telemetry Record, hostname/pid embedded in the Record itself (currently only in the JSONL filename), and a cisternal-package-version field
+  rationale: Valid gaps noted during the telemetry scoping pass but deliberately not bundled into the git-provenance change
+  recommended_phase: null
+- description: bathos's dependency_lock_sha256 pattern (hashing the lockfile alongside git state) generalized into cisternal
+  rationale: A good complementary reproducibility signal bathos already has, but possibly out of scope for a generic substrate rather than something every consumer needs -- noted, not decided
+  recommended_phase: null
+- description: 'Issue #30: wire()''s CLI passthrough has no room for rich contracts (custom exit codes per exception type, Rich console formatting, multi-tool orchestration per CLI command) -- two independent consumers (alphex, redsox) each hand-rolled a separate CLI instead of using wire()''s cyclopts mounting for exactly this reason'
+  rationale: Real gap, but needs an API design decision (the issue sketches a CliContract shape but calls it "not prescriptive") before implementing -- not a quick bugfix like #18/#28 were
+  recommended_phase: null
+- description: 'Issue #18''s secondary ask: pre-flight validation in wire() so a mid-loop failure for some OTHER reason (not the now-fixed server=None case) doesn''t leave one target (server or app) partially populated with tools while the other has none'
+  rationale: The issue itself calls this "Secondary" and speculative; the core reported bug (server=None AttributeError) is fully fixed without it
+  recommended_phase: null
+lessons_refs:
+- .praxia/lessons.jsonl
+next_steps:
+- Before any further git-provenance work in cisternal (or starting the bathos/myxcel consolidation), check in with the user's parallel session's more-complete implementation to avoid duplicate or conflicting work on src/cisternal/telemetry/git_state.py.
+- If proceeding with the bathos/myxcel consolidation independently: bathos's git.py local-shellout tier and myxcel's provenance.py local capture (including dirty_content_id) should delegate to cisternal.telemetry.git_state.capture_git_state() per .praxia/docs/specs/260827_git-provenance-telemetry.md's Design section. myxcel's call sites are async -- wrap via asyncio.to_thread() since capture_git_state() is sync. Add parity tests (AC-5/AC-6 in the spec) confirming byte-identical output to the pre-refactor implementations for the local (no-channel) case.
+- Issue #30 (wire() CLI passthrough enrichment) needs a design discussion on the API shape before implementation -- not started.
+- Issue #18's secondary pre-flight-validation ask is optional follow-up, not required.
+- PR #29 is merged (commit 8f06ede); this worktree/branch is done and can be cleaned up whenever convenient.
+---

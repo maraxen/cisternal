@@ -2,7 +2,8 @@
 
 AC-M3-8:
   - export --import <module> populates the registry in-process and emits files to tmp out dir.
-  - Empty registry → WARNING + exit 0.
+  - Empty registry + no --manifest → ERROR + exit 1 (reversed from the original
+    AC-M3-8b "WARNING + exit 0" per issue #28 -- see test_export_empty_registry_errors_and_exits_one).
   - --dry-run prints "path  sha256" lines and writes nothing.
   - import cisternal.cli works without fastmcp installed (fastmcp-free import path).
 
@@ -44,14 +45,14 @@ def _write_tool_module(tmp_path: Path, module_name: str, *, tool_names: list[str
     return module_file
 
 
-def _invoke_app(args: list[str]) -> None:
-    """Invoke the cisternal CLI app; raise AssertionError on non-zero exit."""
+def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
+    """Invoke the cisternal CLI app; raise AssertionError on unexpected exit."""
     from cisternal.cli import app
 
     with pytest.raises(SystemExit) as exc_info:
         app(args)
-    assert exc_info.value.code == 0, (
-        f"Expected exit code 0; got: {exc_info.value.code}"
+    assert exc_info.value.code == exit_code, (
+        f"Expected exit code {exit_code}; got: {exc_info.value.code}"
     )
 
 
@@ -72,7 +73,7 @@ def test_export_import_populates_registry_and_emits_files(
     ``cisternal.assets.source`` always sets ``body=""``), so they leave no
     trace in Claude's emitted files either. The "registry got populated"
     signal this test can still check is the absence of the empty-registry
-    WARNING (contrast ``test_export_empty_registry_emits_warning_and_exits_zero``)
+    WARNING (contrast ``test_export_empty_registry_errors_and_exits_one``)
     plus a valid plugin.json with the new (commands-free) shape.
     """
     module_name = "test_tools_for_cli_ac8a"
@@ -106,47 +107,44 @@ def test_export_import_populates_registry_and_emits_files(
 
 
 # ---------------------------------------------------------------------------
-# AC-M3-8b: empty registry → WARNING + exit 0
+# #28: empty registry + no --manifest → ERROR + exit 1
+#
+# Was AC-M3-8b (empty registry -> WARNING + exit 0) until #28: that behavior
+# looked like a successful handoff downstream while silently producing an
+# empty bundle. Reversed in favor of a loud failure -- see cli.py's
+# _load_export_bundle.
 # ---------------------------------------------------------------------------
 
 
-def test_export_empty_registry_emits_warning_and_exits_zero(
+def test_export_empty_registry_errors_and_exits_one(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Empty registry emits a WARNING to cisternal.cli and returns with exit 0."""
+    """Empty registry + no --manifest logs an ERROR to cisternal.cli and exits 1."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
     # _clear_all_registries autouse fixture ensures registry is empty.
-    with caplog.at_level(logging.WARNING, logger="cisternal.cli"):
-        _invoke_app(["assets", "export", "--out", str(out_dir)])
+    with caplog.at_level(logging.ERROR, logger="cisternal.cli"):
+        _invoke_app(["assets", "export", "--out", str(out_dir)], exit_code=1)
 
-    warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    error_messages = [r.message for r in caplog.records if r.levelno == logging.ERROR]
     assert any(
-        "empty" in str(m).lower() or "registry" in str(m).lower()
-        for m in warning_messages
-    ), f"Expected WARNING about empty registry; got: {warning_messages}"
+        "empty" in str(m).lower() and "manifest" in str(m).lower()
+        for m in error_messages
+    ), f"Expected ERROR about empty registry / missing --manifest; got: {error_messages}"
 
 
-def test_export_empty_registry_still_writes_valid_manifest(tmp_path: Path) -> None:
-    """Even with an empty registry, a valid (name-only) plugin.json is written."""
+def test_export_empty_registry_writes_nothing(tmp_path: Path) -> None:
+    """An empty registry + no --manifest export must not write any output --
+    the whole point of failing loudly is that nothing looks like a completed
+    handoff."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    _invoke_app(["assets", "export", "--out", str(out_dir)])
+    _invoke_app(["assets", "export", "--out", str(out_dir)], exit_code=1)
 
-    import json
-
-    plugin_file = out_dir / ".claude-plugin" / "plugin.json"
-    assert plugin_file.exists()
-    manifest = json.loads(plugin_file.read_text(encoding="utf-8"))
-    # Must have the always-present fields.
-    assert "name" in manifest
-    assert "version" in manifest
-    assert "description" in manifest
-    # commands key must be absent when empty.
-    assert "commands" not in manifest
+    assert not (out_dir / ".claude-plugin" / "plugin.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -199,11 +197,14 @@ def test_export_dry_run_prints_path_sha256(
 
 
 def test_export_dry_run_empty_registry_writes_nothing(tmp_path: Path) -> None:
-    """--dry-run with empty registry also writes nothing."""
+    """--dry-run with an empty registry + no --manifest also errors (#28) and
+    writes nothing -- the empty-bundle check fires before dry-run/writing
+    logic ever runs, so this is true for the same reason regardless of
+    --dry-run."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    _invoke_app(["assets", "export", "--dry-run", "--out", str(out_dir)])
+    _invoke_app(["assets", "export", "--dry-run", "--out", str(out_dir)], exit_code=1)
 
     all_written = list(out_dir.rglob("*"))
     assert all_written == [], f"--dry-run must write nothing; found: {all_written}"
@@ -215,22 +216,39 @@ def test_export_dry_run_empty_registry_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_export_custom_name_and_version(tmp_path: Path) -> None:
-    """--name and --version set the bundle metadata fields."""
+    """--name and --version set the bundle metadata fields.
+
+    Registers a tool via --import first: this test's purpose is orthogonal
+    to registry content, but an empty registry now errors (#28) rather than
+    silently exporting metadata-only, so it needs *something* registered to
+    reach the metadata-override logic being tested.
+    """
+    module_name = "test_tools_for_cli_ac8d"
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    _invoke_app(
-        [
-            "assets",
-            "export",
-            "--name",
-            "custom-plugin",
-            "--version",
-            "9.9.9",
-            "--out",
-            str(out_dir),
-        ]
-    )
+    _write_tool_module(tmp_path, module_name, tool_names=["name_version_tool"])
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        sys.modules.pop(module_name, None)
+        _invoke_app(
+            [
+                "assets",
+                "export",
+                "--import",
+                module_name,
+                "--name",
+                "custom-plugin",
+                "--version",
+                "9.9.9",
+                "--out",
+                str(out_dir),
+            ]
+        )
+    finally:
+        sys.path.remove(str(tmp_path))
+        sys.modules.pop(module_name, None)
 
     import json
 
@@ -270,3 +288,90 @@ def test_cli_importable_without_fastmcp() -> None:
     """import cisternal.cli must succeed (verified by import in-process)."""
     mod = importlib.import_module("cisternal.cli")
     assert hasattr(mod, "app"), "cisternal.cli must export 'app'"
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "cisternal.cli",
+        "cisternal.export.antigravity",
+        "cisternal.export.base",
+        "cisternal.export.claude",
+        "cisternal.export.copilot",
+        "cisternal.export.cursor",
+        "cisternal.export.hooks",
+        "cisternal.export.jcode",
+        "cisternal.export.marketplace",
+        "cisternal.export.opencode",
+        "cisternal.export.pi",
+        "cisternal.export.registry",
+        "cisternal.export.sink",
+        "cisternal.export.write",
+        "cisternal.assets.bridge",
+        "cisternal.assets.bundle",
+        "cisternal.assets.capability",
+        "cisternal.assets.composite",
+        "cisternal.assets.inspect_json",
+        "cisternal.assets.load",
+        "cisternal.assets.manifest",
+        "cisternal.assets.manifest_extensions",
+        "cisternal.assets.protocol",
+        "cisternal.assets.source",
+        "cisternal.assets.spec",
+        "cisternal.assets.validate_golden",
+    ],
+)
+
+def test_modules_importable_with_fastmcp_masked(
+    module_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec M4: verify module imports succeed even when fastmcp is not installed.
+
+    Forcing a fresh import has TWO places that need restoring afterward, not
+    one -- a bare `sys.modules.pop()` (or even `monkeypatch.delitem` on just
+    `sys.modules`) permanently orphans other code's already-bound references:
+
+    1. `sys.modules[module_name]` itself -- reverted via monkeypatch.delitem,
+       which correctly restores the dict entry at teardown.
+    2. The PARENT package's submodule attribute (e.g. `cisternal.export`'s
+       own `.registry` attribute) -- import machinery sets this as a side
+       effect of every import, and monkeypatch.delitem on `sys.modules`
+       does NOT touch it. This matters because `monkeypatch.setattr` on a
+       dotted string path (used throughout test_export_registry.py) resolves
+       its target via ATTRIBUTE WALKING from the top-level package
+       (`_pytest.monkeypatch.resolve`: `__import__("cisternal")` then
+       `getattr(.., "export")` then `getattr(.., "registry")`) -- it never
+       consults `sys.modules` directly. Left unreverted, that attribute
+       keeps pointing at this test's orphaned fresh module forever after,
+       so later `monkeypatch.setattr("cisternal.export.registry.X", ...)`
+       calls silently patch a module nothing else references, while
+       already-imported code (e.g. `from cisternal.export.registry import
+       get_emitter`, bound at test_export_registry.py's own collection
+       time) keeps using the stale, unpatched original -- a real,
+       hard-to-diagnose cross-file test-isolation bug, only visible when
+       running the full suite (confirmed by isolating it to this exact
+       mechanism with a minimal repro).
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "fastmcp", None)
+    monkeypatch.setitem(sys.modules, "fastmcp.server", None)
+    monkeypatch.setitem(sys.modules, "fastmcp.server.middleware", None)
+
+    parent_name, _, submodule_attr = module_name.rpartition(".")
+    parent = sys.modules.get(parent_name) if parent_name else None
+    original_attr = getattr(parent, submodule_attr, None) if parent is not None else None
+
+    # Force fresh import; the sys.modules entry is restored at teardown.
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    mod = importlib.import_module(module_name)
+    assert mod is not None
+
+    if parent is not None and original_attr is not None:
+        # Plain setattr, NOT monkeypatch.setattr: this restoration must be
+        # permanent. monkeypatch.setattr would instead schedule ITS OWN
+        # teardown to revert back to whatever was present at the moment of
+        # this call -- the orphaned fresh module -- undoing the fix.
+        setattr(parent, submodule_attr, original_attr)
+

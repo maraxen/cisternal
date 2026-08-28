@@ -40,7 +40,11 @@ def _build_write_result(
     """Compute per-file content_sha256 entries for *files*."""
     result: list[tuple[str, str]] = []
     for rel_path, contents in files.items():
-        sha = hashlib.sha256(contents.encode()).hexdigest()
+        try:
+            raw = contents.encode("utf-8", errors="surrogatepass")
+        except Exception:
+            raw = str(contents).encode("utf-8", errors="replace")
+        sha = hashlib.sha256(raw).hexdigest()
         result.append((rel_path, sha))
     return WriteResult(files=tuple(result), dry_run=dry_run)
 
@@ -79,19 +83,46 @@ class FileWriterSink(WriterSink):
         if dry_run:
             return write_result
 
+        try:
+            out_resolved = out.resolve()
+        except (OSError, RuntimeError) as exc:
+            _log.warning(
+                "cisternal.export: failed to resolve output root %s: %s",
+                out,
+                exc,
+            )
+            return write_result
+
         for rel_path, contents in files.items():
-            target = out / rel_path
             try:
+                rel_pure = Path(rel_path)
+                if ".." in rel_pure.parts or rel_pure.is_absolute():
+                    _log.warning(
+                        "cisternal.export: skipping unsafe path traversal attempt: %s",
+                        rel_path,
+                    )
+                    continue
+                target = (out / rel_path).resolve()
+                if not target.is_relative_to(out_resolved):
+                    _log.warning(
+                        "cisternal.export: skipping unsafe path traversal attempt: %s",
+                        rel_path,
+                    )
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(contents, encoding="utf-8")
-            except OSError as exc:
+                content_str = str(contents) if not isinstance(contents, str) else contents
+                target.write_text(content_str, encoding="utf-8", errors="surrogatepass")
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 _log.warning(
                     "cisternal.export: write_bundle failed to write %s: %s",
-                    target,
+                    rel_path,
                     exc,
                 )
 
         return write_result
+
+
+
 
 
 class MemoryWriterSink(WriterSink):

@@ -70,7 +70,7 @@ class CommandAsset:
     """A single command asset entry."""
 
     name: str
-    description: str | None
+    description: str | None = None
     body: str = ""
 
 

@@ -86,7 +86,7 @@ def init(
         heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
     """
     init_pipeline(
-        log_dir=log_dir,
+        log_dir=Path(log_dir) if log_dir is not None else None,
         max_bytes=max_bytes,
         backup_count=backup_count,
         exporters=exporters,
@@ -128,6 +128,15 @@ def _lazy_import(name: str) -> object:
 
 def __getattr__(name: str) -> object:
     return _lazy_import(name)
+
+
+def __dir__() -> list[str]:
+    # wire/WiredRegistry resolve via __getattr__ (deferred fastmcp import,
+    # above) rather than being bound in the module's own __dict__, so the
+    # default dir(module) -- which only reflects real __dict__ entries, not
+    # __all__ -- silently omits them (issue #18). Explicit __dir__ so
+    # "wire" in dir(cisternal) is True, matching __all__.
+    return sorted(set(globals()) | set(__all__))
 
 
 __all__ = [

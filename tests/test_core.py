@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from cisternal import emit_event, init, span, aspan, status
-from cisternal.telemetry.context import run_uuid_var
+from cisternal.telemetry.context import run_uuid_var, _set_git_state, _build_record
 from cisternal.telemetry.exporter import ShadowExporter
 
 
@@ -31,6 +31,12 @@ def cleanup_pipeline():
     if pipeline_module._global_pipeline is not None:
         pipeline_module._global_pipeline.shutdown()
         pipeline_module._global_pipeline = None
+
+    # Reset git provenance global (spec 260827) so one test's init()
+    # doesn't leak a populated git state into the next test -- especially
+    # important since it's captured in a background thread and could still
+    # be in flight when a test's own assertions run.
+    _set_git_state(None)
 
     # Reset heartbeat state
     with self_obs_module._heartbeat_lock:
@@ -428,3 +434,98 @@ class TestNonSerializable:
         # or it was silently dropped (never-raise)
         # The contract is: never crash the caller
         # So this test just verifies no exception propagates
+
+
+def _wait_for_git_state(timeout: float = 2.0) -> None:
+    """Poll until init()'s background git-state capture completes."""
+    from cisternal.telemetry.context import get_git_state
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if get_git_state() is not None:
+            return
+        time.sleep(0.005)
+    pytest.fail(f"git state was not captured within {timeout}s")
+
+
+class TestGitProvenanceWiring:
+    """Spec 260827, AC-3/AC-4: git provenance flows from init() into Record."""
+
+    def test_record_before_init_has_none_git_fields(self):
+        """AC-4: a Record built with no init() (git state uncaptured) has None
+        git fields -- never raises either way."""
+        record = _build_record("test.event")
+        assert record is not None
+        assert record.git_hash is None
+        assert record.git_branch is None
+        assert record.git_dirty is None
+        assert record.git_dirty_content_id is None
+        assert record.git_provenance_source is None
+
+    def test_record_after_init_has_populated_git_fields(self, temp_log_dir):
+        """AC-3: init() captures git state (in the background); a Record built
+        after capture completes carries non-None git_hash/git_branch/git_dirty."""
+        init(log_dir=temp_log_dir)
+        _wait_for_git_state()
+        record = _build_record("test.event")
+        assert record is not None
+        # This test suite runs inside the cisternal git repo, so provenance_source
+        # should be "git" (not the nogit/unavailable sentinels) -- but assert on
+        # the weaker, environment-independent invariant to avoid a flaky test
+        # if this ever runs from a tarball/non-repo checkout.
+        assert record.git_hash is not None
+        assert record.git_branch is not None
+        assert record.git_dirty is not None
+        assert record.git_provenance_source is not None
+
+    def test_emit_event_after_init_carries_git_fields(self, temp_log_dir):
+        """End-to-end: emit_event -> ShadowExporter record has git fields,
+        once the background capture has completed.
+
+        Filters by event name rather than asserting an exact record count:
+        a leftover heartbeat thread from an earlier test (started with a
+        short heartbeat_interval, whose reference cleanup_pipeline() forgets
+        without actually stopping the thread -- a pre-existing test-isolation
+        gap in self_obs.py, not something this test should paper over by
+        coincidentally passing) can inject extra "heartbeat" records here
+        when running the full suite.
+        """
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+        _wait_for_git_state()
+        emit_event("test.event")
+        time.sleep(0.05)
+        matching = [r for r in shadow.records if r.name == "test.event"]
+        assert len(matching) == 1
+        assert matching[0].git_hash is not None
+
+    def test_git_state_visible_from_a_different_thread(self, temp_log_dir):
+        """Git state captured during init() (on the main thread, via a
+        background capture thread) must be visible to _build_record() calls
+        on ANY thread -- not just whichever thread happened to call init().
+        A ContextVar would fail this (thread-local by design); the
+        process-global in context.py must not."""
+        import threading as _threading
+
+        init(log_dir=temp_log_dir)
+        _wait_for_git_state()
+
+        result: dict = {}
+
+        def _worker() -> None:
+            record = _build_record("test.event")
+            result["git_hash"] = record.git_hash if record is not None else None
+
+        worker = _threading.Thread(target=_worker)
+        worker.start()
+        worker.join(timeout=2.0)
+
+        assert result.get("git_hash") is not None
+
+    def test_init_returns_promptly_despite_background_capture(self, temp_log_dir):
+        """init() must not block on git-state capture (measured ~70ms in a
+        dirty repo) -- it should return in well under that."""
+        t0 = time.monotonic()
+        init(log_dir=temp_log_dir)
+        elapsed = time.monotonic() - t0
+        assert elapsed < 0.05, f"init() took {elapsed * 1000:.1f}ms, expected < 50ms"

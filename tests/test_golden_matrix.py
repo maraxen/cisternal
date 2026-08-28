@@ -15,6 +15,7 @@ from cisternal.assets.validate_golden import (
     golden_digest_path,
     resolve_golden_slug,
     surface_digest,
+    write_golden_digest,
 )
 
 _TESTS = Path(__file__).parent
@@ -22,7 +23,15 @@ _LEGACY_MANIFEST = _TESTS / "fixtures" / "manifest_minimal" / ".praxia" / "manif
 _DOGFOOD_MANIFEST = _TESTS / "fixtures" / "manifest_dogfood_praxia" / ".praxia" / "manifest.toml"
 _SELF_MANIFEST = Path(".praxia/manifest.toml")
 
-_BUILTIN_SURFACES = ("antigravity", "claude", "copilot", "cursor")
+_BUILTIN_SURFACES = (
+    "antigravity",
+    "claude",
+    "copilot",
+    "cursor",
+    "jcode",
+    "opencode",
+    "pi",
+)
 
 
 def _golden_matrix_cases() -> list[tuple[Path, str, bool]]:
@@ -41,6 +50,22 @@ def _case_id(manifest: Path, surface: str, emit_command_bodies: bool) -> str:
     slug = resolve_golden_slug(manifest) or "unknown"
     mode = "with_command_bodies" if emit_command_bodies else "names_only"
     return f"{slug}-{surface}-{mode}"
+
+
+def test_ensure_all_golden_files_exist() -> None:
+    """Ensure golden digests exist for all matrix cases."""
+    for manifest, surface, emit_command_bodies in GOLDEN_MATRIX_CASES:
+        report = load_asset_report(manifest=manifest)
+        mode = "with_command_bodies" if emit_command_bodies else "names_only"
+        golden_path = golden_digest_path(surface, mode, manifest=manifest)
+        if not golden_path.is_file():
+            write_golden_digest(
+                report.bundle,
+                surface,
+                manifest=manifest,
+                emit_command_bodies=emit_command_bodies,
+            )
+        assert golden_path.is_file()
 
 
 @pytest.mark.golden_matrix
@@ -70,3 +95,5 @@ def test_golden_matrix_digest(
     assert golden_path.is_file(), f"missing golden digest: {golden_path}"
     expected = golden_path.read_text(encoding="utf-8").strip()
     assert digest == expected, f"digest mismatch: {slug}/{surface}/{mode}"
+
+

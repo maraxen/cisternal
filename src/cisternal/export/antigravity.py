@@ -124,15 +124,19 @@ class AntigravityEmitter(Emitter):
         for skill in bundle.skills:
             if skill.body:
                 files[f"skills/{skill.name}/SKILL.md"] = format_skill_markdown(skill)
+                for resource_path, content in skill.resources:
+                    files[f"skills/{skill.name}/{resource_path}"] = content
+
 
         hook_specs = hooks_for_surface(bundle.hook_specs, "antigravity")
         if hook_specs:
-            for spec in hook_specs:
-                if spec.content:
-                    files[f"scripts/{spec.script}"] = spec.content
-
             hooks_root = build_antigravity_hooks(hook_specs, bundle.metadata.name)
-            files[_HOOKS_JSON_PATH] = json.dumps(hooks_root, sort_keys=True, indent=2)
+            if hooks_root.get(bundle.metadata.name):
+                files[_HOOKS_JSON_PATH] = json.dumps(hooks_root, sort_keys=True, indent=2)
+                for spec in hook_specs:
+                    if spec.content and spec.event in ("PreToolUse", "PostToolUse"):
+                        files[f"scripts/{spec.script}"] = spec.content
+
 
         if bundle.mcp_servers:
             mcp_servers: dict[str, object] = {}

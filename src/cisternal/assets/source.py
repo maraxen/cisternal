@@ -124,7 +124,9 @@ def _extract_params(tool_name: str, fn: object) -> tuple[str, ...]:
     here; the WARNING is the only distinguishing signal (PM-4).
     """
     try:
-        sig = inspect.signature(fn)  # type: ignore[arg-type]
+        if not callable(fn):
+            raise TypeError(f"{fn!r} is not callable")
+        sig = inspect.signature(fn)
         return tuple(sig.parameters)
     except Exception:
         _log.warning(
