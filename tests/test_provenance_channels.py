@@ -95,6 +95,103 @@ class TestEnvChannel:
         assert state.provenance_source == "myxcel-env"
         assert state.hash == "c" * 40
 
+    def test_linked_worktree_of_channel_root_beats_env_channel(self, tmp_path, monkeypatch):
+        """A linked worktree W of repo S, when given S as MYXCEL_PROVENANCE_ROOT,
+        should record W's HEAD (with source="git"), not S's HEAD from the channel."""
+        # Create primary repo S
+        s_dir = tmp_path / "S"
+        s_dir.mkdir()
+        primary = _init_repo(s_dir)
+
+        # Create a linked worktree W with a different commit
+        worktree_dir = tmp_path / "W"
+        subprocess.run(
+            ["git", "worktree", "add", str(worktree_dir), "-b", "test-branch"],
+            cwd=primary,
+            check=True,
+        )
+        # Make a different commit in the worktree
+        (worktree_dir / "b.txt").write_text("world\n")
+        subprocess.run(["git", "add", "b.txt"], cwd=worktree_dir, check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "worktree commit"],
+            cwd=worktree_dir,
+            check=True,
+        )
+
+        # Get the actual hashes
+        primary_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=primary,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        worktree_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        # Verify they are different
+        assert primary_head != worktree_head
+
+        # Set up env vars pointing to the primary repo S
+        monkeypatch.setenv("MYXCEL_PROVENANCE_SCHEMA", "1")
+        monkeypatch.setenv("MYXCEL_PROVENANCE_STATUS", "git")
+        monkeypatch.setenv("MYXCEL_GIT_SHA", primary_head)  # Primary's HEAD
+        monkeypatch.setenv("MYXCEL_GIT_BRANCH", "main")
+        monkeypatch.setenv("MYXCEL_PROVENANCE_ROOT", str(primary))
+
+        # Capture from worktree -- should get worktree's HEAD with source="git"
+        state = capture_git_state(worktree_dir)
+        assert state.provenance_source == "git", (
+            f"Expected source='git' (worktree's own HEAD) but got source='{state.provenance_source}' "
+            f"with hash={state.hash}. This is the bug: the channel won over the linked worktree."
+        )
+        assert state.hash == worktree_head, (
+            f"Expected hash={worktree_head} (worktree) but got {state.hash} (channel's primary HEAD)"
+        )
+
+    def test_unrelated_nested_repo_defers_to_env_channel(self, tmp_path, monkeypatch):
+        """A DIFFERENT repo nested inside the channel root (not a worktree of it)
+        should still defer to the channel."""
+        # Create channel root with env vars
+        channel_root = tmp_path / "S"
+        channel_root.mkdir()
+        primary = _init_repo(channel_root)
+
+        # Create an unrelated repo nested inside (vendor/other is NOT a worktree of primary)
+        nested = channel_root / "vendor" / "other"
+        nested.mkdir(parents=True)
+        nested_repo = _init_repo(nested)
+
+        # Get nested repo's HEAD
+        nested_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=nested_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        # Set up env vars pointing to channel root S (not the nested repo)
+        monkeypatch.setenv("MYXCEL_PROVENANCE_SCHEMA", "1")
+        monkeypatch.setenv("MYXCEL_PROVENANCE_STATUS", "git")
+        monkeypatch.setenv("MYXCEL_GIT_SHA", "n" * 40)  # Deliberately wrong
+        monkeypatch.setenv("MYXCEL_PROVENANCE_ROOT", str(channel_root))
+
+        # Capture from nested repo -- should use channel, not nested repo
+        # (because nested_repo.toplevel != channel_root)
+        state = capture_git_state(nested_repo)
+        assert state.provenance_source == "myxcel-env", (
+            f"A nested but unrelated repo should defer to the channel. "
+            f"Got source={state.provenance_source} instead."
+        )
+        assert state.hash == "n" * 40
+
 
 class TestSidecarChannel:
     def test_sidecar_used_when_no_git_and_no_env(self, tmp_path):
