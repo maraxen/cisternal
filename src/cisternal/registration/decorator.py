@@ -53,6 +53,8 @@ def tool(
     *,
     registry: str = "default",
     name: str | None = None,
+    cli_group: str | None = None,
+    cli_name: str | None = None,
 ) -> Callable[[NamedCallable], NamedCallable]: ...  # @tool(...)
 
 
@@ -61,6 +63,8 @@ def tool(
     *,
     registry: str = "default",
     name: str | None = None,
+    cli_group: str | None = None,
+    cli_name: str | None = None,
 ) -> Callable[..., Any]:
     """Pure metadata marker: register *fn* in the named registry.
 
@@ -70,19 +74,30 @@ def tool(
     is always True.
 
     Args:
-        fn:       The function to register.  Supplied positionally when the
-                  decorator is used bare (``@tool``).
-        registry: Which named registry partition to store the tool in.
-        name:     Override for the registered/exposed tool name. Defaults to
-                  ``fn.__name__``. Useful when the Python function name
-                  (e.g. an ``mcp_x_tool`` wrapper) differs from the name a
-                  consumer wants exposed to callers (e.g. ``x``).
+        fn:        The function to register.  Supplied positionally when the
+                   decorator is used bare (``@tool``).
+        registry:  Which named registry partition to store the tool in.
+        name:      Override for the registered/exposed tool name. Defaults to
+                   ``fn.__name__``. Useful when the Python function name
+                   (e.g. an ``mcp_x_tool`` wrapper) differs from the name a
+                   consumer wants exposed to callers (e.g. ``x``).
+        cli_group: Optional cyclopts sub-app name the CLI form of this tool
+                   should nest under (e.g. ``"campaign"`` for ``bth campaign
+                   add``). ``None`` (default) registers a flat top-level CLI
+                   command, matching every consumer's behavior before this
+                   parameter existed. Has no effect on the MCP surface.
+        cli_name:  Optional CLI-visible command name within *cli_group* (or
+                   top-level if *cli_group* is ``None``), independent of
+                   *name*. Defaults to *name* (or ``fn.__name__``) when
+                   omitted — lets the MCP tool name and CLI command name
+                   diverge (e.g. MCP ``campaign_list`` presented as CLI
+                   ``campaign ls``).
 
     Returns:
         The original *fn* (not a wrapper).
     """
     def _register_and_return(f: NamedCallable) -> NamedCallable:
-        register(f, registry=registry, name=name)
+        register(f, registry=registry, name=name, cli_group=cli_group, cli_name=cli_name)
         # Benign marker attr — does NOT change callable identity.
         cast(TaggedCallable, f).__cisternal_tool__ = True
         return f

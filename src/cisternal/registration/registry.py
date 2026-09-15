@@ -31,14 +31,21 @@ class ToolEntry:
     """Metadata record for a registered tool.
 
     Attributes:
-        name:     The tool name as stored in the registry (defaults to fn.__name__).
-        fn:       The original callable (unchanged by the decorator).
-        registry: The partition name the tool was registered in.
+        name:      The tool name as stored in the registry (defaults to fn.__name__).
+        fn:        The original callable (unchanged by the decorator).
+        registry:  The partition name the tool was registered in.
+        cli_group: Optional cyclopts sub-app name the CLI form nests under.
+                   ``None`` means a flat top-level CLI command (default,
+                   matches pre-existing behavior).
+        cli_name:  Optional CLI-visible command name within cli_group (or
+                   top-level). Defaults to ``name`` when ``None``.
     """
 
     name: str
     fn: Callable[..., Any]
     registry: str
+    cli_group: str | None = None
+    cli_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +116,8 @@ def register(
     *,
     registry: str = "default",
     name: str | None = None,
+    cli_group: str | None = None,
+    cli_name: str | None = None,
 ) -> None:
     """Insert *fn* into the named registry partition.
 
@@ -116,12 +125,21 @@ def register(
     callers should use the decorator instead.
 
     Args:
-        fn:       The callable to register.
-        registry: Partition name.  Defaults to ``"default"``.
-        name:     Override for the stored tool name.  Defaults to ``fn.__name__``.
+        fn:        The callable to register.
+        registry:  Partition name.  Defaults to ``"default"``.
+        name:      Override for the stored tool name.  Defaults to ``fn.__name__``.
+        cli_group: Optional cyclopts sub-app name the CLI form nests under.
+        cli_name:  Optional CLI-visible command name within cli_group (or
+                   top-level).  Defaults to ``name`` when ``None``.
     """
     tool_name = name if name is not None else fn.__name__
-    entry = ToolEntry(name=tool_name, fn=fn, registry=registry)
+    entry = ToolEntry(
+        name=tool_name,
+        fn=fn,
+        registry=registry,
+        cli_group=cli_group,
+        cli_name=cli_name,
+    )
     _registry(registry)[tool_name] = entry
 
 

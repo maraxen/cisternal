@@ -603,3 +603,87 @@ class TestServerNoneCliOnlyWiring:
 
         assert registry_result.mcp_tools == []
         assert registry_result.cli_commands == []
+
+
+# ---------------------------------------------------------------------------
+# CLI-side counterpart to AC-M2-15 (TestNameOverrideReachesServer, above):
+# a name= override must also reach the wired cyclopts App, not just FastMCP.
+# ---------------------------------------------------------------------------
+
+
+class TestCliNameOverrideReachesApp:
+    """A @tool(name=...) override must be the CLI command name cyclopts
+    actually registers, not fn.__name__ — the CLI-side counterpart to
+    TestNameOverrideReachesServer's MCP-side regression guard. Pre-existing
+    gap: wire()'s CLI branch has always used entry.name (now entry.cli_name
+    or entry.name) correctly, but no test asserted it."""
+
+    def test_wired_app_uses_name_override_not_fn_name(self):
+        @tool(name="list_runs")
+        def mcp_list_runs_tool(x: int) -> int:
+            return x
+
+        app = App(name="test-name-override-cli")
+        wire(None, app)
+
+        assert app["list_runs"].default_command is not None  # type: ignore[attr-defined]
+        with pytest.raises(KeyError):
+            app["mcp_list_runs_tool"]
+
+
+# ---------------------------------------------------------------------------
+# cli_group / cli_name: grouping and aliasing support
+# ---------------------------------------------------------------------------
+
+
+class TestCliGrouping:
+    """cli_group/cli_name let a tool's CLI form nest under a sub-App with a
+    locally-aliased name, independent of its MCP-visible registry name —
+    e.g. MCP tool 'campaign_list' presented as CLI 'campaign ls'."""
+
+    def test_grouped_aliased_tool_reachable_under_subapp(self):
+        @tool(name="campaign_list", cli_group="campaign", cli_name="ls")
+        def campaign_list_tool() -> dict:
+            return {}
+
+        app = App(name="bth")
+        result = wire(None, app)
+
+        assert result.cli_commands == ["campaign ls"]
+        assert app["campaign"]["ls"].default_command is not None  # type: ignore[attr-defined]
+        with pytest.raises(KeyError):
+            app["campaign_list"]
+
+    def test_two_tools_share_one_subapp_instance(self):
+        """Regression guard for the id(app)-keyed sub-app cache: two tools
+        in the same cli_group must land on ONE sub-App, not two separate
+        ones mounted under the same name."""
+
+        @tool(name="campaign_list", cli_group="campaign", cli_name="ls")
+        def campaign_list_tool() -> dict:
+            return {}
+
+        @tool(name="campaign_add", cli_group="campaign", cli_name="add")
+        def campaign_add_tool() -> dict:
+            return {}
+
+        app = App(name="bth")
+        wire(None, app)
+
+        campaign_subapp = app["campaign"]
+        assert campaign_subapp["ls"].default_command is not None  # type: ignore[attr-defined]
+        assert campaign_subapp["add"].default_command is not None  # type: ignore[attr-defined]
+
+    def test_ungrouped_tool_still_registers_flat(self):
+        """cli_group=None (the default, and every pre-existing consumer's
+        behavior) must still register a flat top-level command."""
+
+        @tool(name="run")
+        def run_tool() -> dict:
+            return {}
+
+        app = App(name="bth")
+        result = wire(None, app)
+
+        assert result.cli_commands == ["run"]
+        assert app["run"].default_command is not None  # type: ignore[attr-defined]

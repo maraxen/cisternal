@@ -48,6 +48,38 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger("cisternal.registration")
 
+# ---------------------------------------------------------------------------
+# CLI sub-app cache (grouping/aliasing support)
+# ---------------------------------------------------------------------------
+
+# Keyed by (id(parent_app), group_name) -> the cyclopts.App mounted under
+# that group on that parent. Repeated wire() calls against the SAME app
+# object (e.g. one call per registry partition targeting a shared CLI app)
+# must reuse the same sub-app rather than mounting a second one under the
+# same group name — cyclopts does not dedupe app.command(sub_app) calls.
+# Keying by id(app), not a global singleton, keeps test suites that
+# construct a fresh App() per test fully isolated from each other.
+_CLI_SUBAPPS: dict[tuple[int, str], Any] = {}
+
+
+def _get_or_create_subapp(app: Any, group_name: str) -> Any:
+    """Return the cyclopts sub-App mounted as *group_name* on *app*.
+
+    Creates and mounts a new ``cyclopts.App(name=group_name)`` on first use
+    for this ``(app, group_name)`` pair; subsequent calls (within the same
+    ``wire()`` call or across repeated ``wire()`` calls against the same
+    *app*) return the cached instance.
+    """
+    key = (id(app), group_name)
+    sub_app = _CLI_SUBAPPS.get(key)
+    if sub_app is None:
+        import cyclopts
+
+        sub_app = cyclopts.App(name=group_name)
+        app.command(sub_app)
+        _CLI_SUBAPPS[key] = sub_app
+    return sub_app
+
 
 # ---------------------------------------------------------------------------
 # WiredRegistry — observable/testable return value (TBD-M2-5)
@@ -62,7 +94,9 @@ class WiredRegistry:
         registry_name: The registry partition that was snapshotted.
         mcp_tools:     Names of tools registered on the FastMCP server.
         cli_commands:  Names of CLI commands registered on the cyclopts App
-                       (empty if *app* was not supplied to ``wire()``).
+                       (empty if *app* was not supplied to ``wire()``). A
+                       grouped command (``entry.cli_group`` set) is recorded
+                       as the space-joined ``"<group> <cli_name>"``.
     """
 
     registry_name: str
@@ -95,10 +129,13 @@ def wire(
            in a ``fastmcp.tools.Tool`` explicitly named ``entry.name`` (AC-M2-15
            -- this is NOT always the same as the callable's ``__name__``), and
            register it on *server* via ``server.add_tool(tool)``.
-        3. If *app* is given: register a CLI command per entry via
-           ``app.command(name=entry.name)(entry.fn)``.  The CLI callable is
-           a PASSTHROUGH to the original function; it does NOT emit telemetry
-           (C5 / AC-M2-6).
+        3. If *app* is given: register a CLI command per entry, named
+           ``entry.cli_name or entry.name``.  When ``entry.cli_group`` is
+           set, the command nests under a cached sub-``cyclopts.App`` for
+           that group (created and mounted on *app* on first use); otherwise
+           it registers flat on *app* directly (default, unchanged
+           behavior). The CLI callable is a PASSTHROUGH to the original
+           function; it does NOT emit telemetry (C5 / AC-M2-6).
         4. Validate *expected* names (AC-M2-9 / AC-M2-10).
         5. Return a :class:`WiredRegistry` instance (TBD-M2-5).
 
@@ -203,6 +240,7 @@ def wire(
             # Capture entry.fn in the closure to avoid late-binding.
             _fn = entry.fn
             _name = entry.name
+            _cli_name = entry.cli_name or entry.name
 
             def _make_cli_cmd(original_fn: Any) -> Any:
                 def _cli_cmd(*args: Any, **kwargs: Any) -> Any:
@@ -234,8 +272,13 @@ def wire(
                 return _cli_cmd
 
             cli_cmd = _make_cli_cmd(_fn)
-            app.command(name=_name)(cli_cmd)
-            cli_command_names.append(_name)
+            if entry.cli_group is not None:
+                target_app = _get_or_create_subapp(app, entry.cli_group)
+                target_app.command(name=_cli_name)(cli_cmd)
+                cli_command_names.append(f"{entry.cli_group} {_cli_name}")
+            else:
+                app.command(name=_cli_name)(cli_cmd)
+                cli_command_names.append(_cli_name)
 
     return WiredRegistry(
         registry_name=registry,
