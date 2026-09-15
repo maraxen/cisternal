@@ -161,7 +161,7 @@ class TestEnvChannel:
         # Create channel root with env vars
         channel_root = tmp_path / "S"
         channel_root.mkdir()
-        primary = _init_repo(channel_root)
+        _init_repo(channel_root)
 
         # Create an unrelated repo nested inside (vendor/other is NOT a worktree of primary)
         nested = channel_root / "vendor" / "other"
@@ -191,6 +191,7 @@ class TestEnvChannel:
             f"Got source={state.provenance_source} instead."
         )
         assert state.hash == "n" * 40
+        assert state.hash != nested_head, "nested repo's own HEAD must not win over the channel"
 
 
 class TestSidecarChannel:
