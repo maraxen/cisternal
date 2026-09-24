@@ -66,20 +66,34 @@ def timed_command(cmd_name: str | None = None):
             t0 = time.monotonic_ns()
             try:
                 result = fn(*args, **kwargs)
+            except BaseException as exc:
+                # BaseException, not Exception. A command that calls sys.exit()
+                # raises SystemExit and Ctrl-C raises KeyboardInterrupt --
+                # neither is an Exception, so the previous handler let both
+                # escape *after* cli.cmd_start had been emitted, leaving an
+                # unclosed span in the record. Every start now has an end.
                 duration_ms = (time.monotonic_ns() - t0) / 1e6
-                emit_event("cli.cmd_end", cmd=name, duration_ms=duration_ms, ok=True)
-                return result
-            except Exception as exc:
-                duration_ms = (time.monotonic_ns() - t0) / 1e6
-                emit_event(
-                    "cli.cmd_end",
-                    cmd=name,
-                    duration_ms=duration_ms,
-                    ok=False,
-                    exc_type=type(exc).__name__,
-                )
+                fields: dict = {
+                    "cmd": name,
+                    "duration_ms": duration_ms,
+                    "ok": False,
+                    "exc_type": type(exc).__name__,
+                }
+                if isinstance(exc, SystemExit):
+                    # A clean exit is not a failure. Recording it as one would
+                    # make every successful `--help` look like an error.
+                    code = exc.code
+                    fields["ok"] = code in (0, None)
+                    fields["exit_code"] = 0 if code is None else code
+                emit_event("cli.cmd_end", **fields)
                 raise
+            duration_ms = (time.monotonic_ns() - t0) / 1e6
+            emit_event("cli.cmd_end", cmd=name, duration_ms=duration_ms, ok=True)
+            return result
 
+        # Lets wire() detect a command a consumer already instrumented by hand,
+        # so it does not wrap a second time and emit every event twice.
+        wrapper._cisternal_timed = True  # type: ignore[attr-defined]
         return wrapper
 
     return decorator
