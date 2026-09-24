@@ -31,6 +31,7 @@ def test_publish_shared_writes_bundle_and_marketplace_entry(tmp_path: Path) -> N
             str(FIXTURE_MANIFEST),
             "--marketplace",
             str(marketplace),
+            "--no-refresh",
         ]
     )
 
@@ -60,6 +61,7 @@ def test_publish_shared_is_idempotent_and_prunes_stale_files(tmp_path: Path) -> 
         str(FIXTURE_MANIFEST),
         "--marketplace",
         str(marketplace),
+        "--no-refresh",
     ]
 
     _invoke_app(args)
@@ -112,6 +114,7 @@ def test_publish_shared_preserves_other_marketplace_entries(tmp_path: Path) -> N
             str(FIXTURE_MANIFEST),
             "--marketplace",
             str(marketplace),
+            "--no-refresh",
         ]
     )
 
@@ -131,6 +134,7 @@ def test_publish_shared_name_override(tmp_path: Path) -> None:
             str(FIXTURE_MANIFEST),
             "--marketplace",
             str(marketplace),
+            "--no-refresh",
             "--name",
             "renamed",
         ]

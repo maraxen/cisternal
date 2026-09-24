@@ -43,7 +43,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated
 
@@ -535,6 +535,21 @@ def publish_shared(
             help="Marketplace root (default: ~/.cisternal/claude-plugin-marketplace).",
         ),
     ] = Path("~/.cisternal/claude-plugin-marketplace").expanduser(),
+    refresh: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--refresh"],
+            help="After publishing, refresh Claude Code: update the marketplace listing and "
+            "update the plugin if it is installed (default: on; --no-refresh to skip).",
+        ),
+    ] = True,
+    claude_bin: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--claude-bin"],
+            help="Path to the claude CLI binary used by --refresh (default: 'claude').",
+        ),
+    ] = "claude",
 ) -> None:
     """Export this manifest's Claude plugin bundle into a SHARED, multi-tool marketplace.
 
@@ -559,10 +574,63 @@ def publish_shared(
     digest of the emitted bundle, so Claude Code's version-keyed plugin cache
     is busted exactly when — and only when — the bundle actually changes.
 
-    After this command, register the marketplace once per machine with
-    ``/plugin marketplace add <marketplace>`` inside Claude Code, then
-    ``/plugin install <name>@<marketplace-name>`` to install.
+    It also records where the bundle came from (``cisternal-source.json``), so
+    ``assets update-all`` can later republish every plugin from its own repo.
+
+    With ``--refresh`` (the default), a changed bundle is pushed into Claude
+    Code: ``claude plugin marketplace update`` then ``claude plugin update``
+    for an installed plugin; restart Claude Code to load it. The marketplace
+    itself must be registered once per machine
+    (``/plugin marketplace add <marketplace>``).
     """
+    result = _publish_shared_core(
+        manifest=manifest,
+        registry=registry,
+        name=name,
+        description=description,
+        marketplace=marketplace,
+    )
+    print(f"published {result.name}@{result.version} -> {result.out}")
+    print(f"marketplace: {marketplace}")
+    if refresh and _refresh_claude(marketplace, [result], claude_bin=claude_bin) != 0:
+        raise SystemExit(1)
+
+
+# Written next to plugin.json by publish-shared; read by update-all. Claude
+# Code ignores unknown files in .claude-plugin/.
+SOURCE_SIDECAR = "cisternal-source.json"
+
+
+@dataclass(frozen=True)
+class _PublishResult:
+    name: str
+    previous_version: str | None
+    version: str
+    out: Path
+
+    @property
+    def changed(self) -> bool:
+        return self.previous_version != self.version
+
+
+def _read_plugin_version(plugin_dir: Path) -> str | None:
+    try:
+        doc = json.loads((plugin_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = doc.get("version") if isinstance(doc, dict) else None
+    return version if isinstance(version, str) else None
+
+
+def _publish_shared_core(
+    *,
+    manifest: Path,
+    registry: str,
+    name: str | None,
+    description: str | None,
+    marketplace: Path,
+) -> _PublishResult:
+    """Export + scrub + write + merge one plugin; shared by publish-shared and update-all."""
     from cisternal.assets.bundle import AssetBundle, BundleMetadata  # noqa: PLC0415
     from cisternal.assets.load import load_asset_report  # noqa: PLC0415
     from cisternal.export.marketplace import (  # noqa: PLC0415
@@ -623,6 +691,7 @@ def publish_shared(
     files = emitter.emit(versioned_bundle)
 
     out = plugin_output_dir(marketplace, resolved_name)
+    previous_version = _read_plugin_version(out)
 
     # write_bundle does not prune stale files, so scrub any previous export
     # of this same plugin before writing the fresh one.
@@ -630,6 +699,15 @@ def publish_shared(
     out.mkdir(parents=True, exist_ok=True)
 
     write_bundle(files, out)
+    source = {
+        "manifest": str(manifest.expanduser().resolve()),
+        "registry": registry,
+        "name": name,
+        "description": description,
+    }
+    (out / ".claude-plugin" / SOURCE_SIDECAR).write_text(
+        json.dumps(source, indent=2) + "\n", encoding="utf-8"
+    )
 
     entry: dict[str, object] = {
         "name": resolved_name,
@@ -642,9 +720,178 @@ def publish_shared(
         seed=default_seed(),
         readme_template=_MARKETPLACE_README_TEMPLATE,
     )
+    return _PublishResult(
+        name=resolved_name, previous_version=previous_version, version=version, out=out
+    )
 
-    print(f"published {resolved_name}@{version} -> {out}")
-    print(f"marketplace: {marketplace}")
+
+def _refresh_claude(
+    marketplace: Path, results: list[_PublishResult], *, claude_bin: str
+) -> int:
+    """Push changed bundles into Claude Code. Returns a process exit code.
+
+    Only plugins whose content changed are touched; a published-but-not-installed
+    plugin gets an install hint rather than being installed unasked. A missing
+    ``claude`` binary is not an error (the publish itself succeeded) -- it
+    prints the equivalent slash commands instead.
+    """
+    changed = [r for r in results if r.changed]
+    if not changed:
+        print("claude: no plugin content changed; nothing to refresh")
+        return 0
+    try:
+        mkt_doc = json.loads(
+            (marketplace / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+        )
+        mkt_name = mkt_doc["name"]
+    except (OSError, ValueError, KeyError) as exc:
+        _log.error("cisternal.cli: cannot read marketplace name for refresh: %s", exc)
+        return 1
+
+    def manual_hint() -> None:
+        print(f"refresh manually in Claude Code: /plugin marketplace update {mkt_name}")
+        for r in changed:
+            print(f"  /plugin update {r.name}@{mkt_name}")
+
+    try:
+        listing = subprocess.run(
+            [claude_bin, "plugin", "list", "--json"], capture_output=True, text=True
+        )
+    except OSError as exc:
+        print(f"claude: could not run {claude_bin!r} ({exc})")
+        manual_hint()
+        return 0
+    if listing.returncode != 0:
+        print(f"claude: `plugin list` failed: {listing.stderr.strip()}")
+        manual_hint()
+        return 0
+    try:
+        installed = {p["id"] for p in json.loads(listing.stdout)}
+    except (ValueError, KeyError, TypeError):
+        print("claude: could not parse `plugin list --json` output")
+        manual_hint()
+        return 0
+
+    update = subprocess.run(
+        [claude_bin, "plugin", "marketplace", "update", mkt_name], capture_output=True, text=True
+    )
+    if update.returncode != 0:
+        _log.error(
+            "cisternal.cli: `claude plugin marketplace update %s` failed (exit %d): %s",
+            mkt_name, update.returncode, update.stderr.strip(),
+        )
+        return 1
+
+    failures = 0
+    for r in changed:
+        plugin_id = f"{r.name}@{mkt_name}"
+        if plugin_id not in installed:
+            print(f"{plugin_id}: published, not installed -- claude plugin install {plugin_id} --scope user")
+            continue
+        upd = subprocess.run(
+            [claude_bin, "plugin", "update", plugin_id], capture_output=True, text=True
+        )
+        if upd.returncode != 0:
+            _log.error(
+                "cisternal.cli: `claude plugin update %s` failed (exit %d): %s",
+                plugin_id, upd.returncode, upd.stderr.strip(),
+            )
+            failures += 1
+        else:
+            print(f"{plugin_id}: {r.previous_version} -> {r.version}")
+    if failures == 0:
+        print("restart Claude Code to load the updated plugin(s)")
+    return 1 if failures else 0
+
+
+@assets_app.command(name="update-all")
+def update_all(
+    *,
+    marketplace: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--marketplace"],
+            help="Marketplace root (default: ~/.cisternal/claude-plugin-marketplace).",
+        ),
+    ] = Path("~/.cisternal/claude-plugin-marketplace").expanduser(),
+    refresh: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--refresh"],
+            help="Refresh Claude Code for changed, installed plugins (default: on).",
+        ),
+    ] = True,
+    claude_bin: Annotated[
+        str,
+        cyclopts.Parameter(name=["--claude-bin"], help="Path to the claude CLI (default: 'claude')."),
+    ] = "claude",
+    dry_run: Annotated[
+        bool,
+        cyclopts.Parameter(name=["--dry-run"], help="List what would be republished; change nothing."),
+    ] = False,
+) -> None:
+    """Republish every plugin in the shared marketplace from its source repo.
+
+    Each plugin published by ``publish-shared`` records its manifest in
+    ``cisternal-source.json``; this re-runs that publish for all of them (from
+    each repo's current checkout), then refreshes Claude Code once for the ones
+    whose content changed. Plugins without the sidecar are listed as unmanaged:
+    run ``cisternal assets publish-shared`` once from that tool's repo to enroll it.
+    """
+    plugins_dir = marketplace / "plugins"
+    if not plugins_dir.is_dir():
+        _log.error("cisternal.cli: no plugins directory at %s", plugins_dir)
+        raise SystemExit(1)
+
+    results: list[_PublishResult] = []
+    unmanaged: list[str] = []
+    failed: list[str] = []
+    for plugin_dir in sorted(p for p in plugins_dir.iterdir() if p.is_dir()):
+        sidecar = plugin_dir / ".claude-plugin" / SOURCE_SIDECAR
+        if not sidecar.is_file():
+            unmanaged.append(plugin_dir.name)
+            continue
+        try:
+            source = json.loads(sidecar.read_text(encoding="utf-8"))
+            source_manifest = Path(source["manifest"])
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            failed.append(f"{plugin_dir.name}: unreadable {SOURCE_SIDECAR} ({exc})")
+            continue
+        if not source_manifest.is_file():
+            failed.append(f"{plugin_dir.name}: manifest not found at {source_manifest}")
+            continue
+        if dry_run:
+            print(f"would republish {plugin_dir.name} from {source_manifest}")
+            continue
+        try:
+            results.append(
+                _publish_shared_core(
+                    manifest=source_manifest,
+                    registry=source.get("registry") or "default",
+                    name=source.get("name"),
+                    description=source.get("description"),
+                    marketplace=marketplace,
+                )
+            )
+        except SystemExit as exc:
+            failed.append(f"{plugin_dir.name}: publish failed (exit {exc.code})")
+
+    for r in results:
+        state = f"{r.previous_version} -> {r.version}" if r.changed else f"unchanged ({r.version})"
+        print(f"{r.name}: {state}")
+    for plugin_name in unmanaged:
+        print(
+            f"{plugin_name}: unmanaged (no {SOURCE_SIDECAR}) -- run "
+            "`cisternal assets publish-shared` once from its repo to enroll it"
+        )
+    for line in failed:
+        print(f"FAILED {line}")
+
+    rc = 0
+    if refresh and not dry_run:
+        rc = _refresh_claude(marketplace, results, claude_bin=claude_bin)
+    if failed or rc:
+        raise SystemExit(1)
 
 
 _MARKETPLACE_README_TEMPLATE = """\
@@ -679,13 +926,24 @@ cisternal assets publish-shared --manifest .praxia/manifest.toml
 This scrubs the destination plugin directory, exports a fresh bundle at a
 content-derived version, and merges the marketplace entry under an flock'd
 atomic read-modify-write — safe to run concurrently with other tools
-publishing to the same marketplace.
+publishing to the same marketplace. If the content changed and the plugin is
+installed, it then runs `claude plugin marketplace update` + `claude plugin
+update` for you (`--no-refresh` to skip); restart Claude Code to load it.
+
+## Updating Everything
+
+```
+cisternal assets update-all
+```
+
+Republishes every plugin here from the repo that last published it (recorded
+in `plugins/<tool>/.claude-plugin/cisternal-source.json`) and refreshes the
+changed, installed ones in Claude Code. `--dry-run` lists what it would do.
 
 ## Known Gaps
 
 - **No cross-machine sync.** This marketplace is local to one machine.
-- **Manual refresh.** Run `/plugin marketplace update cisternal-local` in
-  Claude Code after publishing if you want the listing to refresh immediately.
+- **Restart required.** Claude Code loads an updated plugin on restart.
 - **MCP server name collisions.** Before installing a plugin, check whether
   its `.mcp.json` declares a server name already registered globally
   (`claude mcp list`) — installing would otherwise create a confusing
