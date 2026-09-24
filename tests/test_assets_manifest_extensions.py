@@ -79,6 +79,31 @@ scope = "invalid"
     assert any("invalid scope" in w for w in report.warnings)
 
 
+def test_snippet_global_scope_is_valid(tmp_path: Path) -> None:
+    """praxia's `global` snippet scope (user-wide rules) is accepted."""
+    plugin_root = tmp_path / "plugin"
+    snippets = plugin_root / "snippets"
+    snippets.mkdir(parents=True)
+    (snippets / "s.md").write_text("rule", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.snippets]]
+name = "s"
+path = "snippets/s.md"
+scope = "global"
+""",
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert not any("scope" in w for w in report.warnings)
+
+
 def test_validate_workflow_warning_exits_one(tmp_path: Path) -> None:
     """AC-M33d-4: validate fails when L14 extension path missing."""
     manifest = _praxia_manifest(

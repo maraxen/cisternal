@@ -25,7 +25,10 @@ def _invoke_app(args: list[str], *, exit_code: int = 0) -> None:
     assert exc_info.value.code == exit_code
 
 
-def _fake_claude(tmp_path: Path, *, installed: list[str], fail_update: bool = False) -> tuple[Path, Path]:
+def _fake_claude(
+    tmp_path: Path, *, installed: list[str] | dict[str, str], fail_update: bool = False
+) -> tuple[Path, Path]:
+    versions = installed if isinstance(installed, dict) else {i: "0" for i in installed}
     log = tmp_path / "claude_calls.jsonl"
     script = tmp_path / "fake_claude"
     script.write_text(
@@ -33,7 +36,7 @@ def _fake_claude(tmp_path: Path, *, installed: list[str], fail_update: bool = Fa
         "import json, sys\n"
         f"open({str(log)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "if sys.argv[1:3] == ['plugin', 'list']:\n"
-        f"    print(json.dumps([{{'id': i, 'version': '0'}} for i in {installed!r}]))\n"
+        f"    print(json.dumps([{{'id': i, 'version': v}} for i, v in {versions!r}.items()]))\n"
         f"elif sys.argv[1:3] == ['plugin', 'update'] and {fail_update!r}:\n"
         "    sys.exit(1)\n",
         encoding="utf-8",
@@ -86,12 +89,30 @@ def test_refresh_does_not_install_uninstalled_plugin(tmp_path: Path, capsys: pyt
     assert "claude plugin install fixture-plugin@cisternal-local" in capsys.readouterr().out
 
 
-def test_unchanged_republish_skips_refresh(tmp_path: Path) -> None:
-    claude, log = _fake_claude(tmp_path, installed=["fixture-plugin@cisternal-local"])
-    _publish(tmp_path / "mkt", claude)
-    log.unlink()
-    _publish(tmp_path / "mkt", claude)
-    assert _calls(log) == []
+def _published_version(marketplace: Path) -> str:
+    plugin_json = marketplace / "plugins" / "fixture-plugin" / ".claude-plugin" / "plugin.json"
+    return json.loads(plugin_json.read_text(encoding="utf-8"))["version"]
+
+
+def test_up_to_date_install_is_not_updated(tmp_path: Path) -> None:
+    marketplace = tmp_path / "mkt"
+    claude, _ = _fake_claude(tmp_path, installed=[])
+    _publish(marketplace, claude, "--no-refresh")
+    current, log = _fake_claude(
+        tmp_path, installed={"fixture-plugin@cisternal-local": _published_version(marketplace)}
+    )
+    _publish(marketplace, current)
+    assert [c[:2] for c in _calls(log)] == [["plugin", "list"]]
+
+
+def test_stale_install_updated_even_when_marketplace_unchanged(tmp_path: Path) -> None:
+    # The bathos case: the marketplace copy was already current, the install was not.
+    marketplace = tmp_path / "mkt"
+    claude, _ = _fake_claude(tmp_path, installed=[])
+    _publish(marketplace, claude, "--no-refresh")
+    stale, log = _fake_claude(tmp_path, installed={"fixture-plugin@cisternal-local": "1.2.3+deadbeef"})
+    _publish(marketplace, stale)
+    assert ["plugin", "update", "fixture-plugin@cisternal-local"] in _calls(log)
 
 
 def test_no_refresh_never_calls_claude(tmp_path: Path) -> None:
