@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# `global` is praxia's scope for snippets exported as user-wide rules
+# (~/.claude/rules/); praxia, myxcel and other family manifests use it.
+SNIPPET_SCOPES = frozenset({"project", "user", "session", "global"})
+
 _EXTENSION_TABLES: tuple[str, ...] = ("workflows", "pipelines", "snippets")
 
 
@@ -42,9 +46,9 @@ def validate_extension_sections(
             scope = entry.get("scope")
             if table == "snippets" and scope is not None:
                 scope_str = str(scope)
-                if scope_str not in {"project", "user", "session"}:
+                if scope_str not in SNIPPET_SCOPES:
                     warnings.append(
                         f"snippet {name!r}: invalid scope {scope_str!r} "
-                        "(expected project|user|session)"
+                        f"(expected {'|'.join(sorted(SNIPPET_SCOPES))})"
                     )
     return tuple(warnings)

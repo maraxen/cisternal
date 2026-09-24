@@ -728,16 +728,17 @@ def _publish_shared_core(
 def _refresh_claude(
     marketplace: Path, results: list[_PublishResult], *, claude_bin: str
 ) -> int:
-    """Push changed bundles into Claude Code. Returns a process exit code.
+    """Bring installed plugins up to the just-published versions. Returns an exit code.
 
-    Only plugins whose content changed are touched; a published-but-not-installed
-    plugin gets an install hint rather than being installed unasked. A missing
-    ``claude`` binary is not an error (the publish itself succeeded) -- it
-    prints the equivalent slash commands instead.
+    Compares each INSTALLED version against the published one, not merely
+    "did this publish change the marketplace copy": the marketplace can already
+    be ahead of the install (e.g. published by another tool or an earlier run
+    with --no-refresh). A published-but-not-installed plugin gets an install
+    hint rather than being installed unasked. A missing ``claude`` binary is
+    not an error (the publish itself succeeded) -- it prints the equivalent
+    slash commands instead.
     """
-    changed = [r for r in results if r.changed]
-    if not changed:
-        print("claude: no plugin content changed; nothing to refresh")
+    if not results:
         return 0
     try:
         mkt_doc = json.loads(
@@ -748,9 +749,9 @@ def _refresh_claude(
         _log.error("cisternal.cli: cannot read marketplace name for refresh: %s", exc)
         return 1
 
-    def manual_hint() -> None:
+    def manual_hint(targets: list[_PublishResult]) -> None:
         print(f"refresh manually in Claude Code: /plugin marketplace update {mkt_name}")
-        for r in changed:
+        for r in targets:
             print(f"  /plugin update {r.name}@{mkt_name}")
 
     try:
@@ -759,17 +760,29 @@ def _refresh_claude(
         )
     except OSError as exc:
         print(f"claude: could not run {claude_bin!r} ({exc})")
-        manual_hint()
+        manual_hint([r for r in results if r.changed])
         return 0
     if listing.returncode != 0:
         print(f"claude: `plugin list` failed: {listing.stderr.strip()}")
-        manual_hint()
+        manual_hint([r for r in results if r.changed])
         return 0
     try:
-        installed = {p["id"] for p in json.loads(listing.stdout)}
+        installed = {p["id"]: p.get("version") for p in json.loads(listing.stdout)}
     except (ValueError, KeyError, TypeError):
         print("claude: could not parse `plugin list --json` output")
-        manual_hint()
+        manual_hint([r for r in results if r.changed])
+        return 0
+
+    stale = [
+        r for r in results
+        if f"{r.name}@{mkt_name}" in installed and installed[f"{r.name}@{mkt_name}"] != r.version
+    ]
+    for r in results:
+        if r.changed and f"{r.name}@{mkt_name}" not in installed:
+            print(f"{r.name}@{mkt_name}: published, not installed -- "
+                  f"claude plugin install {r.name}@{mkt_name} --scope user")
+    if not stale:
+        print("claude: installed plugins already match the published versions")
         return 0
 
     update = subprocess.run(
@@ -783,11 +796,8 @@ def _refresh_claude(
         return 1
 
     failures = 0
-    for r in changed:
+    for r in stale:
         plugin_id = f"{r.name}@{mkt_name}"
-        if plugin_id not in installed:
-            print(f"{plugin_id}: published, not installed -- claude plugin install {plugin_id} --scope user")
-            continue
         upd = subprocess.run(
             [claude_bin, "plugin", "update", plugin_id], capture_output=True, text=True
         )
@@ -798,7 +808,7 @@ def _refresh_claude(
             )
             failures += 1
         else:
-            print(f"{plugin_id}: {r.previous_version} -> {r.version}")
+            print(f"{plugin_id}: {installed[plugin_id]} -> {r.version}")
     if failures == 0:
         print("restart Claude Code to load the updated plugin(s)")
     return 1 if failures else 0
