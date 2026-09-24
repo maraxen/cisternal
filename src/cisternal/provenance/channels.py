@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess as _subprocess
 import warnings as _warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -152,14 +153,41 @@ def _same_root(a: str | Path, b: str | Path) -> bool:
         return False
 
 
+def _is_worktree_of(cwd: str | Path, repo_root: str | Path) -> bool:
+    """Check if cwd is a linked worktree of the repository at repo_root.
+
+    Returns True iff the parent of cwd's git-common-dir equals repo_root.
+    Never raises (C6): any failure returns False.
+    """
+    try:
+        result = _subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+        common_dir_str = result.stdout.strip()
+        if not common_dir_str:
+            return False
+        common_dir = Path(common_dir_str)
+        common_dir_parent = common_dir.parent
+        repo_root_path = Path(repo_root).resolve()
+        return _same_root(common_dir_parent, repo_root_path)
+    except Exception:
+        return False
+
+
 def capture_git_state(cwd: Path | None = None) -> GitState:
     """Capture git provenance from multiple channels with defined precedence.
 
-    D6 precedence:
+    D6 precedence (per praxia debt #1802):
     1. Check env and sidecar channels; if neither present, capture live git state
        directly (via telemetry.git_state) or fall back to _UNKNOWN
     2. If a channel exists and a real repo exists at the same root, use the real repo
-    3. Otherwise use the channel
+    3. If a channel exists and live checkout is a linked worktree of the channel's repo, use live
+    4. Otherwise use the channel
 
     Never raises (C6).
     """
@@ -187,6 +215,13 @@ def capture_git_state(cwd: Path | None = None) -> GitState:
         live = _capture_live_git_state(cwd)
         if live.provenance_source == "git" and live.toplevel is not None:
             if _same_root(live.toplevel, prov.get("root") or ""):
+                return GitState(
+                    hash=live.hash, branch=live.branch, dirty=live.dirty,
+                    dirty_content_id=live.dirty_content_id, provenance_source="git",
+                )
+            # Also use live git if the current directory is a linked worktree
+            # of the repository described by the channel (same .git admin directory)
+            if _is_worktree_of(cwd_str, prov.get("root") or ""):
                 return GitState(
                     hash=live.hash, branch=live.branch, dirty=live.dirty,
                     dirty_content_id=live.dirty_content_id, provenance_source="git",
