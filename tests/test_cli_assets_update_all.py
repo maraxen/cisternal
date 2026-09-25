@@ -178,3 +178,66 @@ def test_update_all_reports_missing_manifest(tmp_path: Path, capsys: pytest.Capt
     )
     _invoke_app(["assets", "update-all", "--marketplace", str(marketplace), "--no-refresh"], exit_code=1)
     assert "FAILED gone: manifest not found" in capsys.readouterr().out
+
+
+def _shadow_fixture(claude_home: Path) -> tuple[Path, Path, Path]:
+    """Raw ~/.claude copies of the fixture plugin's skill + agent, plus an unrelated skill."""
+    skill = claude_home / "skills" / "demo-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: demo-skill\n---\nraw copy\n", encoding="utf-8")
+    agent = claude_home / "agents" / "fixture-plugin-recon.md"
+    agent.parent.mkdir(parents=True)
+    agent.write_text("raw agent copy\n", encoding="utf-8")
+    unrelated = claude_home / "skills" / "my-own-skill"
+    unrelated.mkdir()
+    (unrelated / "SKILL.md").write_text("mine\n", encoding="utf-8")
+    return skill, agent, unrelated
+
+
+def test_publish_reports_shadowing_copies_without_touching_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    claude_home = tmp_path / "claude_home"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+    skill, agent, unrelated = _shadow_fixture(claude_home)
+    claude, _ = _fake_claude(tmp_path, installed=[])
+    _publish(tmp_path / "mkt", claude)
+    out = capsys.readouterr().out
+    assert f"shadowed: {skill}" in out
+    assert f"shadowed: {agent}" in out
+    assert "my-own-skill" not in out
+    assert skill.exists() and agent.exists() and unrelated.exists()
+
+
+def test_publish_prune_shadowed_moves_copies_to_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_home = tmp_path / "claude_home"
+    backup_root = tmp_path / "shadow_backup"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+    monkeypatch.setenv("CISTERNAL_SHADOW_BACKUP_DIR", str(backup_root))
+    skill, agent, unrelated = _shadow_fixture(claude_home)
+    claude, _ = _fake_claude(tmp_path, installed=[])
+    _publish(tmp_path / "mkt", claude, "--prune-shadowed")
+    assert not skill.exists() and not agent.exists()
+    assert unrelated.exists()
+    moved = sorted(p.relative_to(backup_root).as_posix() for p in backup_root.rglob("*") if p.is_file())
+    assert any(m.endswith("skills/demo-skill/SKILL.md") for m in moved)
+    assert any(m.endswith("agents/fixture-plugin-recon.md") for m in moved)
+
+
+def test_update_all_prunes_shadowed_for_every_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_home = tmp_path / "claude_home"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+    monkeypatch.setenv("CISTERNAL_SHADOW_BACKUP_DIR", str(tmp_path / "shadow_backup"))
+    claude, _ = _fake_claude(tmp_path, installed=[])
+    mkt = tmp_path / "mkt"
+    _publish(mkt, claude, "--no-refresh")
+    skill, agent, unrelated = _shadow_fixture(claude_home)
+    _invoke_app(
+        ["assets", "update-all", "--marketplace", str(mkt), "--claude-bin", str(claude),
+         "--prune-shadowed"]
+    )
+    assert not skill.exists() and not agent.exists() and unrelated.exists()

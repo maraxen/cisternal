@@ -39,10 +39,12 @@ import importlib
 import importlib.metadata
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated
@@ -543,6 +545,15 @@ def publish_shared(
             "update the plugin if it is installed (default: on; --no-refresh to skip).",
         ),
     ] = True,
+    prune_shadowed: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--prune-shadowed"],
+            help="Move raw ~/.claude/skills/<skill>/ and ~/.claude/agents/<plugin>-<agent>.md "
+            "copies that shadow this plugin's own skills/agents into a timestamped backup "
+            "(~/.cisternal/shadowed/). Without it they are only reported.",
+        ),
+    ] = False,
     claude_bin: Annotated[
         str,
         cyclopts.Parameter(
@@ -592,6 +603,7 @@ def publish_shared(
     )
     print(f"published {result.name}@{result.version} -> {result.out}")
     print(f"marketplace: {marketplace}")
+    _handle_shadowed([result], prune=prune_shadowed)
     if refresh and _refresh_claude(marketplace, [result], claude_bin=claude_bin) != 0:
         raise SystemExit(1)
 
@@ -607,6 +619,8 @@ class _PublishResult:
     previous_version: str | None
     version: str
     out: Path
+    skill_names: tuple[str, ...] = ()
+    agent_names: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -721,8 +735,61 @@ def _publish_shared_core(
         readme_template=_MARKETPLACE_README_TEMPLATE,
     )
     return _PublishResult(
-        name=resolved_name, previous_version=previous_version, version=version, out=out
+        name=resolved_name,
+        previous_version=previous_version,
+        version=version,
+        out=out,
+        skill_names=tuple(s.name for s in versioned_bundle.skills),
+        agent_names=tuple(a.name for a in versioned_bundle.agents),
     )
+
+
+def _claude_home() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+
+
+def _find_shadowed(result: _PublishResult, claude_home: Path) -> list[Path]:
+    """User-level copies that duplicate what this plugin already ships.
+
+    Claude Code lists a plugin's skills as ``<plugin>:<skill>``; a same-named
+    ``<claude_home>/skills/<skill>/`` is a second, unnamespaced listing of the
+    same skill (and wins over the plugin's copy when they drift). Agents are
+    matched by the ``<plugin>-<agent>.md`` name that legacy per-tool exporters
+    wrote, so a user's own same-named agent is never touched.
+    """
+    found = [
+        claude_home / "skills" / skill
+        for skill in result.skill_names
+        if (claude_home / "skills" / skill).exists()
+    ]
+    found += [
+        claude_home / "agents" / f"{result.name}-{agent}.md"
+        for agent in result.agent_names
+        if (claude_home / "agents" / f"{result.name}-{agent}.md").is_file()
+    ]
+    return found
+
+
+def _handle_shadowed(results: list[_PublishResult], *, prune: bool) -> None:
+    """Report (or with *prune*, move into a backup) copies shadowing published plugins."""
+    claude_home = _claude_home()
+    shadowed = [(r, p) for r in results for p in _find_shadowed(r, claude_home)]
+    if not shadowed:
+        return
+    if not prune:
+        for r, path in shadowed:
+            print(f"shadowed: {path} duplicates plugin {r.name}")
+        print("rerun with --prune-shadowed to move these into a backup")
+        return
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    backup_root = Path(
+        os.environ.get("CISTERNAL_SHADOW_BACKUP_DIR") or "~/.cisternal/shadowed"
+    ).expanduser() / stamp
+    for r, path in shadowed:
+        dest = backup_root / path.relative_to(claude_home)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(dest))
+        print(f"pruned: {path} (duplicate of plugin {r.name}) -> {dest}")
 
 
 def _refresh_claude(
@@ -831,6 +898,15 @@ def update_all(
             help="Refresh Claude Code for changed, installed plugins (default: on).",
         ),
     ] = True,
+    prune_shadowed: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--prune-shadowed"],
+            help="Move raw ~/.claude/skills/<skill>/ and ~/.claude/agents/<plugin>-<agent>.md "
+            "copies that shadow this plugin's own skills/agents into a timestamped backup "
+            "(~/.cisternal/shadowed/). Without it they are only reported.",
+        ),
+    ] = False,
     claude_bin: Annotated[
         str,
         cyclopts.Parameter(name=["--claude-bin"], help="Path to the claude CLI (default: 'claude')."),
@@ -897,6 +973,9 @@ def update_all(
     for line in failed:
         print(f"FAILED {line}")
 
+    if not dry_run:
+        _handle_shadowed(results, prune=prune_shadowed)
+
     rc = 0
     if refresh and not dry_run:
         rc = _refresh_claude(marketplace, results, claude_bin=claude_bin)
@@ -905,6 +984,7 @@ def update_all(
 
 
 _MARKETPLACE_README_TEMPLATE = """\
+<!-- cisternal:managed -->
 # Cisternal Local Plugin Marketplace
 
 This is a shared Claude Code marketplace for locally built plugins from the
@@ -949,6 +1029,13 @@ cisternal assets update-all
 Republishes every plugin here from the repo that last published it (recorded
 in `plugins/<tool>/.claude-plugin/cisternal-source.json`) and refreshes the
 changed, installed ones in Claude Code. `--dry-run` lists what it would do.
+
+## One Source Per Skill
+
+Plugins own their skills and agents. `publish-shared` and `update-all` report
+any `~/.claude/skills/<skill>/` or `~/.claude/agents/<plugin>-<agent>.md` copy
+that duplicates a published plugin; add `--prune-shadowed` to move them into
+`~/.cisternal/shadowed/<timestamp>/`.
 
 ## Known Gaps
 

@@ -78,3 +78,17 @@ def test_plugin_output_dir_rejects_unsafe_names(tmp_path: Path) -> None:
     for bad in ("..", ".", "../escape", "a/b"):
         with pytest.raises(ValueError, match="unsafe"):
             plugin_output_dir(tmp_path, bad)
+
+
+def test_merge_marketplace_entry_refreshes_managed_readme(tmp_path: Path) -> None:
+    from cisternal.export.marketplace import README_MANAGED_MARKER
+
+    marketplace = tmp_path / "mkt"
+    entry = {"name": "p", "source": "./plugins/p", "description": "d"}
+    merge_marketplace_entry(
+        marketplace, entry, seed=default_seed(), readme_template=f"{README_MANAGED_MARKER}\nv1"
+    )
+    merge_marketplace_entry(
+        marketplace, entry, seed=default_seed(), readme_template=f"{README_MANAGED_MARKER}\nv2"
+    )
+    assert (marketplace / "README.md").read_text(encoding="utf-8").endswith("v2")

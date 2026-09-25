@@ -34,6 +34,10 @@ DEFAULT_MARKETPLACE_DESCRIPTION = (
 )
 
 
+# A README containing this line is regenerated on every publish; delete the
+# line to take ownership of the file.
+README_MANAGED_MARKER = "<!-- cisternal:managed -->"
+
 def content_version(base_version: str, files: dict[str, str]) -> str:
     """Return *base_version* suffixed with a short content digest of *files*.
 
@@ -123,7 +127,13 @@ def merge_marketplace_entry(
         temp_path.replace(marketplace_json_path)
 
     readme_dest = marketplace_root / "README.md"
-    if readme_template is not None and not readme_dest.exists():
+    if readme_template is not None and (
+        not readme_dest.exists()
+        or README_MANAGED_MARKER in readme_dest.read_text(encoding="utf-8")
+    ):
+        # Written once, then left alone -- unless the existing file still
+        # carries the managed marker (i.e. it is an unedited generated copy),
+        # in which case it tracks the current template instead of going stale.
         readme_dest.write_text(readme_template, encoding="utf-8")
 
     return marketplace_json_path
