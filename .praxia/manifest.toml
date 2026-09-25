@@ -1,4 +1,7 @@
 [plugin]
+# Skills reach Claude Code only via the cisternal plugin bundle (<plugin>:<skill>);
+# skip praxia's legacy copy into ~/.claude/skills, which duplicated every listing.
+skills_delivered_by_plugin = true
 name = "cisternal"
 version = "0.1.0"
 description = "Agent-asset export CLI — dogfood manifest for M4 Export Trust"
