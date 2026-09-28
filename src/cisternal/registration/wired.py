@@ -118,6 +118,7 @@ def wire(
     expected: list[str] | None = None,
     validate: bool = True,
     recovery: tuple[Callable[[BaseException], bool], Callable[[], None]] | None = None,
+    cli_telemetry: bool = True,
 ) -> WiredRegistry:
     """Snapshot the named registry and register each tool on *server* (and *app*).
 
@@ -134,19 +135,39 @@ def wire(
            set, the command nests under a cached sub-``cyclopts.App`` for
            that group (created and mounted on *app* on first use); otherwise
            it registers flat on *app* directly (default, unchanged
-           behavior). The CLI callable is a PASSTHROUGH to the original
-           function; it does NOT emit telemetry (C5 / AC-M2-6).
+           behavior). The CLI callable dispatches to the original function
+           and, unless ``cli_telemetry=False``, is instrumented with
+           :func:`~cisternal.adapters.cli.timed_command`.
         4. Validate *expected* names (AC-M2-9 / AC-M2-10).
         5. Return a :class:`WiredRegistry` instance (TBD-M2-5).
 
-    HARD INVARIANT (C5 / AC-M2-6):
-        This function and the callables it registers MUST NOT call any adapter
-        methods or emit any telemetry.  The *adapter* parameter is accepted for
-        forward-compat and is intentionally never used.  (*recovery*'s hooks
-        are supplied by the caller, not owned by cisternal, and the only
-        cisternal-side side effect of a recovery attempt is a plain
-        ``ContextVar.set()`` — a signal, not a telemetry call; see
+    HARD INVARIANT (C5 / AC-M2-6) — MCP PATH ONLY:
+        The composed **MCP** callable MUST NOT call any adapter method or emit
+        any telemetry.  Telemetry on that path is owned by
+        :class:`~cisternal.adapters.v3_middleware.CisternalMiddleware`, and a
+        callable that emitted as well would double-count every tool call
+        whenever the middleware is installed.  The *adapter* parameter is
+        accepted for forward-compat and is intentionally never used.
+        (*recovery*'s hooks are supplied by the caller, not owned by cisternal,
+        and the only cisternal-side side effect of a recovery attempt is a
+        plain ``ContextVar.set()`` — a signal, not a telemetry call; see
         ``compose.py``'s module docstring, R1.)
+
+    WHY THE CLI PATH IS DIFFERENT (and why it changed):
+        That invariant was previously applied to the CLI closure too, by
+        analogy.  The analogy does not hold: there is no CLI middleware, so
+        nothing owned CLI telemetry and the path emitted **nothing at all**.
+        The same tool invoked the same way produced a complete record through
+        MCP and silence through the CLI — a telemetry surface that under-reports
+        by construction, and does so most for the surface a human is most
+        likely to be driving.
+
+        The CLI's designated owner is ``timed_command`` (spec §4.2, AC-CLI-1),
+        which already existed; ``wire()`` simply never applied it.  It now
+        does, emitting ``cli.cmd_start`` / ``cli.cmd_end`` per command.  A
+        function a consumer already decorated by hand is detected via
+        ``_cisternal_timed`` and is not wrapped twice.  Pass
+        ``cli_telemetry=False`` to restore the previous silence.
 
     Args:
         server:    A ``fastmcp.FastMCP`` instance (or any object with an
@@ -165,6 +186,13 @@ def wire(
         validate:  When ``True`` (default) and *expected* names are missing:
                    raise :class:`CisternalWireError`.  When ``False``: log a
                    WARNING to ``cisternal.registration`` and continue.
+        cli_telemetry:
+                   When ``True`` (default), each registered CLI command is
+                   instrumented with ``timed_command`` so the CLI path emits
+                   ``cli.cmd_start`` / ``cli.cmd_end`` like the MCP path emits
+                   its middleware events.  ``False`` restores the pre-change
+                   behaviour of emitting nothing on the CLI.  Has no effect on
+                   the MCP path, whose C5 invariant is unchanged.
         recovery:  Optional ``(is_recoverable, recover)`` pair of synchronous
                    callables (spec 260805_nlm-adapter-transparent-auto-reauth,
                    AC7-AC13).  When supplied, it is threaded uniformly into
@@ -242,17 +270,36 @@ def wire(
             _name = entry.name
             _cli_name = entry.cli_name or entry.name
 
-            def _make_cli_cmd(original_fn: Any) -> Any:
+            def _make_cli_cmd(original_fn: Any, cmd_name: str) -> Any:
+                # Telemetry owner for the CLI path. The MCP path's silence is
+                # deliberate — CisternalMiddleware owns it there, and emitting
+                # in the composed callable too would double-count every tool
+                # call. The CLI path had no such owner, so it emitted nothing
+                # at all: identical work produced a full record through MCP and
+                # silence through the CLI. `timed_command` is the CLI's
+                # designated owner and already existed; wire() simply never
+                # applied it.
+                _dispatch = lambda *a, **k: apply_recovery_sync(  # noqa: E731
+                    original_fn, recovery, *a, **k
+                )
+                if cli_telemetry and not getattr(
+                    original_fn, "_cisternal_timed", False
+                ):
+                    from cisternal.adapters.cli import timed_command
+
+                    # Deliberately INSIDE the F1 handler below, so telemetry
+                    # observes the original exception. Wrapping outside would
+                    # record every failure as exc_type="SystemExit", since F1
+                    # converts exceptions into sys.exit(1) before they escape.
+                    _dispatch = timed_command(cmd_name)(_dispatch)
+
                 def _cli_cmd(*args: Any, **kwargs: Any) -> Any:
                     # F1 CLI error contract: wrap exceptions into a clean exit.
-                    # No telemetry emitted here (C5 / AC-M2-6). AC13: the same
-                    # `recovery` policy passed to wire() applies here too, via
-                    # apply_recovery_sync's AC12 sync leg (no thread offload,
-                    # no telemetry contextvar — see compose.py).
+                    # AC13: the same `recovery` policy passed to wire() applies
+                    # here too, via apply_recovery_sync's AC12 sync leg (no
+                    # thread offload, no telemetry contextvar — see compose.py).
                     try:
-                        return apply_recovery_sync(
-                            original_fn, recovery, *args, **kwargs
-                        )
+                        return _dispatch(*args, **kwargs)
                     except SystemExit:
                         # Re-raise SystemExit unchanged (already a clean exit).
                         raise
@@ -271,7 +318,7 @@ def wire(
                 _cli_cmd.__annotations__ = dict(original_fn.__annotations__)
                 return _cli_cmd
 
-            cli_cmd = _make_cli_cmd(_fn)
+            cli_cmd = _make_cli_cmd(_fn, _name)
             if entry.cli_group is not None:
                 target_app = _get_or_create_subapp(app, entry.cli_group)
                 target_app.command(name=_cli_name)(cli_cmd)

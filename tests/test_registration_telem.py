@@ -378,10 +378,24 @@ class TestCLICallableExceptionToExitCode:
             f"got: {stderr_output!r}"
         )
 
-    def test_cli_callable_exception_does_not_emit_telemetry(self, shadow_pipeline):
-        """F1 (CLI): CLI callable error handler must NOT emit telemetry."""
-        spy, pipeline = shadow_pipeline
+    def test_cli_callable_error_path_still_exits_cleanly_with_telemetry_on(self):
+        """F1 (CLI) survives the CLI path gaining telemetry.
 
+        This test previously asserted the opposite -- that the CLI error handler
+        emits NO telemetry -- by checking ``len(spy.records) == 0`` against the
+        ``shadow_pipeline`` fixture. That assertion could not fail: the fixture
+        builds an ``EventPipeline`` but never installs it as the global
+        pipeline, so ``emit_event`` never reaches its spy. It passed both before
+        and after the CLI path began emitting.
+
+        The CLI path now has a telemetry owner (``timed_command``, applied by
+        ``wire``), deliberately: the MCP path's silence is covered by
+        CisternalMiddleware, while the CLI path had no owner and so emitted
+        nothing at all. What this test still guards is the part that must NOT
+        change -- the F1 contract that a failing command writes to stderr and
+        exits non-zero. Real emission coverage lives in
+        ``test_registration_cli_telemetry.py``, which installs a real pipeline.
+        """
         @tool
         def telem_free_fail(x: int) -> int:
             raise ValueError("no telem please")
@@ -391,20 +405,15 @@ class TestCLICallableExceptionToExitCode:
         wire(server, app)
 
         stderr_capture = io.StringIO()
+        exit_code = None
         with patch("sys.stderr", stderr_capture):
             try:
                 app(["telem-free-fail", "--x", "99"], exit_on_error=False)
-            except SystemExit:
-                pass
-            except Exception:
-                pass
+            except SystemExit as e:
+                exit_code = e.code
 
-        time.sleep(0.05)
-
-        assert len(spy.records) == 0, (
-            f"CLI error handler must not emit telemetry; "
-            f"got {len(spy.records)} records: {spy.records}"
-        )
+        assert exit_code == 1, f"F1 requires a non-zero exit, got {exit_code!r}"
+        assert "ValueError" in stderr_capture.getvalue()
 
     def test_cli_callable_success_path_unchanged(self):
         """F1 (CLI): CLI callable success path executes without error (no interference)."""
