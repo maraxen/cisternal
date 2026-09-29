@@ -380,13 +380,25 @@ first two items below before accepting any of them.
 - **Empty manifest fails.** `verify_tree` on a manifest with no files returns `verified=False`
   (`error="empty manifest"`), and `build_tree_manifest` returns `None` for an empty file set.
   Reproduced: an empty allowlist previously verified vacuously and would have surfaced the sha.
-- **Built-in bytecode excludes.** `__pycache__/`, `*.pyc` and `*.pyo` are always excluded from
-  the extras listing. Reproduced: without this, the first Python import on a host whose
-  `.gitignore` lacks `__pycache__` withholds the sha permanently. Safe because a sourceless
-  `.pyc` inside `__pycache__` is never imported.
-- **Gitlinks.** Nested repos and submodules are recorded as `skipped: "gitlink:<path>"`. They do
-  not fail verification and are excluded from the extras listing. Only `non-utf8:` and
-  `unreadable:` skips fail verification. The spec previously left this undefined.
+- **Built-in bytecode exclude (rev. C: `__pycache__/` only).** Bytecode inside `__pycache__`
+  is always excluded from the extras listing. Reproduced: without this, the first Python import
+  on a host whose `.gitignore` lacks `__pycache__` withholds the sha permanently. This is safe
+  because a sourceless `.pyc` inside `__pycache__` is never imported. Rev. B's unanchored
+  `*.pyc`/`*.pyo` was **reverted** after the re-review: a sourceless legacy-location
+  `src/pkg/mod.pyc` is importable (SourcelessFileLoader) and was reproduced passing
+  verification. It must be reported as an extra.
+- **Gitlinks (rev. C: fail closed).** Nested repos and submodules are recorded as
+  `skipped: "gitlink:<path>"`. Their contents are not hashed, so **any skipped entry, gitlinks
+  included, fails verification** and the sha is withheld. Their contents are left out of the
+  extras listing only because the gitlink reason already explains the failure. Rev. B's
+  "gitlinks pass" was rejected: build classifies *any* directory entry as a gitlink, so exempting
+  them would let a code directory escape all checks. Verifying submodules properly (mode 160000
+  plus the recorded commit) is deferred. Until then, trees with submodules report `"unknown"`.
+- **Non-UTF-8 names from `ls-files`** are recorded as `non-utf8:<repr>` in `skipped`, never
+  dropped (rev. C).
+- **The budget covers the extras phase** (rev. C): every subprocess timeout and each step of the
+  fallback walk draws on the remaining `max_seconds`. The budget is re-checked after the final
+  file.
 - **Streaming hashing.** Files are hashed in chunks. The budget is checked after each file, and
   the extras scan counts against `max_seconds`. A path that is not a regular file (e.g. a FIFO)
   fails verification instead of blocking. A symlink changed to a regular file, or back, counts as

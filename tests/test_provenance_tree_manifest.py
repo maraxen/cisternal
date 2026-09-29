@@ -1103,9 +1103,12 @@ class TestVerifyTree:
         shutil.copytree(repo, copy, ignore=shutil.ignore_patterns(".git"))
 
         verification = verify_tree(copy, manifest)
-        # src/vendor (nested repo) should be in skipped as gitlink, not in extras
-        # After verification, the nested repo dir should NOT cause extra failures
-        assert verification.verified is True or "src/vendor" not in str(verification.extra_untracked_under_declared_dirs)
+        # Spec rev. C: a nested repo is recorded as a gitlink and is NOT hashed, so the
+        # tree cannot be fully verified -> fail closed. Its contents are not reported
+        # as extras (the gitlink reason is enough).
+        assert any(s.rstrip("/") == "gitlink:src/vendor" for s in manifest.skipped)
+        assert verification.verified is False
+        assert not any(e.startswith("src/vendor/") for e in verification.extra_untracked_under_declared_dirs)
 
     def test_budget_exceeded_zero_max_seconds(self, tmp_path):
         """R1.5: Budget check: max_seconds=0 should fail quickly."""
@@ -1159,3 +1162,38 @@ class TestVerifyTree:
         finally:
             if fifo_path.exists():
                 os.unlink(str(fifo_path))
+
+
+def test_sourceless_legacy_pyc_is_an_extra(tmp_path):
+    """Rev. C: src/pkg/mod.pyc with no mod.py is importable, so it must fail verification.
+
+    Only bytecode inside __pycache__ is excluded by default.
+    """
+    root = tmp_path / "tree"
+    (root / "src" / "pkg").mkdir(parents=True)
+    (root / "src" / "pkg" / "a.py").write_text("x\n")
+    manifest = build_tree_manifest(root, commit=None, paths=["src/pkg/a.py"])
+    assert manifest is not None
+
+    (root / "src" / "pkg" / "__pycache__").mkdir()
+    (root / "src" / "pkg" / "__pycache__" / "a.cpython-313.pyc").write_bytes(b"x")
+    ok = verify_tree(root, manifest)
+    assert ok.verified is True and ok.error is None
+
+    (root / "src" / "pkg" / "mod.pyc").write_bytes(b"x")
+    bad = verify_tree(root, manifest)
+    assert bad.verified is False
+    assert "src/pkg/mod.pyc" in bad.extra_untracked_under_declared_dirs
+
+
+def test_non_utf8_name_from_ls_files_is_recorded_as_skipped(tmp_path):
+    """Rev. C: a non-UTF-8 path from `git ls-files` is recorded (not dropped) and fails verification."""
+    repo = _init_test_repo(tmp_path / "repo")
+    try:
+        (repo / os.fsdecode(b"src/bad\xff.py")).write_text("y\n")
+    except (OSError, UnicodeError):
+        pytest.skip("filesystem refuses non-UTF-8 names")
+    manifest = build_tree_manifest(repo, commit=None)
+    assert manifest is not None
+    assert any(s.startswith("non-utf8:") for s in manifest.skipped)
+    assert verify_tree(repo, manifest).verified is False
