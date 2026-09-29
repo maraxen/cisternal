@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import subprocess
 import warnings
 
@@ -52,6 +53,30 @@ def _head(repo) -> str:
 def _assert_sha_absent(state: GitState, sha: str) -> None:
     assert sha not in repr(state)
     assert sha not in json.dumps(dataclasses.asdict(state), default=str)
+
+
+def _simulate_foreign_owner(monkeypatch) -> None:
+    """Make git refuse every repo on ownership grounds (the real safe.directory failure), hermetically.
+
+    GIT_TEST_ASSUME_DIFFERENT_OWNER (git >= 2.36) only makes git *check* ownership; a
+    `safe.directory` entry in system/global/env config still overrides it. GitHub's runner
+    image sets a wildcard one, so the bare variable is not enough there (CI run 36629890642).
+    Neutralise every protected config source so the outcome no longer depends on the host.
+    """
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_PARAMETERS", raising=False)
+    for key in [k for k in os.environ if k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))]:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+
+
+def _git_refuses_for_ownership(path) -> bool:
+    """True iff `git rev-parse HEAD` at `path` fails with git's dubious-ownership refusal."""
+    # bytes: git's message quotes the path, which may be non-UTF-8
+    result = subprocess.run(["git", "-C", os.fsencode(path), "rev-parse", "HEAD"], capture_output=True)
+    return result.returncode != 0 and b"dubious ownership" in result.stderr
 
 
 def _linked_worktree(tmp_path):
@@ -145,8 +170,8 @@ def test_gitlink_to_existing_target_that_git_rejects_fails_closed(tmp_path, monk
         "git_branch": "wb", "git_dirty": False, "provenance_root": str(wt),
         "tree_manifest": manifest.to_dict(),
     }))
-    # git >= 2.36: makes git treat every repo as foreign-owned (the real safe.directory failure).
-    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    _simulate_foreign_owner(monkeypatch)
+    assert _git_refuses_for_ownership(wt), "precondition: git must refuse this repo"
 
     state = capture_git_state(wt)
 
@@ -389,8 +414,6 @@ def test_two_dangling_gitlinks_in_the_ascent_stop_at_the_first(tmp_path):
 def test_non_utf8_gitdir_target_that_exists_fails_closed(tmp_path, monkeypatch):
     """The gitfile bytes must reach stat() unmangled: decoding with errors='replace' would turn
     a non-UTF-8 target that EXISTS into one that looks absent."""
-    import os
-
     s_dir = tmp_path / "S"
     s_dir.mkdir()
     primary = _init_repo(s_dir)
@@ -408,7 +431,8 @@ def test_non_utf8_gitdir_target_that_exists_fails_closed(tmp_path, monkeypatch):
         "git_branch": "wb", "git_dirty": False, "provenance_root": str(wt),
         "tree_manifest": manifest.to_dict(),
     }))
-    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    _simulate_foreign_owner(monkeypatch)
+    assert _git_refuses_for_ownership(wt), "precondition: git must refuse this repo"
 
     state = capture_git_state(wt)
 
@@ -417,7 +441,7 @@ def test_non_utf8_gitdir_target_that_exists_fails_closed(tmp_path, monkeypatch):
     _assert_sha_absent(state, wt_head)
 
 
-@pytest.mark.skipif(__import__("os").geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
 def test_permission_denied_on_target_is_not_evidence_of_absence(tmp_path):
     remote, head_sha = _make_verified_tree(tmp_path)
     locked = tmp_path / "locked"
@@ -448,12 +472,45 @@ def test_relative_target_is_resolved_against_the_gitfile_not_the_process_cwd(tmp
     elsewhere = tmp_path / "elsewhere" / "deeper"
     elsewhere.mkdir(parents=True)
     monkeypatch.chdir(elsewhere)  # "../S/..." does NOT exist from here
-    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    _simulate_foreign_owner(monkeypatch)
+    assert _git_refuses_for_ownership(wt), "precondition: git must refuse this repo"
 
     state = capture_git_state(wt)
 
     assert state.sha is None
     assert state.provenance_source == "none"
+    _assert_sha_absent(state, wt_head)
+
+
+def _hostile_wildcard_safe_directory(monkeypatch) -> None:
+    """Reproduce the GitHub runner: a protected-config `safe.directory = *`."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "*")
+
+
+def test_ownership_simulation_negative_control_bare_env_var_is_defeated_by_safe_directory(tmp_path, monkeypatch):
+    """Negative control (the instrument CAN fail): with a wildcard safe.directory, the bare
+    GIT_TEST_ASSUME_DIFFERENT_OWNER does NOT stop git -- exactly what broke CI run 36629890642."""
+    wt = _linked_worktree(tmp_path)
+    _hostile_wildcard_safe_directory(monkeypatch)
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+
+    assert not _git_refuses_for_ownership(wt)
+    assert subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True).returncode == 0
+
+
+def test_ownership_simulation_positive_control_helper_survives_safe_directory(tmp_path, monkeypatch):
+    """Positive control: the hermetic helper makes git refuse even under that hostile config,
+    and the reader then fails closed rather than surfacing the target repo's sha."""
+    wt = _linked_worktree(tmp_path)
+    wt_head = _head(wt)
+    _hostile_wildcard_safe_directory(monkeypatch)
+    _simulate_foreign_owner(monkeypatch)
+
+    assert _git_refuses_for_ownership(wt)
+    state = capture_git_state(wt)
+    assert state.sha is None
     _assert_sha_absent(state, wt_head)
 
 
