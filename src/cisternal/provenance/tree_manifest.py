@@ -36,7 +36,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping, cast
 
 from .capture import clean_git_env
 from .record import PROVENANCE_FILENAME
@@ -79,49 +79,43 @@ def tree_id(files: Mapping[str, tuple[str, str]]) -> str:
         # Empty tree
         return hashlib.sha1(b"tree 0\0").hexdigest()
 
-    # Build nested tree structure
-    # Group files by directory, then recursively build tree entries
-    def build_tree_recursive(entries: dict[str, tuple[str, str] | dict]) -> str:
-        """Build a tree object from entries (path -> (mode, blob) or nested dict)."""
-        tree_content = b""
-        for name in sorted(
-            entries.keys(),
-            key=lambda n: (n.encode("utf-8") + (b"/" if isinstance(entries[n], dict) else b""))
-        ):
-            entry = entries[name]
-            if isinstance(entry, dict):
-                # This is a directory (nested tree)
-                mode = b"40000"
-                blob_hex = build_tree_recursive(entry)
-            else:
-                # Regular file or symlink
-                mode_str, blob_hex = entry
-                mode = mode_str.encode("utf-8")
-
-            name_bytes = name.encode("utf-8")
-            blob_bytes = bytes.fromhex(blob_hex)
-            tree_content += mode + b" " + name_bytes + b"\0" + blob_bytes
-
-        # Compute tree OID
-        tree_header = f"tree {len(tree_content)}\0".encode("utf-8")
-        return hashlib.sha1(tree_header + tree_content).hexdigest()
-
-    # Organize files into a nested dict structure
-    root_entries: dict[str, tuple[str, str] | dict] = {}
+    root = _TreeNode()
     for path, (mode, blob_hex) in files.items():
         parts = path.split("/")
-        current = root_entries
+        node = root
         for part in parts[:-1]:
-            if part not in current:
-                current[part] = {}
-            elif not isinstance(current[part], dict):
-                # Conflict: path is both file and directory
+            if part in node.files:
                 logger.warning("tree_id: path conflict (file and directory): %s", path)
                 return ""
-            current = current[part]
-        current[parts[-1]] = (mode, blob_hex)
+            node = node.dirs.setdefault(part, _TreeNode())
+        if parts[-1] in node.dirs:
+            logger.warning("tree_id: path conflict (file and directory): %s", path)
+            return ""
+        node.files[parts[-1]] = (mode, blob_hex)
 
-    return build_tree_recursive(root_entries)
+    return root.oid()
+
+
+class _TreeNode:
+    """One directory level while building a git tree object bottom-up."""
+
+    __slots__ = ("dirs", "files")
+
+    def __init__(self) -> None:
+        self.dirs: dict[str, _TreeNode] = {}
+        self.files: dict[str, tuple[str, str]] = {}
+
+    def oid(self) -> str:
+        # git orders entries by name bytes, with a directory compared as name + "/".
+        entries: list[tuple[bytes, bytes, str]] = [
+            (name.encode("utf-8"), b"40000", sub.oid()) for name, sub in self.dirs.items()
+        ]
+        entries += [
+            (name.encode("utf-8"), mode.encode("utf-8"), blob) for name, (mode, blob) in self.files.items()
+        ]
+        entries.sort(key=lambda e: e[0] + (b"/" if e[1] == b"40000" else b""))
+        content = b"".join(mode + b" " + name + b"\0" + bytes.fromhex(sha) for name, mode, sha in entries)
+        return hashlib.sha1(b"tree %d\0" % len(content) + content).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -170,6 +164,7 @@ class TreeManifest:
         """Deserialize from dict. Returns None (never raises) if invalid."""
         if not isinstance(d, dict):
             return None
+        d = cast(dict[str, Any], d)
 
         try:
             manifest_version = d.get("manifest_version")
@@ -191,10 +186,9 @@ class TreeManifest:
             if not isinstance(matches_commit, bool):
                 return None
 
-            # Strict validation: hex fields must be lowercase hex strings (40 chars) or None
-            if tree_id is not None:
-                if not isinstance(tree_id, str) or not _is_valid_hex(tree_id, 40):
-                    return None
+            # Strict validation: tree_id is required; commit may be None. Both lowercase 40-hex.
+            if not isinstance(tree_id, str) or not _is_valid_hex(tree_id, 40):
+                return None
             if commit is not None:
                 if not isinstance(commit, str) or not _is_valid_hex(commit, 40):
                     return None
