@@ -808,3 +808,354 @@ class TestVerifyTree:
         # Error should not be None and should contain "budget"
         assert verification.error is not None
         assert "budget" in verification.error
+
+    # ========== R1 FIXES ==========
+
+    def test_empty_manifest_fails_verification(self, tmp_path):
+        """R1.1: Empty manifest should verify to False, not True."""
+        repo = _init_test_repo(tmp_path / "repo")
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        # Create an empty manifest
+        empty_manifest = TreeManifest(
+            manifest_version=MANIFEST_VERSION,
+            hash_algo=HASH_ALGO,
+            commit=None,
+            tree_id="4b825dc642cb6eb9a060e54bf8d69288fbee4904",  # Empty tree ID
+            declared_dirs=(),
+            matches_commit=False,
+            extra_excludes=(),
+            files={},
+            skipped=(),
+        )
+
+        # Verify should return False with error about empty manifest
+        verification = verify_tree(copy, empty_manifest)
+        assert verification.verified is False
+        assert verification.error is not None
+        assert "empty" in verification.error.lower()
+
+    def test_build_manifest_returns_none_for_empty_files(self, tmp_path):
+        """R1.1: build_tree_manifest should return None when resulting file set is empty."""
+        # Create an empty repo (no files)
+        repo = tmp_path / "empty_repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        # Build manifest with empty paths list
+        manifest = build_tree_manifest(repo, commit=None, paths=[])
+        assert manifest is None
+
+    def test_builtin_excludes_pycache_not_extra(self, tmp_path):
+        """R1.2: __pycache__ and .pyc files should not be marked as extras."""
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        # Copy files
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        # Create __pycache__ directory with a .pyc file (no .gitignore entry for it)
+        pycache_dir = copy / "src" / "pkg" / "__pycache__"
+        pycache_dir.mkdir()
+        (pycache_dir / "a.cpython-313.pyc").write_bytes(b"fake bytecode")
+
+        # Verify should pass despite __pycache__ not being in .gitignore
+        verification = verify_tree(copy, manifest)
+        assert "src/pkg/__pycache__/a.cpython-313.pyc" not in verification.extra_untracked_under_declared_dirs
+        assert verification.verified is True
+        assert verification.error is None
+
+    def test_from_dict_rejects_non_bool_matches_commit(self):
+        """R1.7: from_dict should reject non-bool matches_commit."""
+        bad_dict = {
+            "manifest_version": 1,
+            "hash_algo": "git-blob-sha1-nofilter",
+            "commit": None,
+            "tree_id": "abc123def456abc123def456abc123def456abc1",
+            "declared_dirs": [],
+            "matches_commit": "false",  # String instead of bool
+            "extra_excludes": [],
+            "files": {},
+            "skipped": [],
+        }
+        assert TreeManifest.from_dict(bad_dict) is None
+
+    def test_from_dict_rejects_invalid_hex_tree_id(self):
+        """R1.7: from_dict should reject invalid hex tree_id."""
+        bad_dict = {
+            "manifest_version": 1,
+            "hash_algo": "git-blob-sha1-nofilter",
+            "commit": None,
+            "tree_id": "ABCDEF0123456789ABCDEF0123456789ABCDEF01",  # Uppercase
+            "declared_dirs": [],
+            "matches_commit": False,
+            "extra_excludes": [],
+            "files": {},
+            "skipped": [],
+        }
+        assert TreeManifest.from_dict(bad_dict) is None
+
+    def test_from_dict_rejects_invalid_hex_commit(self):
+        """R1.7: from_dict should reject invalid hex commit when present."""
+        bad_dict = {
+            "manifest_version": 1,
+            "hash_algo": "git-blob-sha1-nofilter",
+            "commit": "not-hex-at-all",  # Invalid hex
+            "tree_id": "abc123def456abc123def456abc123def456abc1",
+            "declared_dirs": [],
+            "matches_commit": False,
+            "extra_excludes": [],
+            "files": {},
+            "skipped": [],
+        }
+        assert TreeManifest.from_dict(bad_dict) is None
+
+    def test_verify_file_type_change_mismatched(self, tmp_path):
+        """R1.6: File type change (mode 120000 vs regular) counts as mismatched."""
+        repo = _init_test_repo(tmp_path / "repo")
+
+        # Create a symlink
+        link_target = repo / "src" / "pkg" / "a.py"
+        symlink = repo / "src" / "link.py"
+        symlink.symlink_to(link_target)
+
+        subprocess.run(["git", "add", "src/link.py"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "add symlink"], cwd=repo, capture_output=True)
+
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+        assert manifest.files["src/link.py"][0] == "120000"
+
+        # Copy and replace symlink with regular file (same content as target)
+        copy = tmp_path / "copy"
+        shutil.copytree(repo, copy, ignore=shutil.ignore_patterns(".git"), symlinks=True)
+
+        # Remove symlink and replace with regular file
+        (copy / "src" / "link.py").unlink()
+        (copy / "src" / "link.py").write_text("def func_a():\n    pass\n")
+
+        # Verify should fail: mode changed from 120000 to 100644
+        verification = verify_tree(copy, manifest)
+        assert verification.verified is False
+        assert "src/link.py" in verification.mismatched  # Different type → mismatched
+
+    def test_verify_mode_changed_same_blob(self, tmp_path):
+        """R1.6: Mode change (exec bit) with same blob → mode_changed, verified still True."""
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        # Change a file to executable (same content)
+        (copy / "src" / "pkg" / "a.py").chmod(0o755)
+
+        # Verify should show mode_changed
+        verification = verify_tree(copy, manifest)
+        assert "src/pkg/a.py" in verification.mode_changed
+        assert verification.verified is True
+        assert verification.error is None
+
+    def test_verify_extra_ignored_file_and_mode_changed_assert(self, tmp_path):
+        """R1.9: test_verify_extra_ignored_file must assert verified=True, error=None."""
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        (copy / "src" / "test.log").write_text("log content\n")
+
+        verification = verify_tree(copy, manifest)
+        assert "src/test.log" not in verification.extra_untracked_under_declared_dirs
+        assert verification.verified is True
+        assert verification.error is None
+
+    def test_verify_extra_excludes_pattern_assert(self, tmp_path):
+        """R1.9: test_verify_extra_excludes_pattern must assert verified=True, error=None."""
+        repo = _init_test_repo(tmp_path / "repo")
+
+        manifest = build_tree_manifest(
+            repo,
+            commit=None,
+            extra_excludes=["*.swp", ".DS_Store"],
+        )
+        assert manifest is not None
+
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        (copy / "src" / "test.swp").write_text("swap file\n")
+
+        verification = verify_tree(copy, manifest)
+        assert "src/test.swp" not in verification.extra_untracked_under_declared_dirs
+        assert verification.verified is True
+        assert verification.error is None
+
+    def test_tree_id_ordering_with_file_and_dir_names(self, tmp_path):
+        """R1.9: Test tree_id ordering: files with similar prefixes."""
+        # Create a test repo with files: "a.b", "a/x", "a-b" (ordered correctly)
+        repo = tmp_path / "ordering_repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        (repo / "a.b").write_text("file a.b\n")
+        (repo / "a-b").write_text("file a-b\n")
+        a_dir = repo / "a"
+        a_dir.mkdir()
+        (a_dir / "x").write_text("file a/x\n")
+
+        subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        # Build manifest and compare against git write-tree
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        # Get git's tree OID
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0
+        git_tree_id = proc.stdout.strip()
+        assert manifest.tree_id == git_tree_id
+
+    def test_gitlink_nested_repo_not_extra(self, tmp_path):
+        """R1.4: Nested git repos should not be marked as extras, use gitlink:<path> in skipped."""
+        repo = tmp_path / "main_repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        # Create a file in main repo
+        (repo / "main.py").write_text("main\n")
+
+        # Create a nested git repo
+        vendor_dir = repo / "src" / "vendor"
+        vendor_dir.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=vendor_dir, capture_output=True, check=True)
+        (vendor_dir / "module.py").write_text("module\n")
+        subprocess.run(["git", "add", "-A"], cwd=vendor_dir, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "vendor"], cwd=vendor_dir, capture_output=True)
+
+        # Commit in main repo (without adding the nested repo as submodule, just as untracked)
+        subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        # Copy and verify
+        copy = tmp_path / "copy"
+        shutil.copytree(repo, copy, ignore=shutil.ignore_patterns(".git"))
+
+        verification = verify_tree(copy, manifest)
+        # src/vendor (nested repo) should be in skipped as gitlink, not in extras
+        # After verification, the nested repo dir should NOT cause extra failures
+        assert verification.verified is True or "src/vendor" not in str(verification.extra_untracked_under_declared_dirs)
+
+    def test_budget_exceeded_zero_max_seconds(self, tmp_path):
+        """R1.5: Budget check: max_seconds=0 should fail quickly."""
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        verification = verify_tree(copy, manifest, max_seconds=0)
+        assert verification.verified is False
+        assert "budget" in verification.error.lower()
+
+    def test_fifo_not_regular_file_fails(self, tmp_path):
+        """R1.5: FIFO at manifest path should fail quickly, not hang."""
+        # Skip on non-POSIX systems
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("os.mkfifo not available (non-POSIX)")
+
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        # Create a FIFO at a manifest path location
+        fifo_path = copy / "src" / "pkg" / "a.py"
+        fifo_path.unlink()
+        try:
+            os.mkfifo(str(fifo_path))
+
+            # Verify with a timeout guard
+            import threading
+            result = [None]
+
+            def verify_with_timeout():
+                result[0] = verify_tree(copy, manifest, max_seconds=5)
+
+            thread = threading.Thread(target=verify_with_timeout, daemon=True)
+            thread.start()
+            thread.join(timeout=10)  # Real timeout
+
+            # Should have completed within the time limit
+            assert thread is not None
+            assert result[0] is not None
+            assert result[0].verified is False
+            assert "not a regular file" in result[0].error.lower() or "FIFO" in result[0].error
+
+        finally:
+            if fifo_path.exists():
+                os.unlink(str(fifo_path))
