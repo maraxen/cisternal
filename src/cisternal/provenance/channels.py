@@ -23,8 +23,10 @@ BROKEN GITLINK (debt #2100): a `.git` counts as a repository only if git can act
 use it. A `.git` FILE (a worktree/submodule gitlink) whose `gitdir:` target is positively
 absent -- e.g. a tree rsynced from a laptop, where the target is a laptop path -- is
 skipped, so the sidecar/manifest verification path is reached instead of the ascent
-stopping dead. This relaxes WHERE a channel may be read, never the hard rule: the sha
-still surfaces only if the manifest verifies. It is deliberately narrow -- a `.git`
+stopping dead -- but only for a sidecar in the SAME directory as the gitfile (a gitfile
+marks a separate checkout; climbing past it would let a parent's sidecar vouch for files
+its manifest never covered). This relaxes WHERE a channel may be read, never the hard
+rule: the sha still surfaces only if the manifest verifies. It is deliberately narrow -- a `.git`
 directory, an unreadable or malformed gitfile, or a gitfile whose target EXISTS (so a real
 repo is there that git may be refusing on ownership/safe.directory grounds, and git is the
 authority we cannot consult) all still stop the ascent, i.e. fail closed. The target is
@@ -106,11 +108,12 @@ def _unknown() -> GitState:
 def _broken_gitlink() -> GitState:
     """Nothing answered, and the reason is a dangling `.git` gitfile (debt #2100).
 
-    Same fields as `_unknown()` -- no sha, nothing verified -- but a distinct
-    provenance_source so "not a repo" and "a repo whose gitlink points nowhere" can be told
-    apart. Only returned when NO channel verified anything.
+    No sha, nothing verified, and a distinct provenance_source so "not a repo" and "a repo
+    whose gitlink points nowhere" can be told apart. dirty=True (as in `_withheld`, unlike
+    `_unknown()`): a checkout demonstrably exists here and its state is unknown, so the
+    state must not read as clean. Only returned when NO channel verified anything.
     """
-    return GitState(hash="unknown", branch="unknown", dirty=False, provenance_source="broken-gitlink")
+    return GitState(hash="unknown", branch="unknown", dirty=True, provenance_source="broken-gitlink")
 
 
 def _live_state(live) -> GitState:
@@ -188,7 +191,7 @@ class _BrokenGitlink:
     target: str  # the gitdir target exactly as written in the file
 
 
-_GITFILE_PREFIX = "gitdir: "
+_GITFILE_PREFIX = b"gitdir: "
 _GITFILE_MAX_BYTES = 4096
 
 
@@ -209,13 +212,16 @@ def _dangling_gitlink(git_path: Path) -> _BrokenGitlink | None:
     try:
         if not git_path.is_file():
             return None
-        with open(git_path, encoding="utf-8", errors="replace") as fh:
+        # Bytes, not text: a lossy decode could turn a non-UTF-8 target that EXISTS into one
+        # that looks absent. os.fsdecode round-trips exactly (surrogateescape) for stat().
+        with open(git_path, "rb") as fh:
             content = fh.read(_GITFILE_MAX_BYTES + 1)
         if len(content) > _GITFILE_MAX_BYTES or not content.startswith(_GITFILE_PREFIX):
             return None
-        target = content[len(_GITFILE_PREFIX):].rstrip("\r\n")
-        if not target or "\n" in target or "\r" in target or "\0" in target:
+        raw_target = content[len(_GITFILE_PREFIX):].rstrip(b"\r\n")
+        if not raw_target or b"\n" in raw_target or b"\r" in raw_target or b"\0" in raw_target:
             return None
+        target = os.fsdecode(raw_target)
         try:
             os.stat(git_path.parent / target)  # relative targets resolve against the gitfile's dir
         except (FileNotFoundError, NotADirectoryError):
@@ -228,9 +234,13 @@ def _dangling_gitlink(git_path: Path) -> _BrokenGitlink | None:
 def _ascend_for_sidecar(cwd: str | Path) -> tuple[dict | None, _BrokenGitlink | None]:
     """Ascend from cwd up to 8 levels looking for .myxcel_provenance.json or .git.
 
-    Stops at the first .git (file or directory) or PROVENANCE_FILENAME -- except a
-    dangling gitfile (see `_dangling_gitlink`), which is skipped as if it were absent.
-    Returns (parsed sidecar record or None, the nearest skipped dangling gitlink or None).
+    Stops at the first .git (file or directory) or PROVENANCE_FILENAME -- except that a
+    dangling gitfile (see `_dangling_gitlink`) is skipped as if absent, but ONLY for a
+    sidecar in that SAME directory. A gitfile marks the root of a separate checkout, so the
+    ascent must never climb past it to a parent tree's sidecar: that sidecar's manifest does
+    not cover the nested checkout's files (gitignored/undeclared dirs), and would vouch for
+    code nobody verified.
+    Returns (parsed sidecar record or None, the skipped dangling gitlink or None).
     """
     cwd_path = Path(cwd).resolve()
     current = cwd_path
@@ -239,10 +249,9 @@ def _ascend_for_sidecar(cwd: str | Path) -> tuple[dict | None, _BrokenGitlink | 
     for _ in range(8):
         git_path = current / ".git"
         if git_path.exists():
-            link = _dangling_gitlink(git_path)
-            if link is None:
-                return None, broken
-            broken = broken or link
+            broken = _dangling_gitlink(git_path)
+            if broken is None:
+                return None, None
 
         sidecar_path = current / PROVENANCE_FILENAME
         if sidecar_path.exists():
@@ -276,6 +285,9 @@ def _ascend_for_sidecar(cwd: str | Path) -> tuple[dict | None, _BrokenGitlink | 
                 }, broken
             except (json.JSONDecodeError, OSError):
                 return None, broken
+
+        if broken is not None:
+            return None, broken  # a gitfile is a checkout boundary: never ascend past it
 
         parent = current.parent
         if parent == current:

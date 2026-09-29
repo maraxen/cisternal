@@ -313,3 +313,208 @@ def test_gitfile_pointing_at_valid_worktree_live_git_wins(tmp_path):
     assert state.hash == _head(wt)
     assert state.code_verified is True
     _assert_sha_absent(state, "c" * 40)
+
+
+def test_live_git_wins_even_if_the_gitlink_was_judged_dangling(tmp_path, monkeypatch):
+    """Defence in depth (TOCTOU: the target appears after the stat): if git resolves, git wins
+    over a sidecar even when `_dangling_gitlink` said the gitfile was dangling."""
+    wt = _linked_worktree(tmp_path)
+    (wt / PROVENANCE_FILENAME).write_text(json.dumps({
+        "schema_version": 1, "provenance_status": "git", "git_sha": "c" * 40,
+        "provenance_root": str(wt),
+    }))
+    monkeypatch.setattr(
+        channels, "_dangling_gitlink", lambda p: channels._BrokenGitlink(path=p, target="/gone")
+    )
+
+    state = capture_git_state(wt)
+
+    assert state.provenance_source == "git"
+    assert state.hash == _head(wt)
+    _assert_sha_absent(state, "c" * 40)
+
+
+# --- a dangling gitfile is only skipped when the SIDECAR sits beside it (challenger B1) -------
+# A gitfile BELOW the sidecar's directory is positive evidence that cwd belongs to a different
+# checkout. verify_tree does not cover such a tree (gitignored/undeclared dirs), so climbing past
+# the gitfile would let the parent's sidecar vouch, code_verified=True, for code nobody checked.
+
+
+def test_nested_dangling_checkout_below_the_sidecar_is_not_vouched_for(tmp_path):
+    remote, head_sha = _make_verified_tree(tmp_path)
+    nested = remote / "extern" / "tool"  # an undeclared top-level dir: verify_tree cannot see into it
+    (nested / "pkg").mkdir(parents=True)
+    (nested / "pkg" / "evil.py").write_text("print('not the pushed code')\n")
+    _dangle(nested)
+
+    for cwd in (nested, nested / "pkg"):
+        state = capture_git_state(cwd)
+        assert state.sha is None, cwd
+        assert state.code_verified is None, cwd
+        assert state.provenance_source == "broken-gitlink", cwd
+        _assert_sha_absent(state, head_sha)
+
+
+def test_nested_dangling_checkout_inside_a_declared_dir_is_not_vouched_for(tmp_path):
+    remote, head_sha = _make_verified_tree(tmp_path)
+    vendored = remote / "src" / "vendored"
+    vendored.mkdir()
+    _dangle(vendored)
+
+    state = capture_git_state(vendored)
+
+    assert state.sha is None
+    assert state.provenance_source == "broken-gitlink"
+    _assert_sha_absent(state, head_sha)
+
+
+def test_two_dangling_gitlinks_in_the_ascent_stop_at_the_first(tmp_path):
+    remote, head_sha = _make_verified_tree(tmp_path)
+    _dangle(remote)  # the protamer shape at the sidecar root ...
+    sub = remote / "extern" / "tool"
+    sub.mkdir(parents=True)
+    _dangle(sub, target="/another/gone/gitdir")  # ... plus a separate dangling checkout below it
+
+    with pytest.warns(UserWarning, match=r"another/gone/gitdir"):
+        state = capture_git_state(sub)
+
+    assert state.sha is None
+    assert state.provenance_source == "broken-gitlink"
+    _assert_sha_absent(state, head_sha)
+
+
+# --- fail-closed edges of the "definitely absent" test (challenger B2, M2, M3) ---------------
+
+
+def test_non_utf8_gitdir_target_that_exists_fails_closed(tmp_path, monkeypatch):
+    """The gitfile bytes must reach stat() unmangled: decoding with errors='replace' would turn
+    a non-UTF-8 target that EXISTS into one that looks absent."""
+    import os
+
+    s_dir = tmp_path / "S"
+    s_dir.mkdir()
+    primary = _init_repo(s_dir)
+    wt = tmp_path / os.fsdecode(b"W\xe9")
+    try:
+        subprocess.run(["git", "worktree", "add", "-q", os.fsencode(wt), "-b", "wb"], cwd=primary, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("filesystem cannot hold a non-UTF-8 path")
+    assert b"\xe9" in (wt / ".git").read_bytes()
+    wt_head = _head(wt)
+    manifest = build_tree_manifest(wt, commit=wt_head)
+    assert manifest is not None
+    (wt / PROVENANCE_FILENAME).write_text(json.dumps({
+        "schema_version": 2, "provenance_status": "git", "git_sha": wt_head,
+        "git_branch": "wb", "git_dirty": False, "provenance_root": str(wt),
+        "tree_manifest": manifest.to_dict(),
+    }))
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+
+    state = capture_git_state(wt)
+
+    assert state.sha is None
+    assert state.provenance_source == "none"
+    _assert_sha_absent(state, wt_head)
+
+
+@pytest.mark.skipif(__import__("os").geteuid() == 0, reason="root ignores directory permissions")
+def test_permission_denied_on_target_is_not_evidence_of_absence(tmp_path):
+    remote, head_sha = _make_verified_tree(tmp_path)
+    locked = tmp_path / "locked"
+    (locked / "gitdir").mkdir(parents=True)
+    _dangle(remote, target=str(locked / "gitdir"))
+    locked.chmod(0)
+    try:
+        state = capture_git_state(remote)
+    finally:
+        locked.chmod(0o755)
+
+    assert state.sha is None
+    assert state.provenance_source == "none"
+    _assert_sha_absent(state, head_sha)
+
+
+def test_relative_target_is_resolved_against_the_gitfile_not_the_process_cwd(tmp_path, monkeypatch):
+    wt = _linked_worktree(tmp_path)
+    wt_head = _head(wt)
+    (wt / ".git").write_text("gitdir: ../S/.git/worktrees/W\n")  # exists relative to the gitfile only
+    manifest = build_tree_manifest(wt, commit=wt_head)
+    assert manifest is not None
+    (wt / PROVENANCE_FILENAME).write_text(json.dumps({
+        "schema_version": 2, "provenance_status": "git", "git_sha": wt_head,
+        "git_branch": "wb", "git_dirty": False, "provenance_root": str(wt),
+        "tree_manifest": manifest.to_dict(),
+    }))
+    elsewhere = tmp_path / "elsewhere" / "deeper"
+    elsewhere.mkdir(parents=True)
+    monkeypatch.chdir(elsewhere)  # "../S/..." does NOT exist from here
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+
+    state = capture_git_state(wt)
+
+    assert state.sha is None
+    assert state.provenance_source == "none"
+    _assert_sha_absent(state, wt_head)
+
+
+def test_broken_gitlink_sentinel_does_not_claim_a_clean_tree(tmp_path):
+    root = tmp_path / "protamer"
+    root.mkdir()
+    _dangle(root)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        state = capture_git_state(root)
+
+    assert state.provenance_source == "broken-gitlink"
+    assert state.dirty is True  # unknown state must not read as clean (same as _withheld)
+
+
+# --- end to end with the REAL writer half (build_provenance_record + build_tree_manifest) ----
+
+
+def test_e2e_real_writer_worktree_gitfile_copied_off_laptop_verifies(tmp_path):
+    """The protamer shape end to end: a linked worktree's sidecar is written by the real writer,
+    the tree (including its `.git` gitfile) is copied to a 'cluster' dir, and the original repo --
+    the gitfile's target -- is gone. The reader must surface the verified sha; touching a file
+    afterwards must withhold it."""
+    import shutil
+
+    from cisternal.provenance.capture import build_provenance_record
+    from cisternal.provenance.record import to_json_bytes
+
+    wt = _linked_worktree(tmp_path)
+    (wt / "src").mkdir()
+    (wt / "src" / "m.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "add m"], cwd=wt, check=True)
+    head = _head(wt)
+
+    manifest = build_tree_manifest(wt, commit=head)
+    assert manifest is not None
+    cluster = tmp_path / "cluster" / "protamer"
+    record, _ = build_provenance_record(
+        wt, remote="engaging", project="protamer", provenance_root=str(cluster),
+        capture_stage="push", tree_manifest=manifest,
+    )
+    assert record.schema_version == 2 and record.git_sha == head
+
+    shutil.copytree(wt, cluster)  # carries the gitfile along, as rsync does
+    (cluster / PROVENANCE_FILENAME).write_bytes(to_json_bytes(record))
+    shutil.rmtree(tmp_path / "S")  # the laptop repo: the gitfile now dangles
+    assert (cluster / ".git").is_file()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        state = capture_git_state(cluster)
+    assert state.sha == head
+    assert state.code_verified is True
+    assert state.provenance_source == "myxcel-sidecar"
+
+    (cluster / "src" / "m.py").write_text("x = 2\n")
+    channels._WARNED.clear()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        state = capture_git_state(cluster)
+    assert state.sha is None
+    assert state.code_verified is False
