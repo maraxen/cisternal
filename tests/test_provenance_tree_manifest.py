@@ -1084,7 +1084,23 @@ class TestVerifyTree:
         subprocess.run(["git", "init"], cwd=vendor_dir, capture_output=True, check=True)
         (vendor_dir / "module.py").write_text("module\n")
         subprocess.run(["git", "add", "-A"], cwd=vendor_dir, capture_output=True, check=True)
-        subprocess.run(["git", "commit", "-m", "vendor"], cwd=vendor_dir, capture_output=True)
+        # Inline identity: CI has no global git identity, and an uncommitted
+        # nested repo makes the outer `git add -A` fail.
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test User",
+                "commit",
+                "-m",
+                "vendor",
+            ],
+            cwd=vendor_dir,
+            capture_output=True,
+            check=True,
+        )
 
         # Commit in main repo (without adding the nested repo as submodule, just as untracked)
         subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)

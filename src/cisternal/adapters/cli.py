@@ -93,7 +93,7 @@ def timed_command(cmd_name: str | None = None):
 
         # Lets wire() detect a command a consumer already instrumented by hand,
         # so it does not wrap a second time and emit every event twice.
-        wrapper._cisternal_timed = True  # type: ignore[attr-defined]
+        wrapper._cisternal_timed = True  # ty: ignore[unresolved-attribute]
         return wrapper
 
     return decorator

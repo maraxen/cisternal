@@ -141,7 +141,6 @@ def test_v1_record_without_tree_manifest_omits_key_for_compatibility():
 
 def test_v2_round_trip_with_tree_manifest(tmp_path):
     """v2 record with tree_manifest can round-trip through write/read."""
-    from cisternal.provenance.record import MAX_KNOWN_SCHEMA_VERSION
 
     manifest_dict = {"manifest_version": 1, "files": {}}
     record = ProvenanceRecord(
