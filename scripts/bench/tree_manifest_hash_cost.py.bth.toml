@@ -1,0 +1,22 @@
+[experiment]
+hypothesis = "A 5,000-file tree with no .git can be hashed for manifest verification in under 2 s on this box, pure-Python git-blob-sha1 equals `git hash-object --no-filters` on every file, and --no-filters makes the hash independent of eol config"
+description = "Pre-registration for the tree-manifest design in the debt-2060 spec (sidecar verification). Decides whether verify() hashes in pure Python or via one batched git hash-object call, and whether eol/filter behaviour needs handling without a repo config."
+task_id = "260929_sidecar-verify-2060"
+
+[outcomes.pass]
+condition = "python_vs_git_agree == n_files AND one_byte_edit_detected AND crlf_filtered_differs_from_no_filters AND crlf_no_filters_matches_python AND NOT tree_inside_git_repo AND min(seconds_python_blob_sha1, seconds_git_hash_object_batched) < 2.0"
+reasoning = "Positive control (agreement) plus two negative controls that must fire; the tree must genuinely be outside a repo; and verification must be cheap enough to run once per bathos run capture"
+is_residual = false
+
+[outcomes.marginal]
+condition = "all controls pass but min(seconds) is between 2.0 and 10.0"
+reasoning = "Correct but expensive: verify() would need caching (e.g. stat-based short-circuit) before it can run on every capture"
+is_residual = false
+
+[outcomes.fail]
+condition = "any control fails, or the tree is inside a git repo, or min(seconds) >= 10.0"
+reasoning = "Either the instrument is wrong (hashes disagree / a negative control does not fire) or hashing is too slow to run per capture"
+is_residual = true
+
+[result_schema]
+fields = ["n_files", "total_bytes", "tree_inside_git_repo", "python_vs_git_agree", "one_byte_edit_detected", "crlf_filtered_differs_from_no_filters", "crlf_no_filters_matches_python", "seconds_python_blob_sha1", "seconds_git_hash_object_batched", "git_version"]

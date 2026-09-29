@@ -187,3 +187,66 @@ class TestBuildProvenanceRecord:
         )
         assert sync_record.git_sha == async_record.git_sha
         assert sync_record.provenance_status == async_record.provenance_status
+
+
+class TestBuildProvenanceRecordWithTreeManifest:
+    def test_without_tree_manifest_param_defaults_to_v1(self, clean_repo):
+        """build_provenance_record without tree_manifest param -> schema_version 1, tree_manifest None."""
+        record, _ = build_provenance_record(
+            clean_repo, remote="r", project="p", provenance_root="/remote/p", capture_stage="push",
+        )
+        assert record.schema_version == 1
+        assert record.tree_manifest is None
+
+    def test_with_tree_manifest_object_sets_v2(self, clean_repo):
+        """build_provenance_record with tree_manifest object -> schema_version 2 when status is git."""
+        class FakeTreeManifest:
+            def to_dict(self):
+                return {"x": 1}
+
+        manifest = FakeTreeManifest()
+        record, _ = build_provenance_record(
+            clean_repo, remote="r", project="p", provenance_root="/remote/p", capture_stage="push",
+            tree_manifest=manifest,
+        )
+        assert record.schema_version == 2
+        assert record.tree_manifest == {"x": 1}
+
+    def test_tree_manifest_not_set_when_status_not_git(self, tmp_path):
+        """build_provenance_record with tree_manifest on nogit -> schema_version 1, tree_manifest None."""
+        class FakeTreeManifest:
+            def to_dict(self):
+                return {"x": 1}
+
+        manifest = FakeTreeManifest()
+        record, _ = build_provenance_record(
+            tmp_path, remote="r", project="p", provenance_root="/remote/p", capture_stage="push",
+            tree_manifest=manifest,
+        )
+        # nogit status, so should stay v1 even with tree_manifest provided
+        assert record.schema_version == 1
+        assert record.tree_manifest is None
+
+    @pytest.mark.asyncio
+    async def test_async_without_tree_manifest_defaults_to_v1(self, clean_repo):
+        """abuild_provenance_record without tree_manifest param -> schema_version 1, tree_manifest None."""
+        record, _ = await abuild_provenance_record(
+            clean_repo, remote="r", project="p", provenance_root="/remote/p", capture_stage="push",
+        )
+        assert record.schema_version == 1
+        assert record.tree_manifest is None
+
+    @pytest.mark.asyncio
+    async def test_async_with_tree_manifest_sets_v2(self, clean_repo):
+        """abuild_provenance_record with tree_manifest object -> schema_version 2 when status is git."""
+        class FakeTreeManifest:
+            def to_dict(self):
+                return {"manifest_version": 1, "files": {}}
+
+        manifest = FakeTreeManifest()
+        record, _ = await abuild_provenance_record(
+            clean_repo, remote="r", project="p", provenance_root="/remote/p", capture_stage="push",
+            tree_manifest=manifest,
+        )
+        assert record.schema_version == 2
+        assert record.tree_manifest == {"manifest_version": 1, "files": {}}
