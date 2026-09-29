@@ -532,9 +532,10 @@ class TestVerificationGating:
 
     def test_env_channel_no_manifest_withheld(self, tmp_path, monkeypatch):
         """Env channel with no sidecar manifest at root → withheld."""
+        env_sha = "a" * 40
         monkeypatch.setenv("MYXCEL_PROVENANCE_SCHEMA", "2")
         monkeypatch.setenv("MYXCEL_PROVENANCE_STATUS", "git")
-        monkeypatch.setenv("MYXCEL_GIT_SHA", "a" * 40)
+        monkeypatch.setenv("MYXCEL_GIT_SHA", env_sha)
         monkeypatch.setenv("MYXCEL_GIT_BRANCH", "main")
         monkeypatch.setenv("MYXCEL_PROVENANCE_ROOT", str(tmp_path))
         # No sidecar at tmp_path, so no manifest to read
@@ -543,14 +544,21 @@ class TestVerificationGating:
         assert state.hash == "unknown"
         assert state.code_verified is None
         assert state.provenance_source == "unverified-env"
+        assert state.branch == "unknown"
+        assert state.dirty_content_id is None
+
+        # Hard-rule: env sha should not appear in state representation
+        assert env_sha not in repr(state)
+        assert env_sha not in json.dumps(dataclasses.asdict(state), default=str)
 
     def test_env_sha_mismatch_with_sidecar_withheld(self, tmp_path, monkeypatch):
         """Env SHA != sidecar SHA with verified sidecar → withheld, code_verified=False."""
         remote, head_sha = _make_verified_tree(tmp_path)
 
+        env_sha = "c" * 40  # Different from sidecar
         monkeypatch.setenv("MYXCEL_PROVENANCE_SCHEMA", "2")
         monkeypatch.setenv("MYXCEL_PROVENANCE_STATUS", "git")
-        monkeypatch.setenv("MYXCEL_GIT_SHA", "c" * 40)  # Different from sidecar
+        monkeypatch.setenv("MYXCEL_GIT_SHA", env_sha)
         monkeypatch.setenv("MYXCEL_GIT_BRANCH", "main")
         monkeypatch.setenv("MYXCEL_PROVENANCE_ROOT", str(remote))
 
@@ -558,6 +566,12 @@ class TestVerificationGating:
         assert state.hash == "unknown"
         assert state.code_verified is False
         assert state.provenance_source == "unverified-env"
+        assert state.branch == "unknown"
+        assert state.dirty_content_id is None
+
+        # Hard-rule: env sha should not appear in state representation
+        assert env_sha not in repr(state)
+        assert env_sha not in json.dumps(dataclasses.asdict(state), default=str)
 
     def test_env_channel_with_valid_sidecar_surfaces(self, tmp_path, monkeypatch):
         """Env channel pointing to a verified sidecar → surfaces."""
@@ -639,6 +653,8 @@ class TestVerificationGating:
             capture_git_state(fixture_dir)
             count_after_second = len(w)
 
+        # First call should have emitted at least one warning
+        assert count_after_first >= 1, "Expected at least one warning on first call"
         # Second call should not have emitted another warning
         assert count_after_second == count_after_first
 
@@ -681,17 +697,33 @@ class TestVerificationGating:
         assert len(state.verification.extra_untracked_under_declared_dirs) > 0
 
     def test_cwd_outside_sidecar_withheld(self, tmp_path):
-        """cwd outside sidecar directory → withheld."""
+        """cwd outside sidecar directory: _gate withholds, but verify control passes."""
+        from cisternal.provenance.channels import _gate, _sidecar_channel
+
+        # Build a verified tree
         remote, head_sha = _make_verified_tree(tmp_path)
 
-        # cwd outside remote
-        outside = tmp_path / "outside"
-        outside.mkdir()
+        # Obtain the sidecar record (includes sidecar_path)
+        prov = _sidecar_channel(remote)
+        assert prov is not None, "Failed to read sidecar"
+        assert "sidecar_path" in prov, "sidecar_path not in prov dict"
 
-        state = capture_git_state(outside)
-        assert state.hash == "unknown"
-        # The sidecar is not found, so it's just _unknown()
-        assert state.provenance_source == "none"
+        # Call _gate with cwd outside the sidecar directory
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        state = _gate(prov, "myxcel-sidecar", outside)
+
+        # Should be withheld because cwd is outside root_dir
+        assert state.hash == "unknown", f"Expected unknown hash, got {state.hash}"
+        assert state.provenance_source == "unverified-sidecar"
+        assert state.code_verified is False
+
+        # Control: call _gate with cwd inside the sidecar directory
+        state_control = _gate(prov, "myxcel-sidecar", remote)
+
+        # Should surface because cwd is inside root_dir
+        assert state_control.hash == head_sha
+        assert state_control.code_verified is True
 
     def test_nogit_status_keeps_hash(self, tmp_path):
         """nogit status surfaces hash='nogit', no verification needed."""
@@ -838,7 +870,7 @@ class TestVerificationGating:
 
     def test_gate_no_sidecar_path(self, tmp_path):
         """Direct _gate call: sidecar mode without sidecar_path → withheld."""
-        from cisternal.provenance.channels import _gate
+        from cisternal.provenance.channels import _gate, _WARNED
 
         # Call _gate directly with a dict that has no sidecar_path
         prov = {
@@ -848,10 +880,26 @@ class TestVerificationGating:
             "git_dirty": False,
             # No sidecar_path key
         }
-        state = _gate(prov, "myxcel-sidecar", tmp_path)
+
+        # Clear the warning cache
+        _WARNED.clear()
+
+        # Capture warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            state = _gate(prov, "myxcel-sidecar", tmp_path)
+
         assert state.hash == "unknown"
         assert state.provenance_source == "unverified-sidecar"
         assert state.code_verified is None
+
+        # Verify a warning was emitted
+        assert len(w) >= 1, "Expected at least one warning to be emitted"
+
+        # Verify the SHA is NOT in any warning message
+        for warning in w:
+            msg = str(warning.message)
+            assert "a" * 40 not in msg, f"SHA found in warning message: {msg}"
 
     def test_gate_sidecar_path_with_valid_manifest(self, tmp_path):
         """_gate with sidecar_path but no actual manifest → withheld."""

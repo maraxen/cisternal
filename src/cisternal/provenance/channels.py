@@ -9,7 +9,7 @@ move, bathos independently re-implemented a reader for the exact schema
 myxcel's writer produces, with no shared code enforcing the two agree.
 
 `capture_git_state()` never raises (C6 of the spec): every caller-visible
-failure degrades to the `_UNKNOWN` sentinel, because a provenance-capture
+failure degrades to _unknown(), because a provenance-capture
 failure must never fail the run it's attached to.
 
 VERIFICATION (debt #2060): sidecar and env channels now verify their reported
@@ -64,13 +64,17 @@ class GitState:
 
     @property
     def sha(self) -> str | None:
-        """Return hash iff it is 40 lowercase hex, else None.
+        """Return hash only if it is 40 lowercase hex, else None.
+
+        Returns the hash (a valid git commit SHA) only if it is exactly 40
+        lowercase hex digits. Returns None for "unknown", "nogit", or any other
+        non-hex value.
 
         This property guards access to the hash for callers who need only
         authoritative (verified) shas. The hard rule: a sidecar or env channel
         surfaces its hash ONLY when all verification conditions pass. For those
         channels, sha == hash iff code_verified is True. For live git or nogit,
-        sha == hash always.
+        sha == hash always (unless hash is "nogit", in which case sha is None).
         """
         if self.hash and _re.fullmatch(r"[0-9a-f]{40}", self.hash):
             return self.hash
@@ -83,6 +87,23 @@ _WARNED: set[str] = set()
 def _unknown() -> GitState:
     """Return a fresh unknown sentinel (not a shared mutable instance)."""
     return GitState(hash="unknown", branch="unknown", dirty=False, provenance_source="none")
+
+
+def _withheld(prov_source: str, code_verified: bool | None, verification: TreeVerification | None = None) -> GitState:
+    """Return a withheld (verification failed) GitState for a sidecar or env channel.
+
+    Sets hash/branch to "unknown", dirty=True, dirty_content_id=None.
+    Automatically determines provenance_source based on prov_source parameter.
+    """
+    return GitState(
+        hash="unknown",
+        branch="unknown",
+        dirty=True,
+        dirty_content_id=None,
+        provenance_source="unverified-sidecar" if prov_source == "myxcel-sidecar" else "unverified-env",
+        code_verified=code_verified,
+        verification=verification,
+    )
 
 
 def _env_channel(cwd: str | Path) -> dict | None:
@@ -295,15 +316,8 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
         if not sidecar_path_str:
             # No sidecar_path means we cannot verify against the correct directory
             reason = "sidecar path unknown"
-            _warn_withheld(str(claimed_sha or "unknown"), reason)
-            return GitState(
-                hash="unknown",
-                branch="unknown",
-                dirty=True,
-                dirty_content_id=None,
-                provenance_source="unverified-sidecar",
-                code_verified=None,
-            )
+            _warn_withheld("<unknown sidecar path>", reason)
+            return _withheld(prov_source, None)
         root_dir = Path(sidecar_path_str).parent
         manifest_dict = prov.get("tree_manifest")
     else:  # myxcel-env
@@ -312,30 +326,13 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
         sidecar_rec = read_sidecar(root_dir)
         sidecar_rec_for_env = sidecar_rec
         if sidecar_rec is None or sidecar_rec.tree_manifest is None:
-            if sidecar_rec is None:
-                reason = "no tree manifest at MYXCEL_PROVENANCE_ROOT"
-            else:
-                reason = "no tree manifest at MYXCEL_PROVENANCE_ROOT"
+            reason = "no tree manifest at MYXCEL_PROVENANCE_ROOT"
             _warn_withheld(str(root_dir), reason)
-            return GitState(
-                hash="unknown",
-                branch="unknown",
-                dirty=True,
-                dirty_content_id=None,
-                provenance_source="unverified-env",
-                code_verified=None,
-            )
+            return _withheld(prov_source, None)
         elif sidecar_rec.git_sha != claimed_sha:
             reason = "env sha does not match sidecar sha"
             _warn_withheld(str(root_dir), reason)
-            return GitState(
-                hash="unknown",
-                branch="unknown",
-                dirty=True,
-                dirty_content_id=None,
-                provenance_source="unverified-env",
-                code_verified=False,
-            )
+            return _withheld(prov_source, False)
         else:
             manifest_dict = sidecar_rec.tree_manifest
 
@@ -345,27 +342,13 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
     if manifest is None:
         reason = "no tree manifest (schema v1 sidecar)" if not manifest_dict else "unparseable tree manifest"
         _warn_withheld(str(root_dir), reason)
-        return GitState(
-            hash="unknown",
-            branch="unknown",
-            dirty=True,
-            dirty_content_id=None,
-            provenance_source=("unverified-sidecar" if prov_source == "myxcel-sidecar" else "unverified-env"),
-            code_verified=None,
-        )
+        return _withheld(prov_source, None)
 
     # Check that manifest.commit == claimed_sha
     if manifest.commit != claimed_sha:
         reason = "tree manifest commit does not match git_sha"
         _warn_withheld(str(root_dir), reason)
-        return GitState(
-            hash="unknown",
-            branch="unknown",
-            dirty=True,
-            dirty_content_id=None,
-            provenance_source=("unverified-sidecar" if prov_source == "myxcel-sidecar" else "unverified-env"),
-            code_verified=False,
-        )
+        return _withheld(prov_source, False)
 
     # Check that cwd is inside root_dir (D3 condition 3)
     try:
@@ -374,25 +357,11 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
         if not cwd_resolved.is_relative_to(root_resolved):
             reason = "cwd is not inside sidecar directory"
             _warn_withheld(str(root_dir), reason)
-            return GitState(
-                hash="unknown",
-                branch="unknown",
-                dirty=True,
-                dirty_content_id=None,
-                provenance_source=("unverified-sidecar" if prov_source == "myxcel-sidecar" else "unverified-env"),
-                code_verified=False,
-            )
+            return _withheld(prov_source, False)
     except (ValueError, OSError):
         reason = "cwd path resolution failed"
         _warn_withheld(str(root_dir), reason)
-        return GitState(
-            hash="unknown",
-            branch="unknown",
-            dirty=True,
-            dirty_content_id=None,
-            provenance_source=("unverified-sidecar" if prov_source == "myxcel-sidecar" else "unverified-env"),
-            code_verified=False,
-        )
+        return _withheld(prov_source, False)
 
     # Verify the tree
     v = verify_tree(root_dir, manifest, cwd=cwd, dirty_content_id=prov.get("dirty_content_id"))
@@ -405,15 +374,7 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
         if v.error:
             reason += f"; {v.error}"
         _warn_withheld(str(root_dir), reason)
-        return GitState(
-            hash="unknown",
-            branch="unknown",
-            dirty=True,
-            dirty_content_id=None,
-            provenance_source=("unverified-sidecar" if prov_source == "myxcel-sidecar" else "unverified-env"),
-            code_verified=False,
-            verification=v,
-        )
+        return _withheld(prov_source, False, v)
 
     # All checks passed: surface the sha
     # For env channels: dirty = (env says dirty) or (sidecar says dirty) or (manifest doesn't match commit)
