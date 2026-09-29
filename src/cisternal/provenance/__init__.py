@@ -50,14 +50,22 @@ from .durable import (
     update_ref,
 )
 from .record import (
+    MAX_KNOWN_SCHEMA_VERSION,
     PROVENANCE_FILENAME,
     ProvenanceRecord,
     from_env,
+    read_sidecar,
     read_state_record,
     state_record_path,
     to_env,
     to_json_bytes,
     write_state_record,
+)
+from .tree_manifest import (
+    TreeManifest,
+    TreeVerification,
+    build_tree_manifest,
+    verify_tree,
 )
 
 __all__ = [
@@ -70,6 +78,7 @@ __all__ = [
     "GitResolutionError",
     "GitState",
     "ImportReport",
+    "MAX_KNOWN_SCHEMA_VERSION",
     "PROVENANCE_FILENAME",
     "PinResult",
     "ProvenanceRecord",
@@ -77,11 +86,14 @@ __all__ = [
     "SNAPSHOT_METADATA_ONLY",
     "SNAPSHOT_NONE",
     "SnapshotResult",
+    "TreeManifest",
+    "TreeVerification",
     "abuild_provenance_record",
     "acompute_dirty_content_id",
     "append_manifest",
     "aresolve_git_commit",
     "build_provenance_record",
+    "build_tree_manifest",
     "capture_git_state",
     "clean_git_env",
     "compute_dirty_content_id",
@@ -94,6 +106,7 @@ __all__ = [
     "manifest_entry",
     "pin_result_as_dict",
     "pin_run",
+    "read_sidecar",
     "read_state_record",
     "ref_resolves",
     "repo_root",
@@ -105,5 +118,6 @@ __all__ = [
     "to_json_bytes",
     "uncommitted_diff_for_run",
     "update_ref",
+    "verify_tree",
     "write_state_record",
 ]
