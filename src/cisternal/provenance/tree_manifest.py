@@ -1,0 +1,881 @@
+"""Tree manifest writer and verifier for no-.git provenance.
+
+Two independent problems, solved here:
+
+1. **Build a content-addressed manifest of the files transferred in a push**,
+   with their raw (no-filter) git blob IDs and modes. This is the writer path
+   (myxcel, at push time), which enumerates the actual pushed files, computes
+   their hashes, and embeds the manifest in the sidecar so the reader can
+   verify it later.
+
+2. **Verify that a manifest still matches the disk** on a no-.git host, with
+   content/mode checks, ignore-aware extras detection, and a budget. This is
+   the reader path (bathos, at run time), which takes a manifest from the
+   sidecar and checks whether the code on disk has been modified, deleted, or
+   contaminated.
+
+Both paths use pure-Python git-blob-sha1 hashing (no binary dependency) and
+never raise -- they degrade to a logged reason and a None/failed result. The
+exception is verify_tree, which wraps all exceptions in the result rather than
+propagating them.
+
+Tree manifest format: MANIFEST_VERSION=1, HASH_ALGO="git-blob-sha1-nofilter".
+Files are enumerated from a git ls-files or explicit paths, dropping symlinks
+to nonexistent targets, dropping directories/gitlinks, and excluding .git and
+PROVENANCE_FILENAME by construction.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import subprocess
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Mapping
+
+from .capture import clean_git_env
+from .record import PROVENANCE_FILENAME
+
+logger = logging.getLogger(__name__)
+
+MANIFEST_VERSION = 1
+HASH_ALGO = "git-blob-sha1-nofilter"
+DEFAULT_MAX_BYTES = 4 * 1024**3
+DEFAULT_MAX_SECONDS = 60.0
+
+
+def blob_id(data: bytes) -> str:
+    """Compute git blob SHA-1 of raw bytes (no filters).
+
+    Git blob format: b"blob %d\0" + data, where %d is the byte length.
+    Returns 40-character hex string (lowercase).
+    """
+    blob_header = f"blob {len(data)}\0".encode("utf-8")
+    return hashlib.sha1(blob_header + data).hexdigest()
+
+
+def tree_id(files: Mapping[str, tuple[str, str]]) -> str:
+    """Compute git tree OID from a mapping of path -> (mode, blob_hex).
+
+    Paths must be POSIX-relative and sorted in git order (by UTF-8 bytes,
+    with directories sorted as name + "/").
+
+    A git tree object is: b"tree %d\0" + concat of entries, where each entry is:
+    b"<mode> <name>\0" + bytes.fromhex(blob_hex), and mode is one of
+    "100644" (regular), "100755" (exec), "120000" (symlink), or "40000" (dir).
+
+    This function builds a multi-level tree structure, hashing each level
+    bottom-up.
+    """
+    if not files:
+        # Empty tree
+        return hashlib.sha1(b"tree 0\0").hexdigest()
+
+    # Build nested tree structure
+    # Group files by directory, then recursively build tree entries
+    def build_tree_recursive(entries: dict[str, tuple[str, str] | dict]) -> str:
+        """Build a tree object from entries (path -> (mode, blob) or nested dict)."""
+        tree_content = b""
+        for name in sorted(
+            entries.keys(),
+            key=lambda n: (n.encode("utf-8") + (b"/" if isinstance(entries[n], dict) else b""))
+        ):
+            entry = entries[name]
+            if isinstance(entry, dict):
+                # This is a directory (nested tree)
+                mode = b"40000"
+                blob_hex = build_tree_recursive(entry)
+            else:
+                # Regular file or symlink
+                mode_str, blob_hex = entry
+                mode = mode_str.encode("utf-8")
+
+            name_bytes = name.encode("utf-8")
+            blob_bytes = bytes.fromhex(blob_hex)
+            tree_content += mode + b" " + name_bytes + b"\0" + blob_bytes
+
+        # Compute tree OID
+        tree_header = f"tree {len(tree_content)}\0".encode("utf-8")
+        return hashlib.sha1(tree_header + tree_content).hexdigest()
+
+    # Organize files into a nested dict structure
+    root_entries: dict[str, tuple[str, str] | dict] = {}
+    for path, (mode, blob_hex) in files.items():
+        parts = path.split("/")
+        current = root_entries
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            elif not isinstance(current[part], dict):
+                # Conflict: path is both file and directory
+                logger.warning("tree_id: path conflict (file and directory): %s", path)
+                return ""
+            current = current[part]
+        current[parts[-1]] = (mode, blob_hex)
+
+    return build_tree_recursive(root_entries)
+
+
+@dataclass(frozen=True)
+class TreeManifest:
+    """Content-addressed manifest of files transferred in a push.
+
+    manifest_version: 1
+    hash_algo: "git-blob-sha1-nofilter"
+    commit: The git commit SHA when captured, or None if unavailable.
+    tree_id: Git tree OID computed from files.
+    declared_dirs: Directories scanned for extras during verification.
+    matches_commit: True iff every manifest file is tracked in commit
+                    and its raw blob equals commit's blob (matches_commit per D1).
+    extra_excludes: Ignore patterns from .git/info/exclude, core.excludesFile, etc.
+    files: Mapping of posix_relpath -> (mode, blob_hex).
+    skipped: Paths that were encountered but excluded (non-UTF-8, symlink
+             targets, gitlinks, etc.).
+    """
+
+    manifest_version: int
+    hash_algo: str
+    commit: str | None
+    tree_id: str
+    declared_dirs: tuple[str, ...]
+    matches_commit: bool
+    extra_excludes: tuple[str, ...]
+    files: dict[str, tuple[str, str]]
+    skipped: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        """Return JSON-ready dict (lists not tuples, files as {path: [mode, blob]})."""
+        return {
+            "manifest_version": self.manifest_version,
+            "hash_algo": self.hash_algo,
+            "commit": self.commit,
+            "tree_id": self.tree_id,
+            "declared_dirs": list(self.declared_dirs),
+            "matches_commit": self.matches_commit,
+            "extra_excludes": list(self.extra_excludes),
+            "files": {path: list(entry) for path, entry in self.files.items()},
+            "skipped": list(self.skipped),
+        }
+
+    @classmethod
+    def from_dict(cls, d: object) -> TreeManifest | None:
+        """Deserialize from dict. Returns None (never raises) if invalid."""
+        if not isinstance(d, dict):
+            return None
+
+        try:
+            manifest_version = d.get("manifest_version")
+            if manifest_version != MANIFEST_VERSION:
+                return None
+
+            hash_algo = d.get("hash_algo")
+            if hash_algo != HASH_ALGO:
+                return None
+
+            commit = d.get("commit")
+            tree_id = d.get("tree_id")
+            declared_dirs = tuple(d.get("declared_dirs", []))
+            matches_commit = d.get("matches_commit", False)
+            extra_excludes = tuple(d.get("extra_excludes", []))
+            skipped = tuple(d.get("skipped", []))
+
+            # Validate files: must be dict of path -> [mode, blob_hex]
+            files_raw = d.get("files", {})
+            if not isinstance(files_raw, dict):
+                return None
+
+            files: dict[str, tuple[str, str]] = {}
+            for path, entry in files_raw.items():
+                if not isinstance(path, str):
+                    return None
+                if not isinstance(entry, list) or len(entry) != 2:
+                    return None
+                mode, blob_hex = entry
+                if not isinstance(mode, str) or mode not in ("100644", "100755", "120000"):
+                    return None
+                if not isinstance(blob_hex, str) or not _is_valid_hex(blob_hex, 40):
+                    return None
+                files[path] = (mode, blob_hex)
+
+            if not isinstance(tree_id, str) or not _is_valid_hex(tree_id, 40):
+                return None
+
+            return cls(
+                manifest_version=manifest_version,
+                hash_algo=hash_algo,
+                commit=commit,
+                tree_id=tree_id,
+                declared_dirs=declared_dirs,
+                matches_commit=matches_commit,
+                extra_excludes=extra_excludes,
+                files=files,
+                skipped=skipped,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+def _is_valid_hex(s: str, length: int) -> bool:
+    """Check if s is a valid hex string of given length."""
+    if len(s) != length:
+        return False
+    try:
+        int(s, 16)
+        return True
+    except ValueError:
+        return False
+
+
+@dataclass(frozen=True)
+class TreeVerification:
+    """Result of verifying a manifest against disk.
+
+    verified: True iff manifest_ok and no mismatched/missing/extra files.
+    n_files: Number of files in the manifest.
+    n_match: Number of files that matched on disk (same blob and mode).
+    mismatched: Paths with content differences (blob differs).
+    missing: Paths not found on disk.
+    extra_untracked_under_declared_dirs: Untracked files under declared dirs,
+                                         not matched by extra_excludes.
+    mode_changed: Paths with different mode (exec bit) but same blob.
+    manifest_ok: manifest_version == MANIFEST_VERSION and hash_algo matches
+                 and tree_id(recomputed) == manifest.tree_id.
+    extras_ignore_aware: True if extras were detected using git ls-files
+                         (respects .gitignore), False if fallback Python walk.
+    tree_id: Recomputed tree_id from disk, or None if any missing.
+    dirty_content_id_consistent: None if dirty_content_id arg was None;
+                                 else True iff it matches "tree:" + tree_id.
+    error: Set if an exception was caught or a constraint was violated.
+    """
+
+    verified: bool
+    n_files: int
+    n_match: int
+    mismatched: tuple[str, ...]
+    missing: tuple[str, ...]
+    extra_untracked_under_declared_dirs: tuple[str, ...]
+    mode_changed: tuple[str, ...]
+    manifest_ok: bool
+    extras_ignore_aware: bool
+    tree_id: str | None
+    dirty_content_id_consistent: bool | None
+    error: str | None
+
+
+def build_tree_manifest(
+    root: Path,
+    *,
+    commit: str | None,
+    paths: Iterable[str] | None = None,
+    declared_dirs: Iterable[str] | None = None,
+    extra_excludes: Iterable[str] | None = None,
+) -> TreeManifest | None:
+    """Build a tree manifest for the given root directory.
+
+    root: Repository or project root (no .git required).
+    commit: Git commit SHA (from rev-parse HEAD), or None.
+    paths: Explicit list of files to manifest. If None, enumerate from
+           git ls-files -z --cached --others --exclude-standard.
+    declared_dirs: Directories to scan for extras verification. If None,
+                   default to sorted top-level dirs from files that contain "/".
+    extra_excludes: Ignore patterns to embed. If None, read from
+                    .git/info/exclude and core.excludesFile, else empty.
+
+    Never raises. Returns None with a logged warning on failure.
+    """
+    root = Path(root)
+
+    # Enumerate files
+    if paths is None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                capture_output=True,
+                env=clean_git_env(),
+                timeout=60.0,
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    "build_tree_manifest: git ls-files failed for %s (exit %d): %s",
+                    root, result.returncode, result.stderr.decode("utf-8", errors="replace").strip()[:200]
+                )
+                return None
+            paths = result.stdout.decode("utf-8", errors="replace").split("\0")
+            paths = [p for p in paths if p]  # Remove empty strings
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("build_tree_manifest: git ls-files failed for %s: %s", root, e)
+            return None
+    else:
+        paths = list(paths)
+
+    # Process files: hash them, validate paths, drop non-existent
+    files: dict[str, tuple[str, str]] = {}
+    skipped: list[str] = []
+
+    for path_str in sorted(paths):
+        if path_str == PROVENANCE_FILENAME or not path_str:
+            continue
+
+        # Validate UTF-8
+        try:
+            path_str.encode("utf-8").decode("utf-8")
+        except UnicodeDecodeError:
+            skipped.append(f"non-utf8:{path_str!r}")
+            continue
+
+        path = root / path_str
+        posix_path = path_str.replace(os.sep, "/")
+
+        try:
+            # Check if it's a symlink
+            if os.path.islink(path):
+                try:
+                    link_target = os.readlink(path)
+                    link_bytes = link_target.encode("utf-8") if isinstance(link_target, str) else link_target
+                    blob_hex = blob_id(link_bytes)
+                    files[posix_path] = ("120000", blob_hex)
+                except (OSError, UnicodeDecodeError) as e:
+                    logger.debug("build_tree_manifest: failed to read symlink %s: %s", path, e)
+                    skipped.append(posix_path)
+                continue
+
+            # Regular file
+            if not os.path.isfile(path):
+                logger.debug("build_tree_manifest: path is not a regular file or symlink: %s", path)
+                continue
+
+            # Read file and compute blob ID
+            with open(path, "rb") as f:
+                file_bytes = f.read()
+            blob_hex = blob_id(file_bytes)
+
+            # Determine mode
+            st = os.stat(path)
+            mode = "100755" if (st.st_mode & 0o111) else "100644"
+            files[posix_path] = (mode, blob_hex)
+
+        except (OSError, IOError) as e:
+            logger.debug("build_tree_manifest: failed to process %s: %s", path, e)
+            skipped.append(posix_path)
+
+    # Determine declared_dirs (default: top-level dirs from files)
+    if declared_dirs is None:
+        declared_set = set()
+        for path_str in files.keys():
+            if "/" in path_str:
+                declared_set.add(path_str.split("/")[0])
+        declared_dirs_list = sorted(declared_set)
+    else:
+        declared_dirs_list = sorted(set(declared_dirs))
+
+    # Determine extra_excludes (default: from git config)
+    extra_excludes_list: list[str] = []
+    if extra_excludes is None:
+        try:
+            # Try to read .git/info/exclude via git rev-parse --git-path
+            result = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "--git-path", "info/exclude"],
+                capture_output=True,
+                env=clean_git_env(),
+                timeout=10.0,
+            )
+            if result.returncode == 0:
+                exclude_relpath = result.stdout.decode("utf-8").strip()
+                # Result is relative to root
+                exclude_file = root / exclude_relpath
+                if exclude_file.exists():
+                    with open(exclude_file, "r", encoding="utf-8", errors="replace") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#"):
+                                extra_excludes_list.append(line)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            logger.debug("build_tree_manifest: failed to read info/exclude: %s", e)
+
+        # Try to read core.excludesFile
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), "config", "core.excludesFile"],
+                capture_output=True,
+                env=clean_git_env(),
+                timeout=10.0,
+            )
+            if result.returncode == 0:
+                excludes_path_raw = result.stdout.decode("utf-8").strip()
+                if excludes_path_raw:
+                    # expanduser handles ~ paths
+                    excludes_path = os.path.expanduser(excludes_path_raw)
+                    if os.path.isfile(excludes_path):
+                        with open(excludes_path, "r", encoding="utf-8", errors="replace") as f:
+                            for line in f:
+                                line = line.strip()
+                                if line and not line.startswith("#"):
+                                    extra_excludes_list.append(line)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            logger.debug("build_tree_manifest: failed to read core.excludesFile: %s", e)
+    else:
+        extra_excludes_list = list(extra_excludes)
+
+    # Compute matches_commit
+    matches_commit = False
+    if commit:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), "ls-tree", "-r", "-z", commit],
+                capture_output=True,
+                env=clean_git_env(),
+                timeout=60.0,
+            )
+            if result.returncode == 0:
+                # Parse ls-tree output
+                commit_files: dict[str, str] = {}  # path -> blob_hex
+                items = result.stdout.split(b"\0")
+                for item in items:
+                    if not item:
+                        continue
+                    # Format: "<mode> <type> <object>\t<file>"
+                    parts = item.split(b"\t", 1)
+                    if len(parts) != 2:
+                        continue
+                    path_bytes = parts[1]
+                    tree_info = parts[0].split()
+                    if len(tree_info) >= 3:
+                        obj_hex = tree_info[2].decode("utf-8") if isinstance(tree_info[2], bytes) else tree_info[2]
+                        try:
+                            path_str = path_bytes.decode("utf-8")
+                            commit_files[path_str] = obj_hex
+                        except UnicodeDecodeError:
+                            pass
+
+                # Check if manifest matches commit
+                matches_commit = True
+                for path, (mode, blob_hex) in files.items():
+                    if path not in commit_files or commit_files[path] != blob_hex:
+                        matches_commit = False
+                        break
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+            logger.debug("build_tree_manifest: failed to compute matches_commit: %s", e)
+
+    # Compute tree_id
+    computed_tree_id = tree_id(files)
+
+    return TreeManifest(
+        manifest_version=MANIFEST_VERSION,
+        hash_algo=HASH_ALGO,
+        commit=commit,
+        tree_id=computed_tree_id,
+        declared_dirs=tuple(declared_dirs_list),
+        matches_commit=matches_commit,
+        extra_excludes=tuple(extra_excludes_list),
+        files=files,
+        skipped=tuple(skipped),
+    )
+
+
+def verify_tree(
+    root: Path,
+    manifest: TreeManifest,
+    *,
+    cwd: Path | None = None,
+    dirty_content_id: str | None = None,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    max_seconds: float = DEFAULT_MAX_SECONDS,
+) -> TreeVerification:
+    """Verify a tree manifest against disk.
+
+    root: The directory to verify (the sidecar's directory).
+    manifest: The manifest to verify against.
+    cwd: Optional current working directory. If inside root and not under a
+         declared dir, its direct files are scanned for extras.
+    dirty_content_id: If provided and starts with "tree:", compare against
+                      recomputed tree_id.
+    max_bytes, max_seconds: Verification budget.
+
+    Never raises. All exceptions are caught and result in verified=False
+    with error set.
+    """
+    root = Path(root)
+
+    try:
+        # Step 1: Check manifest_ok
+        manifest_ok = (
+            manifest.manifest_version == MANIFEST_VERSION
+            and manifest.hash_algo == HASH_ALGO
+            and tree_id(manifest.files) == manifest.tree_id
+        )
+
+        # Step 2: Verify each file in manifest
+        start_time = time.monotonic()
+        cumulative_bytes = 0
+        n_files = len(manifest.files)
+        n_match = 0
+        mismatched: list[str] = []
+        missing: list[str] = []
+        mode_changed: list[str] = []
+
+        recomputed_tree_dict: dict[str, tuple[str, str]] = {}
+
+        for path_str in sorted(manifest.files.keys()):
+            # Check budget
+            if cumulative_bytes > max_bytes:
+                return TreeVerification(
+                    verified=False,
+                    n_files=n_files,
+                    n_match=n_match,
+                    mismatched=tuple(mismatched),
+                    missing=tuple(missing),
+                    extra_untracked_under_declared_dirs=(),
+                    mode_changed=tuple(mode_changed),
+                    manifest_ok=manifest_ok,
+                    extras_ignore_aware=False,
+                    tree_id=None,
+                    dirty_content_id_consistent=None,
+                    error=f"budget exceeded: {cumulative_bytes} bytes > {max_bytes}",
+                )
+            if time.monotonic() - start_time > max_seconds:
+                return TreeVerification(
+                    verified=False,
+                    n_files=n_files,
+                    n_match=n_match,
+                    mismatched=tuple(mismatched),
+                    missing=tuple(missing),
+                    extra_untracked_under_declared_dirs=(),
+                    mode_changed=tuple(mode_changed),
+                    manifest_ok=manifest_ok,
+                    extras_ignore_aware=False,
+                    tree_id=None,
+                    dirty_content_id_consistent=None,
+                    error=f"budget exceeded: {time.monotonic() - start_time:.1f}s > {max_seconds}s",
+                )
+
+            path = root / path_str
+            manifest_mode, manifest_blob = manifest.files[path_str]
+
+            # Check if path exists
+            if not os.path.lexists(path):
+                missing.append(path_str)
+                continue
+
+            try:
+                # Read and hash the file
+                if os.path.islink(path):
+                    link_target = os.readlink(path)
+                    link_bytes = link_target.encode("utf-8") if isinstance(link_target, str) else link_target
+                    actual_blob = blob_id(link_bytes)
+                    actual_mode = "120000"
+                else:
+                    with open(path, "rb") as f:
+                        file_bytes = f.read()
+                    actual_blob = blob_id(file_bytes)
+                    cumulative_bytes += len(file_bytes)
+
+                    st = os.stat(path)
+                    actual_mode = "100755" if (st.st_mode & 0o111) else "100644"
+
+                # Compare blob and mode
+                if actual_blob != manifest_blob:
+                    mismatched.append(path_str)
+                elif actual_mode != manifest_mode:
+                    mode_changed.append(path_str)
+                    n_match += 1
+                    recomputed_tree_dict[path_str] = (actual_mode, actual_blob)
+                else:
+                    n_match += 1
+                    recomputed_tree_dict[path_str] = (actual_mode, actual_blob)
+
+            except (OSError, IOError, PermissionError) as e:
+                return TreeVerification(
+                    verified=False,
+                    n_files=n_files,
+                    n_match=n_match,
+                    mismatched=tuple(mismatched),
+                    missing=tuple(missing),
+                    extra_untracked_under_declared_dirs=(),
+                    mode_changed=tuple(mode_changed),
+                    manifest_ok=manifest_ok,
+                    extras_ignore_aware=False,
+                    tree_id=None,
+                    dirty_content_id_consistent=None,
+                    error=f"PermissionError or OSError reading {path_str}: {e}",
+                )
+
+        # Step 3: Scan for extras
+        # Resolve symlinks in root and cwd before relative_to
+        root_resolved = root.resolve()
+        cwd_resolved = Path(cwd).resolve() if cwd is not None else None
+
+        scan_dirs_list: list[str] = list(manifest.declared_dirs)
+        cwd_dir_to_scan: str | None = None
+
+        if cwd_resolved is not None:
+            try:
+                cwd_rel = cwd_resolved.relative_to(root_resolved)
+                if cwd_rel != Path("."):
+                    cwd_rel_str = str(cwd_rel).replace(os.sep, "/")
+                    # Check if cwd is under a declared dir
+                    is_under_declared = any(
+                        cwd_rel_str == d or cwd_rel_str.startswith(d + "/")
+                        for d in manifest.declared_dirs
+                    )
+                    if not is_under_declared:
+                        cwd_dir_to_scan = cwd_rel_str
+            except ValueError:
+                # cwd is not inside root
+                return TreeVerification(
+                    verified=False,
+                    n_files=n_files,
+                    n_match=n_match,
+                    mismatched=tuple(mismatched),
+                    missing=tuple(missing),
+                    extra_untracked_under_declared_dirs=(),
+                    mode_changed=tuple(mode_changed),
+                    manifest_ok=manifest_ok,
+                    extras_ignore_aware=False,
+                    tree_id=None,
+                    dirty_content_id_consistent=None,
+                    error=f"cwd {cwd} is outside provenance root {root}",
+                )
+
+        # Use git to find extras (or fallback to Python walk)
+        extras: list[str] = []
+        extras_ignore_aware = False
+
+        # If there are no scan dirs and no cwd dir, skip extras scanning
+        if not scan_dirs_list and cwd_dir_to_scan is None:
+            extras = []
+            extras_ignore_aware = True
+        else:
+            try:
+                # Create a temporary empty git repo for running ls-files with custom excludes
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_git_dir = Path(tmpdir) / "x.git"
+                    tmp_excludes = Path(tmpdir) / "excludes"
+
+                    try:
+                        git_init_result = subprocess.run(
+                            ["git", "init", "-q", "--bare", str(tmp_git_dir)],
+                            capture_output=True,
+                            timeout=10.0,
+                        )
+                        if git_init_result.returncode != 0:
+                            return TreeVerification(
+                                verified=False,
+                                n_files=n_files,
+                                n_match=n_match,
+                                mismatched=tuple(mismatched),
+                                missing=tuple(missing),
+                                extra_untracked_under_declared_dirs=(),
+                                mode_changed=tuple(mode_changed),
+                                manifest_ok=manifest_ok,
+                                extras_ignore_aware=False,
+                                tree_id=tree_id(recomputed_tree_dict) if not missing else None,
+                                dirty_content_id_consistent=None,
+                                error=f"git init --bare failed: {git_init_result.stderr.decode('utf-8', errors='replace').strip()[:100]}",
+                            )
+
+                        # Write extra_excludes to temp file
+                        with open(tmp_excludes, "w") as f:
+                            for pattern in manifest.extra_excludes:
+                                f.write(pattern + "\n")
+
+                        # Run git ls-files with custom excludes for declared dirs (recursive)
+                        env = clean_git_env()
+                        env["GIT_CONFIG_GLOBAL"] = os.devnull
+                        env["GIT_CONFIG_NOSYSTEM"] = "1"
+
+                        # Scan declared dirs recursively
+                        if scan_dirs_list:
+                            git_args = [
+                                "git",
+                                "-c", "safe.directory=*",
+                                "-c", f"core.excludesFile={tmp_excludes}",
+                                f"--git-dir={tmp_git_dir}",
+                                f"--work-tree={root_resolved}",
+                                "ls-files", "-z", "-o", "--exclude-standard",
+                            ]
+                            git_args.extend(["--"] + scan_dirs_list)
+
+                            result = subprocess.run(
+                                git_args,
+                                capture_output=True,
+                                env=env,
+                                timeout=30.0,
+                            )
+
+                            if result.returncode == 0:
+                                extras_ignore_aware = True
+                                listed_files = result.stdout.decode("utf-8", errors="replace").split("\0")
+                                for f in listed_files:
+                                    if f and f != PROVENANCE_FILENAME and f not in manifest.files:
+                                        extras.append(f)
+                            else:
+                                # git failed
+                                stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                                first_line = stderr.split("\n")[0][:100]
+                                return TreeVerification(
+                                    verified=False,
+                                    n_files=n_files,
+                                    n_match=n_match,
+                                    mismatched=tuple(mismatched),
+                                    missing=tuple(missing),
+                                    extra_untracked_under_declared_dirs=tuple(extras),
+                                    mode_changed=tuple(mode_changed),
+                                    manifest_ok=manifest_ok,
+                                    extras_ignore_aware=False,
+                                    tree_id=tree_id(recomputed_tree_dict) if not missing else None,
+                                    dirty_content_id_consistent=None,
+                                    error=f"git ls-files failed: {first_line}",
+                                )
+                        else:
+                            extras_ignore_aware = True
+
+                        # Scan cwd dir non-recursively
+                        if cwd_dir_to_scan is not None:
+                            git_args_cwd = [
+                                "git",
+                                "-c", "safe.directory=*",
+                                "-c", f"core.excludesFile={tmp_excludes}",
+                                f"--git-dir={tmp_git_dir}",
+                                f"--work-tree={root_resolved}",
+                                "ls-files", "-z", "-o", "--exclude-standard",
+                                "--", cwd_dir_to_scan,
+                            ]
+
+                            result_cwd = subprocess.run(
+                                git_args_cwd,
+                                capture_output=True,
+                                env=env,
+                                timeout=30.0,
+                            )
+
+                            if result_cwd.returncode == 0:
+                                listed_files = result_cwd.stdout.decode("utf-8", errors="replace").split("\0")
+                                for f in listed_files:
+                                    if f and f != PROVENANCE_FILENAME and f not in manifest.files:
+                                        # Only add if it's a direct child (no "/" after the cwd prefix)
+                                        relpath = f[len(cwd_dir_to_scan) + 1:] if f.startswith(cwd_dir_to_scan + "/") else ""
+                                        if relpath and "/" not in relpath:
+                                            extras.append(f)
+                            else:
+                                # git failed on cwd; fail the verification
+                                stderr = result_cwd.stderr.decode("utf-8", errors="replace").strip()
+                                first_line = stderr.split("\n")[0][:100]
+                                return TreeVerification(
+                                    verified=False,
+                                    n_files=n_files,
+                                    n_match=n_match,
+                                    mismatched=tuple(mismatched),
+                                    missing=tuple(missing),
+                                    extra_untracked_under_declared_dirs=tuple(extras),
+                                    mode_changed=tuple(mode_changed),
+                                    manifest_ok=manifest_ok,
+                                    extras_ignore_aware=False,
+                                    tree_id=tree_id(recomputed_tree_dict) if not missing else None,
+                                    dirty_content_id_consistent=None,
+                                    error=f"git ls-files failed: {first_line}",
+                                )
+
+                    except (FileNotFoundError, subprocess.TimeoutExpired):
+                        # git not found or timed out; fallback to Python walk
+                        extras_ignore_aware = False
+                        # Walk declared dirs recursively
+                        for scan_dir in scan_dirs_list:
+                            scan_path = root_resolved / scan_dir
+                            if not scan_path.is_dir():
+                                continue
+                            for dirpath, dirnames, filenames in os.walk(scan_path):
+                                # Prune ignored directories
+                                dirnames[:] = [
+                                    d for d in dirnames
+                                    if d not in {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ipynb_checkpoints"}
+                                    and not d.endswith(".egg-info")
+                                ]
+                                for fname in filenames:
+                                    full_path = Path(dirpath) / fname
+                                    relpath = full_path.relative_to(root_resolved)
+                                    relpath_str = str(relpath).replace(os.sep, "/")
+                                    if relpath_str not in manifest.files and relpath_str != PROVENANCE_FILENAME:
+                                        extras.append(relpath_str)
+                        # Scan cwd dir non-recursively
+                        if cwd_dir_to_scan is not None:
+                            cwd_path = root_resolved / cwd_dir_to_scan
+                            if cwd_path.is_dir():
+                                for entry in os.scandir(cwd_path):
+                                    if entry.is_file(follow_symlinks=False):
+                                        relpath = Path(entry.path).relative_to(root_resolved)
+                                        relpath_str = str(relpath).replace(os.sep, "/")
+                                        if relpath_str not in manifest.files and relpath_str != PROVENANCE_FILENAME:
+                                            extras.append(relpath_str)
+
+            except Exception as e:
+                # Any exception in extras scanning fails verification
+                return TreeVerification(
+                    verified=False,
+                    n_files=n_files,
+                    n_match=n_match,
+                    mismatched=tuple(mismatched),
+                    missing=tuple(missing),
+                    extra_untracked_under_declared_dirs=tuple(extras),
+                    mode_changed=tuple(mode_changed),
+                    manifest_ok=manifest_ok,
+                    extras_ignore_aware=False,
+                    tree_id=tree_id(recomputed_tree_dict) if not missing else None,
+                    dirty_content_id_consistent=None,
+                    error=f"Error scanning for extras: {type(e).__name__}: {e}",
+                )
+
+        # Step 4: Recompute tree_id
+        recomputed_tree_id = tree_id(recomputed_tree_dict) if not missing else None
+
+        # Step 5: dirty_content_id consistency
+        dirty_content_id_consistent: bool | None = None
+        if dirty_content_id is not None:
+            if dirty_content_id.startswith("tree:") and recomputed_tree_id is not None:
+                expected_id = "tree:" + recomputed_tree_id
+                dirty_content_id_consistent = (dirty_content_id == expected_id)
+            # else: informational only, no verdict
+
+        # Step 6: Determine verified
+        verified = (
+            manifest_ok
+            and not mismatched
+            and not missing
+            and not extras
+            and not manifest.skipped
+        )
+
+        return TreeVerification(
+            verified=verified,
+            n_files=n_files,
+            n_match=n_match,
+            mismatched=tuple(mismatched),
+            missing=tuple(missing),
+            extra_untracked_under_declared_dirs=tuple(extras),
+            mode_changed=tuple(mode_changed),
+            manifest_ok=manifest_ok,
+            extras_ignore_aware=extras_ignore_aware,
+            tree_id=recomputed_tree_id,
+            dirty_content_id_consistent=dirty_content_id_consistent,
+            error=None,
+        )
+
+    except Exception as e:
+        # Catch-all for any unexpected error
+        return TreeVerification(
+            verified=False,
+            n_files=len(manifest.files),
+            n_match=0,
+            mismatched=(),
+            missing=(),
+            extra_untracked_under_declared_dirs=(),
+            mode_changed=(),
+            manifest_ok=False,
+            extras_ignore_aware=False,
+            tree_id=None,
+            dirty_content_id_consistent=None,
+            error=f"{type(e).__name__}: {e}",
+        )
