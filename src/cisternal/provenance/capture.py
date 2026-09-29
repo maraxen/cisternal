@@ -50,9 +50,12 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from .record import ProvenanceRecord
+
+if TYPE_CHECKING:
+    from .tree_manifest import TreeManifest
 
 _CaptureStage = Literal["push", "submit"]
 _SyncState = Literal["verified", "drifted", "unverified"]
@@ -449,18 +452,38 @@ def build_provenance_record(
     worktree: str | None = None,
     compute_dirty_content_id_flag: bool = True,
     myxcel_version: str = "",
+    tree_manifest: "TreeManifest | None" = None,
 ) -> tuple[ProvenanceRecord, list[str]]:
-    """Sync twin of `abuild_provenance_record`. See its docstring."""
+    """Compute the provenance record for a local git tree.
+
+    Returns (record, warnings). Never raises: every failure returns a record
+    with provenance_status="unavailable" plus a warning string.
+
+    `compute_dirty_content_id_flag=False` skips the git-tree-OID / write-tree
+    step for dry runs.
+
+    `tree_manifest` (optional TreeManifest object): if provided AND the record's
+    provenance_status is "git", sets schema_version=2 and includes the manifest
+    in the record.
+    """
     warnings: list[str] = []
     computed_at = _now_iso()
 
     def _record(status: _ProvenanceStatus, sha: str | None = None, branch: str | None = None,
                 dirty: bool | None = None, content_id: str | None = None) -> ProvenanceRecord:
+        # Set schema_version and tree_manifest only when tree_manifest is provided AND status is git
+        schema_version = 1
+        manifest_dict = None
+        if tree_manifest is not None and status == "git":
+            schema_version = 2
+            manifest_dict = tree_manifest.to_dict()
+
         return ProvenanceRecord(
-            schema_version=1, provenance_status=status, git_sha=sha, git_branch=branch,
+            schema_version=schema_version, provenance_status=status, git_sha=sha, git_branch=branch,
             git_dirty=dirty, dirty_content_id=content_id, capture_stage=capture_stage,
             sync_state=sync_state, computed_at=computed_at, provenance_root=provenance_root,
             remote=remote, project=project, worktree=worktree, myxcel_version=myxcel_version,
+            tree_manifest=manifest_dict,
         )
 
     info = resolve_git_commit(local_root)
@@ -499,28 +522,32 @@ async def abuild_provenance_record(
     worktree: str | None = None,
     compute_dirty_content_id_flag: bool = True,
     myxcel_version: str = "",
+    tree_manifest: "TreeManifest | None" = None,
 ) -> tuple[ProvenanceRecord, list[str]]:
-    """Compute the provenance record for a local git tree.
+    """Async twin of `build_provenance_record`. See its docstring.
 
-    Returns (record, warnings). Never raises: every failure returns a record
-    with provenance_status="unavailable" plus a warning string.
-
-    `compute_dirty_content_id_flag=False` skips the git-tree-OID / write-tree
-    step: callers that only need the cheap fields (e.g. a dry-run's dirty
-    warning) must not pay for `git add -A` + `git write-tree` against a
-    throwaway index, which writes loose objects into the object store -- a
-    dry run is supposed to touch nothing.
+    `tree_manifest` (optional TreeManifest object): if provided AND the record's
+    provenance_status is "git", sets schema_version=2 and includes the manifest
+    in the record.
     """
     warnings: list[str] = []
     computed_at = _now_iso()
 
     def _record(status: _ProvenanceStatus, sha: str | None = None, branch: str | None = None,
                 dirty: bool | None = None, content_id: str | None = None) -> ProvenanceRecord:
+        # Set schema_version and tree_manifest only when tree_manifest is provided AND status is git
+        schema_version = 1
+        manifest_dict = None
+        if tree_manifest is not None and status == "git":
+            schema_version = 2
+            manifest_dict = tree_manifest.to_dict()
+
         return ProvenanceRecord(
-            schema_version=1, provenance_status=status, git_sha=sha, git_branch=branch,
+            schema_version=schema_version, provenance_status=status, git_sha=sha, git_branch=branch,
             git_dirty=dirty, dirty_content_id=content_id, capture_stage=capture_stage,
             sync_state=sync_state, computed_at=computed_at, provenance_root=provenance_root,
             remote=remote, project=project, worktree=worktree, myxcel_version=myxcel_version,
+            tree_manifest=manifest_dict,
         )
 
     info = await aresolve_git_commit(local_root)

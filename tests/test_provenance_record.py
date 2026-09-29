@@ -126,3 +126,111 @@ def test_write_state_record_is_atomic_no_tmp_file_left(tmp_path):
     write_state_record(path, record)
     assert path.exists()
     assert not path.with_suffix(".json.tmp").exists()
+
+
+def test_v1_record_without_tree_manifest_omits_key_for_compatibility():
+    """v1 record (tree_manifest=None) serializes without a "tree_manifest" key."""
+    record = ProvenanceRecord(**{**_BASE_KWARGS, "tree_manifest": None})
+    payload = to_json_bytes(record)
+    data = json.loads(payload.decode())
+    assert "tree_manifest" not in data
+    # Ensure it still has all the expected v1 keys
+    assert "schema_version" in data
+    assert "provenance_status" in data
+
+
+def test_v2_round_trip_with_tree_manifest(tmp_path):
+    """v2 record with tree_manifest can round-trip through write/read."""
+    from cisternal.provenance.record import MAX_KNOWN_SCHEMA_VERSION
+
+    manifest_dict = {"manifest_version": 1, "files": {}}
+    record = ProvenanceRecord(
+        **{**_BASE_KWARGS, "schema_version": 2, "tree_manifest": manifest_dict}
+    )
+    path = tmp_path / "v2.json"
+    write_state_record(path, record)
+    recovered = read_state_record(path)
+
+    assert recovered is not None
+    assert recovered.schema_version == 2
+    assert recovered.tree_manifest == manifest_dict
+    assert recovered.tree_manifest is not None
+
+
+def test_v2_record_with_tree_manifest_includes_key():
+    """v2 record with tree_manifest includes the key in JSON."""
+    manifest_dict = {"manifest_version": 1, "files": {}}
+    record = ProvenanceRecord(
+        **{**_BASE_KWARGS, "schema_version": 2, "tree_manifest": manifest_dict}
+    )
+    payload = to_json_bytes(record)
+    data = json.loads(payload.decode())
+    assert "tree_manifest" in data
+    assert data["tree_manifest"] == manifest_dict
+
+
+def test_to_env_v2_record_ignores_tree_manifest():
+    """to_env(v2 record) has no MANIFEST keys and equals to_env(same without tree_manifest)."""
+    manifest_dict = {"manifest_version": 1, "files": {}}
+    v2_with_manifest = ProvenanceRecord(
+        **{**_BASE_KWARGS, "schema_version": 2, "tree_manifest": manifest_dict}
+    )
+    v2_without_manifest = ProvenanceRecord(
+        **{**_BASE_KWARGS, "schema_version": 2, "tree_manifest": None}
+    )
+
+    env_with = to_env(v2_with_manifest)
+    env_without = to_env(v2_without_manifest)
+
+    # No MANIFEST keys
+    assert not any("MANIFEST" in k for k in env_with.keys())
+    # Both should be equal (tree_manifest is not serialized to env)
+    assert env_with == env_without
+
+
+def test_read_state_record_ignores_bad_tree_manifest(tmp_path):
+    """read_state_record with "tree_manifest": "garbage" -> record.tree_manifest is None."""
+    data = {**_BASE_KWARGS, "schema_version": 2, "tree_manifest": "garbage"}
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(data))
+
+    recovered = read_state_record(path)
+    assert recovered is not None
+    assert recovered.tree_manifest is None
+
+
+def test_read_sidecar_from_directory(tmp_path):
+    """read_sidecar(directory) reads PROVENANCE_FILENAME from that directory."""
+    from cisternal.provenance.record import read_sidecar, PROVENANCE_FILENAME
+
+    record = ProvenanceRecord(**_BASE_KWARGS)
+    record_path = tmp_path / PROVENANCE_FILENAME
+    write_state_record(record_path, record)
+
+    recovered = read_sidecar(tmp_path)
+    assert recovered is not None
+    assert recovered.git_sha == record.git_sha
+
+
+def test_read_sidecar_from_file(tmp_path):
+    """read_sidecar(file) reads from that file directly."""
+    from cisternal.provenance.record import read_sidecar
+
+    record = ProvenanceRecord(**_BASE_KWARGS)
+    record_path = tmp_path / "custom.json"
+    write_state_record(record_path, record)
+
+    recovered = read_sidecar(record_path)
+    assert recovered is not None
+    assert recovered.git_sha == record.git_sha
+
+
+def test_read_sidecar_missing_returns_none(tmp_path):
+    """read_sidecar on missing file/dir returns None."""
+    from cisternal.provenance.record import read_sidecar
+
+    missing_dir = tmp_path / "nope"
+    assert read_sidecar(missing_dir) is None
+
+    missing_file = tmp_path / "nope.json"
+    assert read_sidecar(missing_file) is None

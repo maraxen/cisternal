@@ -27,12 +27,15 @@ from typing import Literal, cast
 
 PROVENANCE_FILENAME = ".myxcel_provenance.json"
 
+# v2 = sidecar may embed a tree manifest
+MAX_KNOWN_SCHEMA_VERSION = 2
+
 _VALID_PROVENANCE_STATUSES = frozenset({"git", "nogit", "unavailable"})
 
 
 @dataclass
 class ProvenanceRecord:
-    """Schema v1 provenance record, used identically by sidecar JSON and env vars."""
+    """Provenance record schema: v1 (sidecar JSON and env vars) + v2 (sidecar may embed tree manifest)."""
 
     schema_version: int
     provenance_status: Literal["git", "nogit", "unavailable"]
@@ -52,11 +55,19 @@ class ProvenanceRecord:
     # shared by bathos/naurmalade too, neither of which can assume "myxcel"
     # is installed to compute a package-specific default.
     myxcel_version: str = ""
+    # JSON form of cisternal.provenance.tree_manifest.TreeManifest; embedded in the sidecar only, never in env.
+    tree_manifest: dict | None = None
 
 
 def to_json_bytes(record: ProvenanceRecord) -> bytes:
-    """Serialize record to JSON with sorted keys and trailing newline."""
+    """Serialize record to JSON with sorted keys and trailing newline.
+
+    Omits tree_manifest if None for v1 backward compatibility.
+    """
     record_dict = asdict(record)
+    # v1 compat: omit tree_manifest key if None
+    if record_dict.get("tree_manifest") is None:
+        record_dict.pop("tree_manifest", None)
     json_str = json.dumps(record_dict, sort_keys=True, separators=(",", ":"))
     return (json_str + "\n").encode("utf-8")
 
@@ -205,6 +216,11 @@ def read_state_record(path: Path) -> ProvenanceRecord | None:
         if provenance_status not in _VALID_PROVENANCE_STATUSES:
             return None
 
+        # Parse tree_manifest, accepting only dict; treat non-dict as None
+        tree_manifest = data.get("tree_manifest")
+        if tree_manifest is not None and not isinstance(tree_manifest, dict):
+            tree_manifest = None
+
         return ProvenanceRecord(
             schema_version=schema_version,
             provenance_status=provenance_status,
@@ -220,6 +236,22 @@ def read_state_record(path: Path) -> ProvenanceRecord | None:
             project=data.get("project", ""),
             worktree=data.get("worktree"),
             myxcel_version=data.get("myxcel_version", ""),
+            tree_manifest=tree_manifest,
         )
     except (OSError, json.JSONDecodeError, ValueError, KeyError):
         return None
+
+
+def read_sidecar(path: Path) -> ProvenanceRecord | None:
+    """Read a raw, unverified provenance record from a sidecar file or directory.
+
+    If `path` is a directory, reads `path / PROVENANCE_FILENAME`. Otherwise,
+    reads `path` directly. Returns None on missing file or parse failure.
+
+    The returned record is raw and unverified -- its git_sha is a claim, never
+    authoritative (use channels.capture_git_state for an authoritative identity).
+    """
+    path = Path(path)
+    if path.is_dir():
+        path = path / PROVENANCE_FILENAME
+    return read_state_record(path)
