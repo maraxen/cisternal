@@ -460,11 +460,16 @@ def build_provenance_record(
     with provenance_status="unavailable" plus a warning string.
 
     `compute_dirty_content_id_flag=False` skips the git-tree-OID / write-tree
-    step for dry runs.
+    step: callers that only need the cheap fields (e.g. a dry-run's dirty
+    warning) must not pay for `git add -A` + `git write-tree` against a
+    throwaway index, which writes loose objects into the object store -- a
+    dry run is supposed to touch nothing.
 
-    `tree_manifest` (optional TreeManifest object): if provided AND the record's
-    provenance_status is "git", sets schema_version=2 and includes the manifest
-    in the record.
+    `tree_manifest` (a `tree_manifest.TreeManifest`, built by the caller from
+    the exact file set it transfers): if provided AND the record's
+    provenance_status is "git", the record embeds its JSON form and becomes
+    schema_version 2, so a no-.git reader can verify the tree before trusting
+    `git_sha` (spec 260929_sidecar-tree-manifest-verification).
     """
     warnings: list[str] = []
     computed_at = _now_iso()
