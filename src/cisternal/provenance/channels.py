@@ -19,6 +19,19 @@ the disk content matches the manifest. Otherwise the sha is withheld and
 code_verified is False/None. This prevents stale or corrupted sidecars from
 reporting unrelated shas to bathos and other downstream consumers.
 
+BROKEN GITLINK (debt #2100): a `.git` counts as a repository only if git can actually
+use it. A `.git` FILE (a worktree/submodule gitlink) whose `gitdir:` target is positively
+absent -- e.g. a tree rsynced from a laptop, where the target is a laptop path -- is
+skipped, so the sidecar/manifest verification path is reached instead of the ascent
+stopping dead. This relaxes WHERE a channel may be read, never the hard rule: the sha
+still surfaces only if the manifest verifies. It is deliberately narrow -- a `.git`
+directory, an unreadable or malformed gitfile, or a gitfile whose target EXISTS (so a real
+repo is there that git may be refusing on ownership/safe.directory grounds, and git is the
+authority we cannot consult) all still stop the ascent, i.e. fail closed. The target is
+only stat()ed, never read, so a gitlink cannot lead to a target repo's sha. If nothing
+verifies, provenance_source is "unverified-sidecar" (a sidecar was present but did not
+verify) or "broken-gitlink" (no sidecar answered at all); verified, it is "myxcel-sidecar".
+
 The "no channel data, just ask git directly" tier below delegates to
 `cisternal.telemetry.git_state.capture_git_state()` rather than shelling out
 to git itself. That module was merged into `main` (PR #29) while this one was
@@ -58,7 +71,8 @@ class GitState:
     branch: str
     dirty: bool
     dirty_content_id: str | None = None
-    provenance_source: str = "git"  # "git" | "myxcel-env" | "myxcel-sidecar" | "unverified-env" | "unverified-sidecar" | "none"
+    # "git" | "myxcel-env" | "myxcel-sidecar" | "unverified-env" | "unverified-sidecar" | "broken-gitlink" | "none"
+    provenance_source: str = "git"
     code_verified: bool | None = None  # True: checked against disk NOW; False: checked and failed; None: could not check
     verification: TreeVerification | None = None
 
@@ -87,6 +101,25 @@ _WARNED: set[str] = set()
 def _unknown() -> GitState:
     """Return a fresh unknown sentinel (not a shared mutable instance)."""
     return GitState(hash="unknown", branch="unknown", dirty=False, provenance_source="none")
+
+
+def _broken_gitlink() -> GitState:
+    """Nothing answered, and the reason is a dangling `.git` gitfile (debt #2100).
+
+    Same fields as `_unknown()` -- no sha, nothing verified -- but a distinct
+    provenance_source so "not a repo" and "a repo whose gitlink points nowhere" can be told
+    apart. Only returned when NO channel verified anything.
+    """
+    return GitState(hash="unknown", branch="unknown", dirty=False, provenance_source="broken-gitlink")
+
+
+def _live_state(live) -> GitState:
+    """Wrap a successful live-git capture (telemetry.git_state.GitState) as authoritative."""
+    return GitState(
+        hash=live.hash, branch=live.branch, dirty=live.dirty,
+        dirty_content_id=live.dirty_content_id, provenance_source="git",
+        code_verified=True,
+    )
 
 
 def _withheld(prov_source: str, code_verified: bool | None, verification: TreeVerification | None = None) -> GitState:
@@ -147,19 +180,69 @@ def _env_channel(cwd: str | Path) -> dict | None:
     }
 
 
-def _sidecar_channel(cwd: str | Path) -> dict | None:
+@dataclass(frozen=True)
+class _BrokenGitlink:
+    """A `.git` file whose `gitdir:` target is positively known not to exist (debt #2100)."""
+
+    path: Path
+    target: str  # the gitdir target exactly as written in the file
+
+
+_GITFILE_PREFIX = "gitdir: "
+_GITFILE_MAX_BYTES = 4096
+
+
+def _dangling_gitlink(git_path: Path) -> _BrokenGitlink | None:
+    """Return the gitlink iff `git_path` is a `.git` FILE whose gitdir target is absent.
+
+    Deliberately narrow, because a `.git` that is skipped stops shadowing the sidecar:
+    only DEFINITE evidence counts -- a readable regular file, in git's one-line
+    ``gitdir: <path>`` format, whose target stat()s as not-found (ENOENT/ENOTDIR).
+    Anything else returns None and the caller keeps its old behaviour (the `.git` stops
+    the ascent): a `.git` directory, an unreadable or malformed gitfile, a target that
+    exists (git may be refusing it for ownership/safe.directory reasons -- a real repo
+    is there and git is the authority we cannot consult), or any other stat error.
+
+    The target is only stat()ed, never read or followed, so a gitlink can never lead this
+    module to a target repository's sha. Never raises.
+    """
+    try:
+        if not git_path.is_file():
+            return None
+        with open(git_path, encoding="utf-8", errors="replace") as fh:
+            content = fh.read(_GITFILE_MAX_BYTES + 1)
+        if len(content) > _GITFILE_MAX_BYTES or not content.startswith(_GITFILE_PREFIX):
+            return None
+        target = content[len(_GITFILE_PREFIX):].rstrip("\r\n")
+        if not target or "\n" in target or "\r" in target or "\0" in target:
+            return None
+        try:
+            os.stat(git_path.parent / target)  # relative targets resolve against the gitfile's dir
+        except (FileNotFoundError, NotADirectoryError):
+            return _BrokenGitlink(path=git_path, target=target)
+        return None
+    except (OSError, ValueError):
+        return None
+
+
+def _ascend_for_sidecar(cwd: str | Path) -> tuple[dict | None, _BrokenGitlink | None]:
     """Ascend from cwd up to 8 levels looking for .myxcel_provenance.json or .git.
 
-    Stops at the first .git (file or directory) or PROVENANCE_FILENAME.
-    Returns parsed sidecar record or None if not found.
+    Stops at the first .git (file or directory) or PROVENANCE_FILENAME -- except a
+    dangling gitfile (see `_dangling_gitlink`), which is skipped as if it were absent.
+    Returns (parsed sidecar record or None, the nearest skipped dangling gitlink or None).
     """
     cwd_path = Path(cwd).resolve()
     current = cwd_path
+    broken: _BrokenGitlink | None = None
 
     for _ in range(8):
         git_path = current / ".git"
         if git_path.exists():
-            return None
+            link = _dangling_gitlink(git_path)
+            if link is None:
+                return None, broken
+            broken = broken or link
 
         sidecar_path = current / PROVENANCE_FILENAME
         if sidecar_path.exists():
@@ -171,7 +254,7 @@ def _sidecar_channel(cwd: str | Path) -> dict | None:
                     or "schema_version" not in data
                     or not isinstance(data.get("schema_version"), int)
                 ):
-                    return None
+                    return None, broken
                 schema_version = data.get("schema_version", 0)
                 if schema_version > MAX_KNOWN_SCHEMA_VERSION:
                     _warnings.warn(
@@ -190,16 +273,21 @@ def _sidecar_channel(cwd: str | Path) -> dict | None:
                     "tree_manifest": data.get("tree_manifest") if isinstance(data.get("tree_manifest"), dict) else None,
                     "sidecar_path": str(sidecar_path),
                     "schema_version": schema_version,
-                }
+                }, broken
             except (json.JSONDecodeError, OSError):
-                return None
+                return None, broken
 
         parent = current.parent
         if parent == current:
             break
         current = parent
 
-    return None
+    return None, broken
+
+
+def _sidecar_channel(cwd: str | Path) -> dict | None:
+    """The parsed sidecar record found by `_ascend_for_sidecar`, or None."""
+    return _ascend_for_sidecar(cwd)[0]
 
 
 def _same_root(a: str | Path, b: str | Path) -> bool:
@@ -262,6 +350,27 @@ def _warn_withheld(key: str, reason: str) -> None:
         _warnings.warn(
             f"provenance channel at {key} withheld its git sha: {reason}. "
             f"Re-push with a tree-manifest-writing myxcel (#2059), or `myxcel clean` stale files.",
+            stacklevel=3,
+        )
+    except Exception:
+        # -W error cannot escape into capture_git_state's catch-all
+        pass
+
+
+def _warn_broken_gitlink(link: _BrokenGitlink) -> None:
+    """Emit a one-time warning per gitfile naming its dangling gitdir target.
+
+    Like `_warn_withheld`, never includes any sha, and never raises.
+    """
+    key = f"gitlink:{link.path}"
+    if key in _WARNED:
+        return
+    _WARNED.add(key)
+    try:
+        _warnings.warn(
+            f"{link.path} is a gitfile pointing at {link.target!r}, which does not exist; "
+            f"ignoring it, so provenance here can only come from a sidecar whose tree "
+            f"manifest verifies against the files on disk.",
             stacklevel=3,
         )
     except Exception:
@@ -411,6 +520,9 @@ def capture_git_state(cwd: Path | None = None) -> GitState:
     3. If a channel exists and live checkout is a linked worktree of the channel's repo, use live
     4. Otherwise use the channel (with verification per debt #2060)
 
+    A dangling `.git` gitfile is invisible to the sidecar ascent (debt #2100, see module
+    docstring); if git resolves at cwd anyway, live git wins over any channel.
+
     Never raises (C6).
     """
     try:
@@ -418,41 +530,39 @@ def capture_git_state(cwd: Path | None = None) -> GitState:
         cwd_path = Path(cwd)
         cwd_str = str(cwd)
 
+        broken: _BrokenGitlink | None = None
         env_prov = _env_channel(cwd_str)
         if env_prov is not None:
             prov = env_prov
             prov_source = "myxcel-env"
         else:
-            prov = _sidecar_channel(cwd_str)
+            prov, broken = _ascend_for_sidecar(cwd_str)
             prov_source = "myxcel-sidecar"
 
         if prov is None:
             live = _capture_live_git_state(cwd)
             if live.provenance_source != "git":
+                if broken is not None:
+                    _warn_broken_gitlink(broken)
+                    return _broken_gitlink()
                 return _unknown()
-            return GitState(
-                hash=live.hash, branch=live.branch, dirty=live.dirty,
-                dirty_content_id=live.dirty_content_id, provenance_source="git",
-                code_verified=True,
-            )
+            return _live_state(live)
 
         live = _capture_live_git_state(cwd)
+        if broken is not None and live.provenance_source == "git":
+            # A gitlink we judged dangling, yet git resolves here anyway (e.g. the target
+            # appeared meanwhile): git is the authority, and its answer needs no manifest.
+            return _live_state(live)
         if live.provenance_source == "git" and live.toplevel is not None:
             if _same_root(live.toplevel, prov.get("root") or ""):
-                return GitState(
-                    hash=live.hash, branch=live.branch, dirty=live.dirty,
-                    dirty_content_id=live.dirty_content_id, provenance_source="git",
-                    code_verified=True,
-                )
+                return _live_state(live)
             # Also use live git if the current directory is a linked worktree
             # of the repository described by the channel (same .git admin directory)
             if _is_worktree_of(cwd_str, prov.get("root") or ""):
-                return GitState(
-                    hash=live.hash, branch=live.branch, dirty=live.dirty,
-                    dirty_content_id=live.dirty_content_id, provenance_source="git",
-                    code_verified=True,
-                )
+                return _live_state(live)
 
+        if broken is not None:
+            _warn_broken_gitlink(broken)
         # Use the channel with verification
         return _gate(prov, prov_source, cwd_path)
     except Exception:
