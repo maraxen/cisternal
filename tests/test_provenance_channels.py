@@ -710,3 +710,203 @@ class TestVerificationGating:
         assert state.hash == "nogit"
         # nogit doesn't need verification, so code_verified is None
         assert state.code_verified is None
+
+    def test_protamer_fixture_with_mismatched_manifest(self, tmp_path):
+        """Real protamer fixture with a manifest that doesn't match the tree."""
+        fixture_dir = tmp_path / "protamer"
+        fixture_dir.mkdir()
+        (fixture_dir / "src").mkdir()
+        (fixture_dir / "src" / "x.py").write_text("x=1\n")
+
+        # Build a manifest for a DIFFERENT tree
+        other_dir = tmp_path / "other_repo"
+        other_dir.mkdir()
+        other_repo = _init_repo(other_dir)
+        (other_repo / "other.py").write_text("y=2\n")
+        subprocess.run(["git", "add", "-A"], cwd=other_repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "other"], cwd=other_repo, check=True)
+        other_manifest = build_tree_manifest(other_repo, commit=None)
+
+        # Write sidecar with protamer's sha but the other tree's manifest
+        # (change only commit to match protamer's sha)
+        sidecar = fixture_dir / PROVENANCE_FILENAME
+        manifest_dict = other_manifest.to_dict()
+        manifest_dict["commit"] = "9d0b87513d484cdf103199d48450c5c5af42e6ef"
+        sidecar.write_text(json.dumps({
+            "schema_version": 2,
+            "provenance_status": "git",
+            "git_sha": "9d0b87513d484cdf103199d48450c5c5af42e6ef",
+            "git_branch": "feat/chi-bb-scale-confirmatory",
+            "git_dirty": True,
+            "dirty_content_id": "tree:3f3563fdff04c08552315284c53d2288ce2d9c69",
+            "provenance_root": str(fixture_dir),
+            "capture_stage": "push",
+            "sync_state": "verified",
+            "computed_at": "2026-08-28T13:55:00+00:00",
+            "remote": "titanix",
+            "project": "protamer",
+            "worktree": None,
+            "tree_manifest": manifest_dict,
+        }))
+
+        state = capture_git_state(fixture_dir)
+        assert state.hash == "unknown"
+        assert state.code_verified is False
+        assert "9d0b875" not in repr(state)
+
+    def test_verified_tree_matches_commit_false_with_clean_record(self, tmp_path):
+        """Verified tree with matches_commit=False but git_dirty=False → surfaces, dirty=True."""
+        remote, head_sha = _make_verified_tree(tmp_path)
+
+        # Set matches_commit to False in the sidecar's manifest
+        sidecar = remote / PROVENANCE_FILENAME
+        data = json.loads(sidecar.read_text())
+        data["tree_manifest"]["matches_commit"] = False
+        sidecar.write_text(json.dumps(data))
+
+        state = capture_git_state(remote)
+        assert state.hash == head_sha
+        assert state.code_verified is True
+        # matches_commit=False means dirty=True despite git_dirty=False
+        assert state.dirty is True
+
+    def test_schema_v2_sidecar_without_tree_manifest_key(self, tmp_path):
+        """Schema v2 sidecar with NO tree_manifest key → withheld."""
+        fixture_dir = tmp_path / "test"
+        fixture_dir.mkdir()
+        sidecar = fixture_dir / PROVENANCE_FILENAME
+        sidecar.write_text(json.dumps({
+            "schema_version": 2,
+            "provenance_status": "git",
+            "git_sha": "a" * 40,
+            "git_branch": "main",
+            "git_dirty": False,
+            "provenance_root": str(fixture_dir),
+            # Explicitly no tree_manifest key
+        }))
+
+        state = capture_git_state(fixture_dir)
+        assert state.hash == "unknown"
+        assert state.provenance_source == "unverified-sidecar"
+        assert state.code_verified is None
+
+    def test_malformed_tree_manifest_dict(self, tmp_path):
+        """tree_manifest = {"garbage": 1} (invalid schema) → withheld."""
+        fixture_dir = tmp_path / "test"
+        fixture_dir.mkdir()
+        sidecar = fixture_dir / PROVENANCE_FILENAME
+        sidecar.write_text(json.dumps({
+            "schema_version": 2,
+            "provenance_status": "git",
+            "git_sha": "a" * 40,
+            "git_branch": "main",
+            "git_dirty": False,
+            "provenance_root": str(fixture_dir),
+            "tree_manifest": {"garbage": 1},
+        }))
+
+        state = capture_git_state(fixture_dir)
+        assert state.hash == "unknown"
+        assert state.code_verified is None
+
+    def test_ancestor_sidecar_with_cwd_outside_declared_dirs(self, tmp_path):
+        """Ancestor sidecar: cwd = remote/'scratch' (not declared) with extra file → withheld."""
+        remote, head_sha = _make_verified_tree(tmp_path)
+
+        # Create scratch dir with a new file
+        scratch = remote / "scratch"
+        scratch.mkdir()
+        (scratch / "new.py").write_text("# new\n")
+
+        # Capture from scratch dir
+        state = capture_git_state(scratch)
+        assert state.hash == "unknown"
+        assert state.code_verified is False
+        assert state.verification is not None
+        # The extra file should be detected
+        assert len(state.verification.extra_untracked_under_declared_dirs) > 0
+        assert "scratch/new.py" in state.verification.extra_untracked_under_declared_dirs
+
+    def test_unknown_freshness(self, tmp_path):
+        """_unknown() returns fresh instances, not a shared mutable."""
+        from cisternal.provenance.channels import _unknown
+        a = _unknown()
+        b = _unknown()
+        assert a is not b
+        assert a.hash == "unknown"
+        assert b.hash == "unknown"
+
+    def test_gate_no_sidecar_path(self, tmp_path):
+        """Direct _gate call: sidecar mode without sidecar_path → withheld."""
+        from cisternal.provenance.channels import _gate
+
+        # Call _gate directly with a dict that has no sidecar_path
+        prov = {
+            "provenance_status": "git",
+            "git_sha": "a" * 40,
+            "git_branch": "main",
+            "git_dirty": False,
+            # No sidecar_path key
+        }
+        state = _gate(prov, "myxcel-sidecar", tmp_path)
+        assert state.hash == "unknown"
+        assert state.provenance_source == "unverified-sidecar"
+        assert state.code_verified is None
+
+    def test_gate_sidecar_path_with_valid_manifest(self, tmp_path):
+        """_gate with sidecar_path but no actual manifest → withheld."""
+        from cisternal.provenance.channels import _gate
+
+        fake_sidecar = tmp_path / "fake_sidecar.json"
+        prov = {
+            "provenance_status": "git",
+            "git_sha": "a" * 40,
+            "git_branch": "main",
+            "git_dirty": False,
+            "sidecar_path": str(fake_sidecar),
+            # No tree_manifest
+        }
+        state = _gate(prov, "myxcel-sidecar", tmp_path)
+        assert state.hash == "unknown"
+        assert state.code_verified is None
+
+    def test_env_dirty_content_id_from_sidecar(self, tmp_path, monkeypatch):
+        """Env channel: dirty_content_id comes from sidecar, env MYXCEL_GIT_DIRTY_CONTENT_ID ignored."""
+        remote, head_sha = _make_verified_tree(tmp_path)
+
+        monkeypatch.setenv("MYXCEL_PROVENANCE_SCHEMA", "2")
+        monkeypatch.setenv("MYXCEL_PROVENANCE_STATUS", "git")
+        monkeypatch.setenv("MYXCEL_GIT_SHA", head_sha)
+        monkeypatch.setenv("MYXCEL_GIT_BRANCH", "main")
+        monkeypatch.setenv("MYXCEL_PROVENANCE_ROOT", str(remote))
+        monkeypatch.setenv("MYXCEL_GIT_DIRTY_CONTENT_ID", "tree:" + "e" * 40)  # Wrong value
+
+        state = capture_git_state(remote)
+        assert state.hash == head_sha
+        assert state.code_verified is True
+        # Should use sidecar's dirty_content_id (None), not env's
+        assert state.dirty_content_id is None
+
+    def test_env_dirty_3way_or(self, tmp_path, monkeypatch):
+        """Env dirty check: clean only if BOTH env and sidecar say clean."""
+        remote, head_sha = _make_verified_tree(tmp_path)
+
+        # Env says clean (0), but sidecar says dirty (true)
+        monkeypatch.setenv("MYXCEL_PROVENANCE_SCHEMA", "2")
+        monkeypatch.setenv("MYXCEL_PROVENANCE_STATUS", "git")
+        monkeypatch.setenv("MYXCEL_GIT_SHA", head_sha)
+        monkeypatch.setenv("MYXCEL_GIT_BRANCH", "main")
+        monkeypatch.setenv("MYXCEL_GIT_DIRTY", "0")  # Clean in env
+        monkeypatch.setenv("MYXCEL_PROVENANCE_ROOT", str(remote))
+
+        # Update sidecar to say dirty
+        sidecar = remote / PROVENANCE_FILENAME
+        data = json.loads(sidecar.read_text())
+        data["git_dirty"] = True
+        sidecar.write_text(json.dumps(data))
+
+        state = capture_git_state(remote)
+        assert state.hash == head_sha
+        assert state.code_verified is True
+        # One source says dirty → result is dirty
+        assert state.dirty is True

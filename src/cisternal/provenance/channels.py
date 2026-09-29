@@ -263,6 +263,9 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
     git_dirty_value = prov.get("git_dirty", "")
     record_says_clean = _record_says_clean(git_dirty_value)
 
+    # For env channels, we may have a sidecar_rec to check against
+    sidecar_rec_for_env = None
+
     # nogit status: no sha to protect, surface it as-is
     if status == "nogit":
         return GitState(
@@ -290,15 +293,24 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
     if prov_source == "myxcel-sidecar":
         sidecar_path_str = prov.get("sidecar_path")
         if not sidecar_path_str:
-            # Fallback for older dict shapes
-            root_dir = Path(prov.get("root", "."))
-        else:
-            root_dir = Path(sidecar_path_str).parent
+            # No sidecar_path means we cannot verify against the correct directory
+            reason = "sidecar path unknown"
+            _warn_withheld(str(claimed_sha or "unknown"), reason)
+            return GitState(
+                hash="unknown",
+                branch="unknown",
+                dirty=True,
+                dirty_content_id=None,
+                provenance_source="unverified-sidecar",
+                code_verified=None,
+            )
+        root_dir = Path(sidecar_path_str).parent
         manifest_dict = prov.get("tree_manifest")
     else:  # myxcel-env
         root_dir = Path(prov.get("root", "."))
         # For env, try to read the sidecar at root to get the manifest
         sidecar_rec = read_sidecar(root_dir)
+        sidecar_rec_for_env = sidecar_rec
         if sidecar_rec is None or sidecar_rec.tree_manifest is None:
             if sidecar_rec is None:
                 reason = "no tree manifest at MYXCEL_PROVENANCE_ROOT"
@@ -404,14 +416,24 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
         )
 
     # All checks passed: surface the sha
-    # dirty = (record says dirty) or (manifest doesn't match commit)
-    dirty = (not record_says_clean) or (not manifest.matches_commit)
+    # For env channels: dirty = (env says dirty) or (sidecar says dirty) or (manifest doesn't match commit)
+    # For sidecar channels: dirty = (record says dirty) or (manifest doesn't match commit)
+    if prov_source == "myxcel-env" and sidecar_rec_for_env is not None:
+        # 3-way clean check: both env and sidecar must say clean
+        sidecar_says_clean = _record_says_clean(sidecar_rec_for_env.git_dirty)
+        dirty = (not record_says_clean) or (not sidecar_says_clean) or (not manifest.matches_commit)
+        # Use sidecar's dirty_content_id for env channel
+        dirty_content_id = sidecar_rec_for_env.dirty_content_id
+    else:
+        # Sidecar channel
+        dirty = (not record_says_clean) or (not manifest.matches_commit)
+        dirty_content_id = prov.get("dirty_content_id")
 
     return GitState(
         hash=claimed_sha,
         branch=git_branch,
         dirty=dirty,
-        dirty_content_id=prov.get("dirty_content_id"),
+        dirty_content_id=dirty_content_id,
         provenance_source=prov_source,
         code_verified=True,
         verification=v,
