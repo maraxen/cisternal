@@ -372,6 +372,30 @@ Out of scope: bathos fail-closed policy (#2058), myxcel bundle deploy / stamp / 
 | Additive push leaves stale files → permanent `"unknown"` | intended fail-closed; warning names `myxcel clean` / `--delete` push (test 14) |
 | Network-filesystem hashing cost unmeasured | `max_bytes`/`max_seconds` budget → withheld, never cached |
 
+## 6b. Implementation review amendments (rev. B, 2026-09-29)
+
+A Sonnet code review of the implementation returned NEEDS_WORK. The orchestrator reproduced the
+first two items below before accepting any of them.
+
+- **Empty manifest fails.** `verify_tree` on a manifest with no files returns `verified=False`
+  (`error="empty manifest"`), and `build_tree_manifest` returns `None` for an empty file set.
+  Reproduced: an empty allowlist previously verified vacuously and would have surfaced the sha.
+- **Built-in bytecode excludes.** `__pycache__/`, `*.pyc` and `*.pyo` are always excluded from
+  the extras listing. Reproduced: without this, the first Python import on a host whose
+  `.gitignore` lacks `__pycache__` withholds the sha permanently. Safe because a sourceless
+  `.pyc` inside `__pycache__` is never imported.
+- **Gitlinks.** Nested repos and submodules are recorded as `skipped: "gitlink:<path>"`. They do
+  not fail verification and are excluded from the extras listing. Only `non-utf8:` and
+  `unreadable:` skips fail verification. The spec previously left this undefined.
+- **Streaming hashing.** Files are hashed in chunks. The budget is checked after each file, and
+  the extras scan counts against `max_seconds`. A path that is not a regular file (e.g. a FIFO)
+  fails verification instead of blocking. A symlink changed to a regular file, or back, counts as
+  mismatched.
+- **Strict `from_dict`.** `matches_commit` must be a bool. Hex fields must be 40 lowercase hex
+  characters.
+- **Warning key.** The withheld warning for a record with no sidecar path uses a fixed key, never
+  the claimed sha. This was reproduced as a leak.
+
 ## 7. Adversarial review (rev. A, 2026-09-29)
 
 - spec-challenger (Opus): `has_gaps`, 2 blockers, 5 majors, 8 minors. Audit
