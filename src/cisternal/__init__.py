@@ -117,29 +117,18 @@ def emit_event(name: str, *, level: int | str | None = None, **fields: Any) -> N
     if pipeline is None:
         return
 
-    # Normalize and validate level
-    if level is None:
-        severity = logging.INFO
-    elif isinstance(level, int):
-        severity = level
-    elif isinstance(level, str):
-        # Try to convert string level name (e.g. 'DEBUG', 'WARNING')
-        # Invalid names default to INFO (never raise)
-        try:
-            severity = getattr(logging, level.upper(), logging.INFO)
-            if isinstance(severity, str):
-                # getattr returned a string (not a level), default to INFO
-                severity = logging.INFO
-        except (AttributeError, TypeError):
-            severity = logging.INFO
-    else:
+    from cisternal.telemetry.pipeline import _normalize_level
+
+    # Invalid/unknown levels are treated as INFO (never raise).
+    severity = _normalize_level(level)
+    if severity is None:
         severity = logging.INFO
 
     # Check if event passes the configured minimum level threshold
-    if hasattr(pipeline, 'min_level') and pipeline.min_level is not None:
-        if severity < pipeline.min_level:
-            # Event below threshold; drop it
-            return
+    min_level = getattr(pipeline, "min_level", None)
+    if min_level is not None and severity < min_level:
+        # Event below threshold; drop it
+        return
 
     record = _build_record(name, ts=time.time(), severity=severity, **fields)
     if record is not None:

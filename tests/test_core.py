@@ -677,6 +677,26 @@ class TestSeverityLevelFiltering:
         # Invalid level should default to INFO, which is less than WARNING, so filtered
         assert "test.invalid" not in names, "Event with invalid level should be filtered"
 
+    @pytest.mark.parametrize("bad_level", ["basicConfig", "root", "handlers", 3.5, object()])
+    def test_non_level_logging_attr_never_raises(self, temp_log_dir, monkeypatch, bad_level):
+        """Given a level naming a non-int logging attribute (a function, a logger,
+        a module) or a non-int/str value; When emit_event; Then no exception and the
+        event is treated as INFO -- the never-raise contract must hold."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.INFO)
+
+        emit_event("test.bad_level", level=bad_level)
+
+        deadline = time.monotonic() + 5.0
+        matching = []
+        while not matching and time.monotonic() < deadline:
+            matching = [r for r in shadow.records if r.name == "test.bad_level"]
+            time.sleep(0.005)
+        assert matching, "event with a bad level should still be exported at INFO"
+        record = matching[0]
+        assert record.severity == logging.INFO
+
     def test_emit_event_level_kwarg(self, temp_log_dir, monkeypatch):
         """Given emit_event(level=ERROR); Then record.severity reflects it."""
         monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
