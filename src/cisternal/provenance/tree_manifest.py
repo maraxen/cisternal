@@ -68,7 +68,9 @@ _BATHOS_LOCK_MANIFEST_RE = re.compile(
 
 def is_bathos_lock_manifest(relpath: str) -> bool:
     """True iff ``relpath``'s basename is exactly bathos's run-lock shape ``<stem>.bth.<uuid>.bth.lock.toml``."""
-    return _BATHOS_LOCK_MANIFEST_RE.match(posixpath.basename(relpath)) is not None
+    # fullmatch, not match: `$` also matches before a trailing "\n" (git -z and os.walk both return such names), which would exempt a name
+    # that is not exactly the lock shape.
+    return _BATHOS_LOCK_MANIFEST_RE.fullmatch(posixpath.basename(relpath)) is not None
 
 
 def blob_id(data: bytes) -> str:
@@ -1036,6 +1038,16 @@ def verify_tree(
                 dirty_content_id_consistent = (dirty_content_id == expected_id)
             # else: informational only, no verdict
 
+        exempt_sorted = tuple(sorted(set(exempt_locks)))
+        if exempt_sorted:
+            # The names are on TreeVerification, which downstream provenance records do not carry; log them so the exemption is visible.
+            logger.info(
+                "verify_tree: %d bathos run-lock manifest(s) under %s exempted from the extras check: %s",
+                len(exempt_sorted),
+                root,
+                ", ".join(exempt_sorted),
+            )
+
         # Step 6: Determine verified
         verified = (
             manifest_ok
@@ -1058,7 +1070,7 @@ def verify_tree(
             tree_id=recomputed_tree_id,
             dirty_content_id_consistent=dirty_content_id_consistent,
             error=None,
-            exempt_lock_manifests=tuple(sorted(set(exempt_locks))),
+            exempt_lock_manifests=exempt_sorted,
         )
 
     except Exception as e:

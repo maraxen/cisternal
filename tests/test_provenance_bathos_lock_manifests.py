@@ -17,6 +17,7 @@ lock still fails. The exempted names are reported (``exempt_lock_manifests``), n
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 from pathlib import Path
@@ -99,6 +100,10 @@ def test_the_exact_bathos_lock_shape_is_recognised(name):
         "scripts/run.bth.toml",  # the sidecar itself
         "scripts/evil.py",
         "",
+        f"scripts/run.bth.{UUID}.bth.lock.toml\n",  # `$` would match before a trailing newline; the shape is EXACT
+        f"scripts/run.bth.{UUID}.bth.lock.toml\r",
+        f"scripts/run.bth.{UUID}.bth.lock.toml ",
+        f" scripts/run.bth.{UUID}.bth.lock.toml\n\n",
     ],
 )
 def test_near_misses_are_not_exempt(name):
@@ -115,6 +120,43 @@ def test_an_untracked_lock_manifest_is_not_an_extra_and_is_reported(tmp_path):
     assert v.verified is True and v.error is None
     assert v.extra_untracked_under_declared_dirs == ()
     assert v.exempt_lock_manifests == (LOCK,)  # exempted, and visibly so
+
+
+def test_a_name_with_a_trailing_newline_is_not_the_exact_shape_and_stays_an_extra(
+    tmp_path,
+):
+    # code review finding: re.match with `$` also matched a name ending in "\n" (git -z and os.walk both return such names)
+    manifest, copy = _stamped_copy(tmp_path)
+    name = LOCK + "\n"
+    try:
+        (copy / name).write_text("x\n")
+    except OSError:
+        pytest.skip("filesystem refuses a newline in a file name")
+    v = verify_tree(copy, manifest)
+    assert v.verified is False
+    assert name in v.extra_untracked_under_declared_dirs
+    assert v.exempt_lock_manifests == ()
+
+
+def test_the_exemption_is_logged_so_it_is_visible_to_anyone_who_only_sees_code_verified(
+    tmp_path, caplog
+):
+    # code review finding: the exempted names live on TreeVerification, which downstream provenance records do not carry
+    manifest, copy = _stamped_copy(tmp_path)
+    (copy / LOCK).write_text("a\n")
+    with caplog.at_level(logging.INFO, logger="cisternal.provenance.tree_manifest"):
+        assert verify_tree(copy, manifest).verified is True
+    assert any(
+        LOCK in r.getMessage() and "exempt" in r.getMessage().lower()
+        for r in caplog.records
+    )
+
+
+def test_nothing_is_logged_when_nothing_was_exempt(tmp_path, caplog):
+    manifest, copy = _stamped_copy(tmp_path)
+    with caplog.at_level(logging.INFO, logger="cisternal.provenance.tree_manifest"):
+        assert verify_tree(copy, manifest).verified is True
+    assert not [r for r in caplog.records if "exempt" in r.getMessage().lower()]
 
 
 def test_several_locks_at_several_depths_are_all_exempt(tmp_path):
