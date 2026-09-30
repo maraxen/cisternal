@@ -1,0 +1,29 @@
+[experiment]
+hypothesis = "The skill trigger harness can correctly register positive triggers (trigger_rate >= 0.67) and negative non-triggers (trigger_rate <= 0.33) when given a skill description that unambiguously triggers on a specific word ('zebrafrob') in the query."
+description = "Pre-registration for diagnosing cisternal debt #1271: the trigger harness reports trigger_rate 0.0 for every query (including positives that should trigger). This test runs positive and negative controls to determine whether the harness is fundamentally broken (returns False on any failure/network/auth issue) or whether the skill description is simply not triggering as expected."
+task_id = "260930_cisternal-debt-sweep"
+
+[outcomes.pass]
+condition = "positive_pass == true AND negative_pass == true AND claude_on_path == true AND raw_diagnostics_exit_code == 0"
+reasoning = "Positive control (must trigger on 'zebrafrob' query) achieves trigger_rate >= 0.67; negative control (must NOT trigger on '2+2' query) achieves trigger_rate <= 0.33; claude command is available and runs; raw diagnostics show clean exit. Harness is functional; the 0/5 positive rate in the original issue is a real description problem."
+is_residual = false
+
+[outcomes.marginal]
+condition = "positive_pass == true AND negative_pass == true BUT (claude_on_path == false OR raw_diagnostics_exit_code != 0)"
+reasoning = "Controls pass but environment diagnostics are concerning: claude may not be in PATH or basic claude -p invocation fails. Harness works but local environment has issues."
+is_residual = false
+
+[outcomes.fail]
+condition = "NOT (positive_pass == true AND negative_pass == true) OR harness_exception_count > 0"
+reasoning = "Positive or negative control failed to meet threshold, suggesting the harness itself is broken (returns False indiscriminately on network/auth/crashes). Cannot determine whether the issue is measurement or description without fixing the harness first."
+is_residual = true
+
+[result_schema]
+timestamp = "str"
+claude_on_path = "bool"
+raw_diagnostics_exit_code = "int"
+positive_pass = "bool"
+negative_pass = "bool"
+positive_trigger_rate = "float"
+negative_trigger_rate = "float"
+harness_exception_count = "int"
