@@ -30,6 +30,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import posixpath
+import re
 import stat
 import subprocess
 import tempfile
@@ -52,6 +54,23 @@ BUILTIN_EXTRA_EXCLUDES = ("__pycache__/",)
 # there is never imported, so it is always excludable even if not in .gitignore.
 # Deliberately NOT "*.pyc": a sourceless legacy-location src/pkg/mod.pyc IS importable
 # (SourcelessFileLoader), so it must still be reported as an extra.
+
+# bathos writes `<script>.bth.<run-uuid>.bth.lock.toml` next to the script on every tracked run. On a no-.git host that
+# directory is a declared dir, so without an exemption each run would un-verify the host for the next one (myxcel debt 2296
+# class). It is a TOML data file the run itself writes -- it cannot be imported or executed -- so exactly this basename shape
+# is exempt from the EXTRAS check, and only while untracked (a manifest that lists it verifies it by content like any file).
+# Deliberately narrow: the uuid is required and lowercase, and the tail is exactly `.bth.lock.toml`, so an importable
+# `....bth.lock.py`, a truncated uuid or a bare `x.bth.lock.toml` is still reported as an extra.
+_BATHOS_LOCK_MANIFEST_RE = re.compile(
+    r"^.+\.bth\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.bth\.lock\.toml$"
+)
+
+
+def is_bathos_lock_manifest(relpath: str) -> bool:
+    """True iff ``relpath``'s basename is exactly bathos's run-lock shape ``<stem>.bth.<uuid>.bth.lock.toml``."""
+    # fullmatch, not match: `$` also matches before a trailing "\n" (git -z and os.walk both return such names), which would exempt a name
+    # that is not exactly the lock shape.
+    return _BATHOS_LOCK_MANIFEST_RE.fullmatch(posixpath.basename(relpath)) is not None
 
 
 def blob_id(data: bytes) -> str:
@@ -258,6 +277,11 @@ class TreeVerification:
     dirty_content_id_consistent: None if dirty_content_id arg was None;
                                  else True iff it matches "tree:" + tree_id.
     error: Set if an exception was caught or a constraint was violated.
+    exempt_lock_manifests: Untracked bathos run-lock manifests (see
+                           ``is_bathos_lock_manifest``) that were NOT counted as
+                           extras. Reported so the exemption is auditable, never
+                           silent. Empty on the early-error returns, where extras
+                           were not fully scanned.
     """
 
     verified: bool
@@ -272,6 +296,7 @@ class TreeVerification:
     tree_id: str | None
     dirty_content_id_consistent: bool | None
     error: str | None
+    exempt_lock_manifests: tuple[str, ...] = ()
 
 
 def build_tree_manifest(
@@ -777,7 +802,12 @@ def verify_tree(
 
         # Use git to find extras (or fallback to Python walk)
         extras: list[str] = []
+        exempt_locks: list[str] = []
         extras_ignore_aware = False
+
+        def _record_extra(rel: str) -> None:
+            """The one place an untracked file becomes an extra; bathos run-lock manifests are reported, not counted."""
+            (exempt_locks if is_bathos_lock_manifest(rel) else extras).append(rel)
 
         # If there are no scan dirs and no cwd dir, skip extras scanning
         if not scan_dirs_list and cwd_dir_to_scan is None:
@@ -862,7 +892,7 @@ def verify_tree(
                                 listed_files = result.stdout.decode("utf-8", errors="replace").split("\0")
                                 for f in listed_files:
                                     if f and f != PROVENANCE_FILENAME and f not in manifest.files:
-                                        extras.append(f)
+                                        _record_extra(f)
                             else:
                                 # git failed
                                 stderr = result.stderr.decode("utf-8", errors="replace").strip()
@@ -910,7 +940,7 @@ def verify_tree(
                                         # Only add if it's a direct child (no "/" after the cwd prefix)
                                         relpath = f[len(cwd_dir_to_scan) + 1:] if f.startswith(cwd_dir_to_scan + "/") else ""
                                         if relpath and "/" not in relpath:
-                                            extras.append(f)
+                                            _record_extra(f)
                             else:
                                 # git failed on cwd; fail the verification
                                 stderr = result_cwd.stderr.decode("utf-8", errors="replace").strip()
@@ -968,7 +998,7 @@ def verify_tree(
                                     relpath = full_path.relative_to(root_resolved)
                                     relpath_str = str(relpath).replace(os.sep, "/")
                                     if relpath_str not in manifest.files and relpath_str != PROVENANCE_FILENAME:
-                                        extras.append(relpath_str)
+                                        _record_extra(relpath_str)
                         # Scan cwd dir non-recursively
                         if cwd_dir_to_scan is not None:
                             cwd_path = root_resolved / cwd_dir_to_scan
@@ -978,7 +1008,7 @@ def verify_tree(
                                         relpath = Path(entry.path).relative_to(root_resolved)
                                         relpath_str = str(relpath).replace(os.sep, "/")
                                         if relpath_str not in manifest.files and relpath_str != PROVENANCE_FILENAME:
-                                            extras.append(relpath_str)
+                                            _record_extra(relpath_str)
 
             except Exception as e:
                 # Any exception in extras scanning fails verification
@@ -1008,6 +1038,16 @@ def verify_tree(
                 dirty_content_id_consistent = (dirty_content_id == expected_id)
             # else: informational only, no verdict
 
+        exempt_sorted = tuple(sorted(set(exempt_locks)))
+        if exempt_sorted:
+            # The names are on TreeVerification, which downstream provenance records do not carry; log them so the exemption is visible.
+            logger.info(
+                "verify_tree: %d bathos run-lock manifest(s) under %s exempted from the extras check: %s",
+                len(exempt_sorted),
+                root,
+                ", ".join(exempt_sorted),
+            )
+
         # Step 6: Determine verified
         verified = (
             manifest_ok
@@ -1030,6 +1070,7 @@ def verify_tree(
             tree_id=recomputed_tree_id,
             dirty_content_id_consistent=dirty_content_id_consistent,
             error=None,
+            exempt_lock_manifests=exempt_sorted,
         )
 
     except Exception as e:
