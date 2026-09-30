@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import tempfile
 import time
 from pathlib import Path
@@ -627,8 +626,8 @@ class TestSeverityLevelFiltering:
         time.sleep(0.05)
 
         names = [r.name for r in shadow.records]
-        assert "test.error" not in names, f"ERROR should be filtered by CRITICAL level"
-        assert "test.critical" in names, f"CRITICAL should pass"
+        assert "test.error" not in names, "ERROR should be filtered by CRITICAL level"
+        assert "test.critical" in names, "CRITICAL should pass"
 
     def test_explicit_level_beats_env(self, temp_log_dir, monkeypatch):
         """Given CISTERNAL_LOG_LEVEL=CRITICAL and init(level=WARNING); Then explicit wins."""
@@ -643,7 +642,7 @@ class TestSeverityLevelFiltering:
         time.sleep(0.05)
 
         names = [r.name for r in shadow.records]
-        assert "test.warning" in names, f"WARNING should pass (init level=WARNING overrides env CRITICAL)"
+        assert "test.warning" in names, "WARNING should pass (init level=WARNING overrides env CRITICAL)"
 
     def test_heartbeat_not_filtered(self, temp_log_dir, monkeypatch):
         """Given init(level=CRITICAL); When heartbeat emitted; Then not filtered."""
@@ -662,7 +661,7 @@ class TestSeverityLevelFiltering:
                 break
             time.sleep(0.005)
 
-        assert heartbeat_found, f"Heartbeat should not be filtered by CRITICAL level"
+        assert heartbeat_found, "Heartbeat should not be filtered by CRITICAL level"
 
     def test_invalid_level_string_defaults_to_info(self, temp_log_dir, monkeypatch):
         """Given emit_event(level='INVALID'); When called; Then no crash, defaults to INFO."""
@@ -676,7 +675,7 @@ class TestSeverityLevelFiltering:
 
         names = [r.name for r in shadow.records]
         # Invalid level should default to INFO, which is less than WARNING, so filtered
-        assert "test.invalid" not in names, f"Event with invalid level should be filtered"
+        assert "test.invalid" not in names, "Event with invalid level should be filtered"
 
     def test_emit_event_level_kwarg(self, temp_log_dir, monkeypatch):
         """Given emit_event(level=ERROR); Then record.severity reflects it."""
