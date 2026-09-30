@@ -60,5 +60,7 @@ class Record:
     git_provenance_source: str | None = None
     """Snapshot of git_state_var.provenance_source ("git" | "nogit" |
     "unavailable"). None until init() has run."""
+
     severity: int = logging.INFO
-    """Log severity level (numeric, e.g. logging.INFO=20, logging.ERROR=40)."""
+    """Numeric severity (stdlib levels: INFO=20, ERROR=40). Set by
+    emit_event(level=...); spans and heartbeats are always INFO."""

@@ -8,6 +8,7 @@ to the CLI, which owns exit codes.
 """
 
 import functools
+import logging
 import time
 from typing import Any
 
@@ -85,7 +86,10 @@ def timed_command(cmd_name: str | None = None):
                     code = exc.code
                     fields["ok"] = code in (0, None)
                     fields["exit_code"] = 0 if code is None else code
-                emit_event("cli.cmd_end", **fields)
+                # A failed command is an error; a clean exit stays INFO. This
+                # keeps failures visible under init(level="WARNING"/"ERROR").
+                level = logging.INFO if fields["ok"] else logging.ERROR
+                emit_event("cli.cmd_end", level=level, **fields)
                 raise
             duration_ms = (time.monotonic_ns() - t0) / 1e6
             emit_event("cli.cmd_end", cmd=name, duration_ms=duration_ms, ok=True)

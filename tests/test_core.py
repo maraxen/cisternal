@@ -711,3 +711,118 @@ class TestSeverityLevelFiltering:
         assert len(warn_records) >= 1
         record = warn_records[0]
         assert record.severity == logging.WARNING
+
+
+def _poll_records(shadow, name: str, timeout: float = 5.0) -> list:
+    """Return records named *name*, polling until at least one arrives."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        matching = [r for r in shadow.records if r.name == name]
+        if matching:
+            return matching
+        time.sleep(0.005)
+    return [r for r in shadow.records if r.name == name]
+
+
+class TestSeverityReviewFixes:
+    """Review findings on debt #2272: field collisions, error levels, re-init."""
+
+    def test_severity_field_does_not_collide_in_emit_event(self, temp_log_dir, monkeypatch):
+        """A caller field named 'severity' is a normal field, never a TypeError."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        emit_event("test.sev_field", severity="high")
+
+        (record,) = _poll_records(shadow, "test.sev_field")
+        assert record.fields["severity"] == "high"
+        assert record.severity == logging.INFO
+
+    def test_severity_field_does_not_hijack_span_severity(self, temp_log_dir, monkeypatch):
+        """span(..., severity=...) keeps the field and an int Record.severity."""
+        from cisternal.telemetry.span import span
+
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        with span("test.sev_span", severity="high"):
+            pass
+
+        (end,) = _poll_records(shadow, "test.sev_span.end")
+        assert isinstance(end.severity, int)
+        (start,) = _poll_records(shadow, "test.sev_span.start")
+        assert start.fields["severity"] == "high"
+
+    def test_tool_error_survives_warning_filter(self, temp_log_dir, monkeypatch):
+        """mcp.tool_error is emitted at ERROR, so level=WARNING keeps it."""
+        from cisternal.adapters.base import PassthroughAdapter
+
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level="WARNING")
+
+        PassthroughAdapter().emit_error("t", "req-1", ValueError("boom"))
+
+        (record,) = _poll_records(shadow, "mcp.tool_error")
+        assert record.severity == logging.ERROR
+
+    def test_failed_cli_command_survives_warning_filter(self, temp_log_dir, monkeypatch):
+        """A failing CLI command's cli.cmd_end is ERROR; a clean one stays INFO."""
+        from cisternal.adapters.cli import timed_command
+
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level="WARNING")
+
+        @timed_command("boom")
+        def boom():
+            raise ValueError("x")
+
+        @timed_command("fine")
+        def fine():
+            return 1
+
+        with pytest.raises(ValueError):
+            boom()
+        fine()
+
+        ends = _poll_records(shadow, "cli.cmd_end")
+        assert [r.fields["cmd"] for r in ends] == ["boom"]
+        assert ends[0].severity == logging.ERROR
+
+    def test_explicit_level_on_reinit_applies(self, temp_log_dir, monkeypatch):
+        """init(level=) after the pipeline exists updates the threshold instead
+        of being silently ignored; init() without level leaves it alone."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+        init(level="ERROR")
+        init()  # no level: must not reset the threshold
+
+        emit_event("test.reinit_info")
+        emit_event("test.reinit_error", level="ERROR")
+
+        _poll_records(shadow, "test.reinit_error")
+        names = [r.name for r in shadow.records]
+        assert "test.reinit_info" not in names
+
+    @pytest.mark.parametrize("bad", ["WARNIN", True])
+    def test_invalid_init_level_warns(self, temp_log_dir, monkeypatch, capsys, bad):
+        """An unparseable level disables filtering, loudly rather than silently."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        init(log_dir=temp_log_dir, level=bad)
+        assert "level" in capsys.readouterr().err.lower()
+
+    def test_numeric_string_level_accepted(self, temp_log_dir, monkeypatch):
+        """CISTERNAL_LOG_LEVEL=30 is WARNING, like the stdlib accepts ints."""
+        monkeypatch.setenv("CISTERNAL_LOG_LEVEL", "30")
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        emit_event("test.num_info")
+        emit_event("test.num_warn", level="WARNING")
+
+        _poll_records(shadow, "test.num_warn")
+        assert "test.num_info" not in [r.name for r in shadow.records]

@@ -246,19 +246,43 @@ def _normalize_level(level: int | str | None) -> int | None:
         Normalized int level, or None if input is invalid.
         Never raises; invalid inputs return None.
     """
-    if level is None:
+    if level is None or isinstance(level, bool):
+        # bool is an int subclass; True/False are never meant as levels.
         return None
     if isinstance(level, int):
         return level
     if isinstance(level, str):
-        try:
-            # Try to get attribute from logging module (e.g. logging.INFO, logging.WARNING)
-            val = getattr(logging, level.upper(), None)
-            if isinstance(val, int):
-                return val
-        except (AttributeError, TypeError):
-            pass
+        text = level.strip()
+        if text.isdigit():
+            return int(text)
+        val = logging.getLevelNamesMapping().get(text.upper())
+        if isinstance(val, int):
+            return val
     return None
+
+
+def _resolve_min_level(level: int | str | None) -> int | None:
+    """Explicit arg > CISTERNAL_LOG_LEVEL > None (no filtering).
+
+    An explicit or env level that doesn't parse disables filtering, and says so
+    on stderr instead of silently exporting everything.
+    """
+    import os
+
+    source, raw = ("level", level) if level is not None else (
+        "CISTERNAL_LOG_LEVEL",
+        os.getenv("CISTERNAL_LOG_LEVEL"),
+    )
+    if raw is None:
+        return None
+    resolved = _normalize_level(raw)
+    if resolved is None:
+        print(
+            f"[cisternal] Warning: unrecognized log level {source}={raw!r}; "
+            "level filtering is disabled",
+            file=sys.stderr,
+        )
+    return resolved
 
 
 def init_pipeline(
@@ -282,8 +306,8 @@ def init_pipeline(
         backup_count: Backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
         heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
-        level: Minimum log level for filtering (int or string; default None=no filtering).
-               Respects CISTERNAL_LOG_LEVEL env var if not explicitly set.
+        level: Minimum severity for ``emit_event`` (see ``cisternal.init``).
+            Applied even when the pipeline already exists, if given.
 
     Returns:
         The global EventPipeline instance.
@@ -292,7 +316,13 @@ def init_pipeline(
 
     with _pipeline_lock:
         if _global_pipeline is not None:
-            # Already initialized; return existing (AC-CORE-5: idempotent)
+            # Already initialized; return existing (AC-CORE-5: idempotent).
+            # The one exception: an explicit level applies, so a consumer that
+            # calls init(level=...) after something else initialized telemetry
+            # gets its threshold rather than a silent no-op. init() without a
+            # level never changes an existing threshold.
+            if level is not None:
+                _global_pipeline.min_level = _resolve_min_level(level)
             return _global_pipeline
 
         # Initialize exporter list (copy to avoid mutating caller's list)
@@ -305,16 +335,7 @@ def init_pipeline(
             log_dir = Path(log_dir)
 
         # Resolve min_level: explicit arg > env var > None (no filtering)
-        min_level = None
-        if level is not None:
-            # Explicit arg provided; normalize it
-            min_level = _normalize_level(level)
-        else:
-            # Try to get from env
-            import os
-            env_level = os.getenv("CISTERNAL_LOG_LEVEL")
-            if env_level is not None:
-                min_level = _normalize_level(env_level)
+        min_level = _resolve_min_level(level)
 
         # Write-probe (fall back to tempdir on failure) — spec §3.2
         import os
