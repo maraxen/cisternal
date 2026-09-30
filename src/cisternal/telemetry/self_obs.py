@@ -202,7 +202,7 @@ def _start_heartbeat(
             shutdown_pipeline()) gets a fresh thread at its own interval; the
             previous thread notices it lost ownership and exits on its own.
     """
-    global _heartbeat_thread, _heartbeat_owner, _jsonl_path, _heartbeat_interval
+    global _heartbeat_thread, _heartbeat_owner, _jsonl_path, _heartbeat_interval, _last_stat
 
     with _heartbeat_lock:
         if _heartbeat_thread is None or (
@@ -211,6 +211,9 @@ def _start_heartbeat(
             _jsonl_path = jsonl_path
             _heartbeat_interval = interval
             _heartbeat_owner = owner
+            # Liveness evidence belongs to the previous pipeline's file; a new
+            # owner starts from no evidence rather than inheriting "alive".
+            _last_stat = {"mtime": None, "size": None, "ts": None, "last_growth_ts": None}
             _heartbeat_thread = threading.Thread(
                 target=_heartbeat_daemon, args=(interval, owner), daemon=True
             )

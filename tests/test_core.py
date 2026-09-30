@@ -514,13 +514,8 @@ class TestGitProvenanceWiring:
         """End-to-end: emit_event -> ShadowExporter record has git fields,
         once the background capture has completed.
 
-        Filters by event name rather than asserting an exact record count:
-        a leftover heartbeat thread from an earlier test (started with a
-        short heartbeat_interval, whose reference cleanup_pipeline() forgets
-        without actually stopping the thread -- a pre-existing test-isolation
-        gap in self_obs.py, not something this test should paper over by
-        coincidentally passing) can inject extra "heartbeat" records here
-        when running the full suite.
+        Filters by event name rather than asserting an exact record count,
+        since this pipeline's own heartbeat can also land in the exporter.
         """
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow])

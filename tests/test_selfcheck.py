@@ -348,3 +348,17 @@ class TestEC3Warn:
 
         captured = capsys.readouterr()
         assert "EC-3" in captured.err or "pipeline consumer dead" in captured.err
+
+
+def test_new_owner_does_not_inherit_liveness(temp_log_dir):
+    """After shutdown_pipeline() + init(), status() must not report the old
+    pipeline's file growth as the new pipeline's liveness."""
+    from cisternal.telemetry.pipeline import shutdown_pipeline
+
+    init(log_dir=temp_log_dir, heartbeat_interval=0.02)
+    emit_event("first")
+    _wait_until(lambda: status().heartbeat_alive)
+    shutdown_pipeline()
+
+    init(log_dir=temp_log_dir, heartbeat_interval=30.0)
+    assert status().heartbeat_alive is False
