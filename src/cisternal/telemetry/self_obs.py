@@ -17,6 +17,7 @@ from .pipeline import get_pipeline
 
 # Global state for heartbeat thread and liveness tracking
 _heartbeat_thread = None
+_heartbeat_owner = None  # the EventPipeline the live heartbeat thread serves
 _heartbeat_lock = threading.Lock()
 _heartbeat_interval = 0.05  # 50ms default, same as tests
 _last_stat = {"mtime": None, "size": None, "ts": None, "last_growth_ts": None}
@@ -54,7 +55,7 @@ class StatusReport:
     """(CH-12) Last heartbeat write probe succeeded (file mtime/size advanced)."""
 
 
-def _heartbeat_daemon(interval: float) -> None:
+def _heartbeat_daemon(interval: float, owner: object | None = None) -> None:
     """Emit periodic heartbeat events and track file liveness (CH-12).
 
     Runs as a daemon thread started by init_pipeline().
@@ -62,6 +63,12 @@ def _heartbeat_daemon(interval: float) -> None:
 
     Args:
         interval: Seconds between heartbeats.
+        owner: The EventPipeline this thread was started for. Once the global
+            pipeline is no longer ``owner`` (shut down, or replaced by a later
+            init()), the thread exits instead of emitting into a pipeline it
+            doesn't belong to -- otherwise a stale thread keeps its old
+            interval forever and leaks heartbeats into every later pipeline.
+            None keeps the legacy "serve whatever pipeline is current" loop.
     """
     from .context import _build_record
 
@@ -69,6 +76,8 @@ def _heartbeat_daemon(interval: float) -> None:
         try:
             time.sleep(interval)
             pipeline = get_pipeline()
+            if owner is not None and pipeline is not owner:
+                return
             if pipeline is None:
                 continue
 
@@ -181,21 +190,29 @@ def _probe_jsonl_file() -> None:
     _maybe_warn_ec3()
 
 
-def _start_heartbeat(interval: float, jsonl_path: Path | None) -> None:
+def _start_heartbeat(
+    interval: float, jsonl_path: Path | None, owner: object | None = None
+) -> None:
     """Start the heartbeat daemon thread (called by init_pipeline).
 
     Args:
         interval: Seconds between heartbeats.
         jsonl_path: Path to the JSONL output file for liveness probing.
+        owner: The EventPipeline the thread serves. A new owner (re-init after
+            shutdown_pipeline()) gets a fresh thread at its own interval; the
+            previous thread notices it lost ownership and exits on its own.
     """
-    global _heartbeat_thread, _jsonl_path, _heartbeat_interval
+    global _heartbeat_thread, _heartbeat_owner, _jsonl_path, _heartbeat_interval
 
     with _heartbeat_lock:
-        if _heartbeat_thread is None:
+        if _heartbeat_thread is None or (
+            owner is not None and owner is not _heartbeat_owner
+        ):
             _jsonl_path = jsonl_path
             _heartbeat_interval = interval
+            _heartbeat_owner = owner
             _heartbeat_thread = threading.Thread(
-                target=_heartbeat_daemon, args=(interval,), daemon=True
+                target=_heartbeat_daemon, args=(interval, owner), daemon=True
             )
             _heartbeat_thread.start()
 

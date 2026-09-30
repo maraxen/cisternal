@@ -323,7 +323,9 @@ def init_pipeline(
         # Start heartbeat daemon thread (CH-12) for liveness detection
         from .self_obs import _start_heartbeat
 
-        _start_heartbeat(interval=heartbeat_interval, jsonl_path=jsonl_path)
+        _start_heartbeat(
+            interval=heartbeat_interval, jsonl_path=jsonl_path, owner=_global_pipeline
+        )
 
         return _global_pipeline
 

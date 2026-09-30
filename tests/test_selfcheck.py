@@ -24,6 +24,20 @@ def temp_log_dir():
         yield Path(tmpdir)
 
 
+def _wait_until(predicate, timeout: float = 2.0, poll: float = 0.01) -> bool:
+    """Poll *predicate* until it returns True or *timeout* elapses.
+
+    Liveness flags depend on heartbeat/probe thread scheduling, so a fixed
+    sleep of a few intervals flakes under load; wait on the state instead.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(poll)
+    return predicate()
+
+
 @pytest.fixture(autouse=True)
 def cleanup():
     """Clean up between tests."""
@@ -63,10 +77,9 @@ class TestACSelfcheck1:
 
         # Emit an initial event to ensure file exists
         emit_event("initial.event")
-        time.sleep(0.05)
 
-        # Sleep for ~150ms to allow heartbeats to fire and file to grow
-        time.sleep(0.15)
+        # Wait for heartbeats to fire and the file to grow
+        _wait_until(lambda: status().heartbeat_alive and status().write_probe_ok)
 
         st = status()
 
@@ -90,10 +103,9 @@ class TestACSelfcheck1:
 
         # Emit an event to force file creation
         emit_event("test.event", field="value")
-        time.sleep(0.05)
 
-        # Sleep long enough for heartbeat to fire and detect file
-        time.sleep(0.1)
+        # Wait for heartbeats to establish a baseline probe and then see growth
+        _wait_until(lambda: status().write_probe_ok and status().heartbeat_alive)
 
         st = status()
 
@@ -115,8 +127,8 @@ class TestACSelfcheck2:
 
         # Emit initial event and let it process
         emit_event("initial.event")
-        time.sleep(0.2)  # Increased to ensure first probe establishes baseline
-        # and second probe detects growth before killing listener
+        # first probe establishes baseline, second detects growth, before killing listener
+        _wait_until(lambda: status().heartbeat_alive)
 
         # Verify pipeline is alive
         st = status()
@@ -131,9 +143,10 @@ class TestACSelfcheck2:
             # Force the thread to die by waiting
             pipeline._listener.join(timeout=1.0)
 
-        # Sleep long enough for multiple heartbeat intervals with no growth
-        # (minimum 2x interval = 100ms, plus margin for probe timing)
-        time.sleep(0.25)
+        # Wait out multiple heartbeat intervals with no growth (> 2x interval)
+        _wait_until(
+            lambda: status().pipeline_alive is False and status().heartbeat_alive is False
+        )
 
         st = status()
 
@@ -153,10 +166,9 @@ class TestACSelfcheck2:
 
         # Emit initial event
         emit_event("test.event")
-        time.sleep(0.05)
 
         # Wait for heartbeat to fire and update probe
-        time.sleep(0.1)
+        _wait_until(lambda: status().heartbeat_alive)
 
         st = status()
         assert st.heartbeat_alive is True, "Should be alive shortly after init"
@@ -173,8 +185,8 @@ class TestACSelfcheck2:
         # So the file won't grow anymore.
 
         # Wait for more than 2x the heartbeat interval (100ms+) with no file growth
-        # This ensures enough time has passed that heartbeat_alive should be False
-        time.sleep(0.15)
+        # so heartbeat_alive goes False
+        _wait_until(lambda: status().heartbeat_alive is False)
 
         st = status()
 
@@ -227,6 +239,51 @@ class TestHeartbeatThread:
             f"Expected heartbeat events, got {len(heartbeat_events)}"
         )
 
+    def test_stale_heartbeat_does_not_leak_into_next_pipeline(self, temp_log_dir):
+        """A heartbeat thread belongs to the pipeline it was started for.
+
+        After shutdown_pipeline() + a fresh init(), the old thread must not
+        emit into the new pipeline. Before this was fixed, a short-interval
+        thread from an earlier init kept running forever and injected
+        'heartbeat' records into every later pipeline (debt #238 flake class).
+        """
+        from cisternal.telemetry.exporter import ShadowExporter
+        from cisternal.telemetry.pipeline import shutdown_pipeline
+
+        init(log_dir=temp_log_dir, heartbeat_interval=0.01)
+        time.sleep(0.05)
+        shutdown_pipeline()
+
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=30.0)
+        time.sleep(0.2)
+
+        heartbeats = [r for r in shadow.records if r.name == "heartbeat"]
+        assert heartbeats == [], (
+            f"stale heartbeat thread emitted {len(heartbeats)} records into a new pipeline"
+        )
+
+    def test_reinit_after_shutdown_gets_its_own_heartbeat(self, temp_log_dir):
+        """Liveness must survive shutdown_pipeline() + init(): the new pipeline
+        gets heartbeats at its own interval, without test-fixture resets."""
+        from cisternal.telemetry.exporter import ShadowExporter
+        from cisternal.telemetry.pipeline import shutdown_pipeline
+
+        init(log_dir=temp_log_dir, heartbeat_interval=30.0)
+        shutdown_pipeline()
+
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], heartbeat_interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if any(r.name == "heartbeat" for r in shadow.records):
+                break
+            time.sleep(0.01)
+
+        assert any(r.name == "heartbeat" for r in shadow.records), (
+            "re-initialized pipeline never received a heartbeat"
+        )
+
     def test_heartbeat_survives_exporter_failure(self, temp_log_dir):
         """Verify that a failing exporter doesn't crash the heartbeat thread."""
 
@@ -272,7 +329,8 @@ class TestEC3Warn:
 
         init(log_dir=temp_log_dir, heartbeat_interval=0.05)
         emit_event("initial.event")
-        time.sleep(0.15)  # let file grow so last_growth_ts is set
+        # let file grow so last_growth_ts is set
+        _wait_until(lambda: self_obs_module._last_stat["last_growth_ts"] is not None)
 
         from cisternal.telemetry import pipeline as pipeline_module
 
@@ -281,7 +339,7 @@ class TestEC3Warn:
             pipeline._listener.stop()
             pipeline._listener.join(timeout=1.0)
 
-        time.sleep(0.15)  # let liveness go stale (> 2x interval)
+        _wait_until(lambda: status().heartbeat_alive is False)  # stale (> 2x interval)
 
         import cisternal.telemetry.self_obs as so
 
