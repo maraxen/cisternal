@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any
+import logging
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,3 +60,7 @@ class Record:
     git_provenance_source: str | None = None
     """Snapshot of git_state_var.provenance_source ("git" | "nogit" |
     "unavailable"). None until init() has run."""
+
+    severity: int = logging.INFO
+    """Numeric severity (stdlib levels: INFO=20, ERROR=40). Set by
+    emit_event(level=...); spans and heartbeats are always INFO."""

@@ -21,6 +21,7 @@ propagates normally.
 
 from abc import ABC, abstractmethod
 import importlib
+import logging
 import json
 import re
 import sys
@@ -203,6 +204,7 @@ class AdapterBase(ABC):
             request_id=request_id,
             exc_type=type(exc).__name__,
             exc_msg=_redact_secrets(str(exc)),
+            level=logging.ERROR,
         )
 
     @abstractmethod

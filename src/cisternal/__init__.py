@@ -75,6 +75,7 @@ def init(
     backup_count: int = 5,
     exporters: list[ExporterBase] | None = None,
     heartbeat_interval: float = 30.0,
+    level: int | str | None = None,
 ) -> None:
     """Initialize the telemetry pipeline (idempotent).
 
@@ -84,6 +85,14 @@ def init(
         backup_count: Number of backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
         heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
+        level: Minimum severity for events sent through ``emit_event`` (int,
+            level name like ``"WARNING"``, or digit string). Resolution:
+            explicit arg > ``CISTERNAL_LOG_LEVEL`` > None (no filtering). An
+            unrecognized value warns on stderr and disables filtering. Unlike
+            the other arguments, an explicit ``level`` also applies when the
+            pipeline already exists; ``init()`` without one never changes it.
+            Spans (``span``/``aspan``/``job_span``) and heartbeats are never
+            filtered.
     """
     init_pipeline(
         log_dir=Path(log_dir) if log_dir is not None else None,
@@ -91,28 +100,58 @@ def init(
         backup_count=backup_count,
         exporters=exporters,
         heartbeat_interval=heartbeat_interval,
+        level=level,
     )
 
 
-def emit_event(name: str, **fields: Any) -> None:
-    """Emit a telemetry event.
+def emit_event(name: str, *, level: int | str | None = None, **fields: Any) -> None:
+    """Emit a telemetry event with optional level filtering.
 
     Snapshots contextvars on this thread, builds a Record, and enqueues
     it for non-blocking export. Never raises.
 
     Args:
         name: Event name (e.g. 'mcp.call_start').
+        level: Severity of this event (int or level name; keyword-only, so
+            ``level`` is a reserved name, not a field). Stored as
+            ``Record.severity``; dropped if below the ``init(level=)``
+            threshold. Unrecognized values count as INFO. Defaults to INFO.
         **fields: Event fields (e.g. tool='foo', request_id='xyz').
     """
+    import logging
+    import dataclasses
+    import sys
     import time
 
-    pipeline = get_pipeline()
-    if pipeline is None:
-        return
+    try:
+        pipeline = get_pipeline()
+        if pipeline is None:
+            return
 
-    record = _build_record(name, ts=time.time(), **fields)
-    if record is not None:
+        from cisternal.telemetry.pipeline import _normalize_level
+
+        # Invalid/unknown levels are treated as INFO (never raise).
+        severity = _normalize_level(level)
+        if severity is None:
+            severity = logging.INFO
+
+        # Check if event passes the configured minimum level threshold
+        min_level = getattr(pipeline, "min_level", None)
+        if min_level is not None and severity < min_level:
+            # Event below threshold; drop it
+            return
+
+        # Severity is attached after the build, never passed through **fields,
+        # so a caller field named "severity" stays an ordinary field.
+        record = _build_record(name, ts=time.time(), **fields)
+        if record is None:
+            return
+        if severity != record.severity:
+            record = dataclasses.replace(record, severity=severity)
         pipeline.emit(record)
+    except Exception as e:
+        # Never-raise contract: telemetry must not break the caller.
+        print(f"[cisternal] emit_event({name!r}) failed: {e}", file=sys.stderr)
 
 
 def _lazy_import(name: str) -> object:

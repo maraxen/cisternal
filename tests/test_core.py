@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import tempfile
 import time
 from pathlib import Path
@@ -556,3 +557,299 @@ class TestGitProvenanceWiring:
         init(log_dir=temp_log_dir)
         elapsed = time.monotonic() - t0
         assert elapsed < 0.05, f"init() took {elapsed * 1000:.1f}ms, expected < 50ms"
+class TestSeverityLevelFiltering:
+    """Test severity field and level-based filtering (debt #2272)."""
+
+    def test_default_severity_field_present(self, temp_log_dir):
+        """Given no level config; When emit_event; Then record.severity == logging.INFO."""
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        emit_event("test.event")
+        time.sleep(0.05)
+
+        # Filter out heartbeats
+        test_records = [r for r in shadow.records if r.name == "test.event"]
+        assert len(test_records) >= 1, f"Expected test.event in {[r.name for r in shadow.records]}"
+        record = test_records[0]
+        assert record.severity == logging.INFO, f"Expected severity={logging.INFO}, got {record.severity}"
+
+    def test_severity_text_in_jsonl(self, temp_log_dir):
+        """Given emit_event; When JSONL exported; Then record contains severity_text."""
+        init(log_dir=temp_log_dir)
+
+        emit_event("test.event")
+        time.sleep(0.05)
+
+        # Find the JSONL file and verify severity_text
+        jsonl_files = list(temp_log_dir.glob("events.*.*.jsonl"))
+        assert len(jsonl_files) > 0
+
+        with open(jsonl_files[0]) as f:
+            lines = f.readlines()
+
+        test_record = None
+        for line in lines:
+            record = json.loads(line)
+            if record["name"] == "test.event":
+                test_record = record
+                break
+
+        assert test_record is not None
+        assert "severity" in test_record, f"severity not in {test_record.keys()}"
+        assert test_record["severity"] == logging.INFO
+        assert "severity_text" in test_record, f"severity_text not in {test_record.keys()}"
+        assert test_record["severity_text"] == "INFO"
+
+    def test_init_with_level_string_filters(self, temp_log_dir, monkeypatch):
+        """Given init(level='WARNING'); When emit_event at INFO; Then event filtered."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level="WARNING")
+
+        # Emit at INFO (should be filtered)
+        emit_event("test.info", level=logging.INFO)
+        time.sleep(0.05)
+
+        # Emit at WARNING (should pass)
+        emit_event("test.warning", level=logging.WARNING)
+        time.sleep(0.05)
+
+        # Filter out heartbeats and find our events
+        names = [r.name for r in shadow.records]
+        assert "test.info" not in names, f"INFO event should be filtered, but found in {names}"
+        assert "test.warning" in names, f"WARNING event should pass, but not in {names}"
+
+    def test_init_with_level_int(self, temp_log_dir, monkeypatch):
+        """Given init(level=30); When emit_event at DEBUG(10); Then event filtered."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.WARNING)
+
+        # Emit at DEBUG (should be filtered)
+        emit_event("test.debug", level=logging.DEBUG)
+        time.sleep(0.05)
+
+        # Emit at ERROR (should pass)
+        emit_event("test.error", level=logging.ERROR)
+        time.sleep(0.05)
+
+        names = [r.name for r in shadow.records]
+        assert "test.debug" not in names, f"DEBUG should be filtered, but found in {names}"
+        assert "test.error" in names, f"ERROR should pass, but not in {names}"
+
+    def test_env_level_honored(self, temp_log_dir, monkeypatch):
+        """Given CISTERNAL_LOG_LEVEL=CRITICAL; When init(); Then level from env."""
+        monkeypatch.setenv("CISTERNAL_LOG_LEVEL", "CRITICAL")
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        # Emit at ERROR (should be filtered)
+        emit_event("test.error", level=logging.ERROR)
+        time.sleep(0.05)
+
+        # Emit at CRITICAL (should pass)
+        emit_event("test.critical", level=logging.CRITICAL)
+        time.sleep(0.05)
+
+        names = [r.name for r in shadow.records]
+        assert "test.error" not in names, "ERROR should be filtered by CRITICAL level"
+        assert "test.critical" in names, "CRITICAL should pass"
+
+    def test_explicit_level_beats_env(self, temp_log_dir, monkeypatch):
+        """Given CISTERNAL_LOG_LEVEL=CRITICAL and init(level=WARNING); Then explicit wins."""
+        monkeypatch.setenv("CISTERNAL_LOG_LEVEL", "CRITICAL")
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.WARNING)
+
+        # Emit at WARNING (should pass because init(level=WARNING) overrides env CRITICAL)
+        # With env alone (CRITICAL), only CRITICAL events would pass
+        # With explicit init(level=WARNING), WARNING and above pass
+        emit_event("test.warning", level=logging.WARNING)
+        time.sleep(0.05)
+
+        names = [r.name for r in shadow.records]
+        assert "test.warning" in names, "WARNING should pass (init level=WARNING overrides env CRITICAL)"
+
+    def test_heartbeat_not_filtered(self, temp_log_dir, monkeypatch):
+        """Given init(level=CRITICAL); When heartbeat emitted; Then not filtered."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        # Use very short heartbeat interval so one fires quickly
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.CRITICAL, heartbeat_interval=0.01)
+
+        # Wait for at least one heartbeat to be emitted
+        deadline = time.monotonic() + 2.0
+        heartbeat_found = False
+        while time.monotonic() < deadline:
+            heartbeat_records = [r for r in shadow.records if r.name == "heartbeat"]
+            if len(heartbeat_records) > 0:
+                heartbeat_found = True
+                break
+            time.sleep(0.005)
+
+        assert heartbeat_found, "Heartbeat should not be filtered by CRITICAL level"
+
+    def test_invalid_level_string_defaults_to_info(self, temp_log_dir, monkeypatch):
+        """Given emit_event(level='INVALID'); When called; Then no crash, defaults to INFO."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.WARNING)
+
+        # Emit with invalid level string (should not crash, should default to INFO and be filtered)
+        emit_event("test.invalid", level="INVALID_LEVEL")
+        time.sleep(0.05)
+
+        names = [r.name for r in shadow.records]
+        # Invalid level should default to INFO, which is less than WARNING, so filtered
+        assert "test.invalid" not in names, "Event with invalid level should be filtered"
+
+    @pytest.mark.parametrize("bad_level", ["basicConfig", "root", "handlers", 3.5, object()])
+    def test_non_level_logging_attr_never_raises(self, temp_log_dir, monkeypatch, bad_level):
+        """Given a level naming a non-int logging attribute (a function, a logger,
+        a module) or a non-int/str value; When emit_event; Then no exception and the
+        event is treated as INFO -- the never-raise contract must hold."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.INFO)
+
+        emit_event("test.bad_level", level=bad_level)
+
+        deadline = time.monotonic() + 5.0
+        matching = []
+        while not matching and time.monotonic() < deadline:
+            matching = [r for r in shadow.records if r.name == "test.bad_level"]
+            time.sleep(0.005)
+        assert matching, "event with a bad level should still be exported at INFO"
+        record = matching[0]
+        assert record.severity == logging.INFO
+
+    def test_emit_event_level_kwarg(self, temp_log_dir, monkeypatch):
+        """Given emit_event(level=ERROR); Then record.severity reflects it."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level=logging.WARNING)
+
+        # Emit at WARNING level (should pass)
+        emit_event("test.warn", level=logging.WARNING)
+        time.sleep(0.05)
+
+        warn_records = [r for r in shadow.records if r.name == "test.warn"]
+        assert len(warn_records) >= 1
+        record = warn_records[0]
+        assert record.severity == logging.WARNING
+
+
+def _poll_records(shadow, name: str, timeout: float = 5.0) -> list:
+    """Return records named *name*, polling until at least one arrives."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        matching = [r for r in shadow.records if r.name == name]
+        if matching:
+            return matching
+        time.sleep(0.005)
+    return [r for r in shadow.records if r.name == name]
+
+
+class TestSeverityReviewFixes:
+    """Review findings on debt #2272: field collisions, error levels, re-init."""
+
+    def test_severity_field_does_not_collide_in_emit_event(self, temp_log_dir, monkeypatch):
+        """A caller field named 'severity' is a normal field, never a TypeError."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        emit_event("test.sev_field", severity="high")
+
+        (record,) = _poll_records(shadow, "test.sev_field")
+        assert record.fields["severity"] == "high"
+        assert record.severity == logging.INFO
+
+    def test_severity_field_does_not_hijack_span_severity(self, temp_log_dir, monkeypatch):
+        """span(..., severity=...) keeps the field and an int Record.severity."""
+        from cisternal.telemetry.span import span
+
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        with span("test.sev_span", severity="high"):
+            pass
+
+        (end,) = _poll_records(shadow, "test.sev_span.end")
+        assert isinstance(end.severity, int)
+        (start,) = _poll_records(shadow, "test.sev_span.start")
+        assert start.fields["severity"] == "high"
+
+    def test_tool_error_survives_warning_filter(self, temp_log_dir, monkeypatch):
+        """mcp.tool_error is emitted at ERROR, so level=WARNING keeps it."""
+        from cisternal.adapters.base import PassthroughAdapter
+
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level="WARNING")
+
+        PassthroughAdapter().emit_error("t", "req-1", ValueError("boom"))
+
+        (record,) = _poll_records(shadow, "mcp.tool_error")
+        assert record.severity == logging.ERROR
+
+    def test_failed_cli_command_survives_warning_filter(self, temp_log_dir, monkeypatch):
+        """A failing CLI command's cli.cmd_end is ERROR; a clean one stays INFO."""
+        from cisternal.adapters.cli import timed_command
+
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow], level="WARNING")
+
+        @timed_command("boom")
+        def boom():
+            raise ValueError("x")
+
+        @timed_command("fine")
+        def fine():
+            return 1
+
+        with pytest.raises(ValueError):
+            boom()
+        fine()
+
+        ends = _poll_records(shadow, "cli.cmd_end")
+        assert [r.fields["cmd"] for r in ends] == ["boom"]
+        assert ends[0].severity == logging.ERROR
+
+    def test_explicit_level_on_reinit_applies(self, temp_log_dir, monkeypatch):
+        """init(level=) after the pipeline exists updates the threshold instead
+        of being silently ignored; init() without level leaves it alone."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+        init(level="ERROR")
+        init()  # no level: must not reset the threshold
+
+        emit_event("test.reinit_info")
+        emit_event("test.reinit_error", level="ERROR")
+
+        _poll_records(shadow, "test.reinit_error")
+        names = [r.name for r in shadow.records]
+        assert "test.reinit_info" not in names
+
+    @pytest.mark.parametrize("bad", ["WARNIN", True])
+    def test_invalid_init_level_warns(self, temp_log_dir, monkeypatch, capsys, bad):
+        """An unparseable level disables filtering, loudly rather than silently."""
+        monkeypatch.delenv("CISTERNAL_LOG_LEVEL", raising=False)
+        init(log_dir=temp_log_dir, level=bad)
+        assert "level" in capsys.readouterr().err.lower()
+
+    def test_numeric_string_level_accepted(self, temp_log_dir, monkeypatch):
+        """CISTERNAL_LOG_LEVEL=30 is WARNING, like the stdlib accepts ints."""
+        monkeypatch.setenv("CISTERNAL_LOG_LEVEL", "30")
+        shadow = ShadowExporter()
+        init(log_dir=temp_log_dir, exporters=[shadow])
+
+        emit_event("test.num_info")
+        emit_event("test.num_warn", level="WARNING")
+
+        _poll_records(shadow, "test.num_warn")
+        assert "test.num_info" not in [r.name for r in shadow.records]
