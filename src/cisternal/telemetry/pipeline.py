@@ -11,6 +11,7 @@ Fork prohibition (C9):
     Per-pid JSONL naming (events.<host>.<pid>.jsonl) requires spawn.
 """
 
+import logging
 import queue
 import sys
 import threading
@@ -104,6 +105,7 @@ class EventPipeline:
         self,
         queue_size: int = 10000,
         exporters: list[ExporterBase] | None = None,
+        min_level: int | None = None,
     ) -> None:
         """Initialize the event pipeline.
 
@@ -111,12 +113,14 @@ class EventPipeline:
             queue_size: Size of the bounded queue. Exceeded → drop.
             exporters: List of ExporterBase instances. If None, uses JsonlExporter
                        with default args (should be overridden; included for tests).
+            min_level: Minimum severity level for emission filtering (optional).
         """
         self._queue: queue.Queue[Record | None] = queue.Queue(maxsize=queue_size)
         self._queue_size = queue_size
         self._exporters = exporters or []
         self._drop_count = 0
         self._events_emitted = 0
+        self.min_level = min_level
 
         # Start custom consumer thread
         self._listener = _QueueListenerThread(self._queue, self._exporters)
@@ -232,12 +236,38 @@ def resolve_log_dir_from_env() -> Path:
     return Path(raw)
 
 
+def _normalize_level(level: int | str | None) -> int | None:
+    """Normalize a log level (int or string name) to an int, or None if invalid.
+
+    Args:
+        level: int (e.g. logging.INFO=20) or string name (e.g. 'WARNING').
+
+    Returns:
+        Normalized int level, or None if input is invalid.
+        Never raises; invalid inputs return None.
+    """
+    if level is None:
+        return None
+    if isinstance(level, int):
+        return level
+    if isinstance(level, str):
+        try:
+            # Try to get attribute from logging module (e.g. logging.INFO, logging.WARNING)
+            val = getattr(logging, level.upper(), None)
+            if isinstance(val, int):
+                return val
+        except (AttributeError, TypeError):
+            pass
+    return None
+
+
 def init_pipeline(
     log_dir: Path | None = None,
     max_bytes: int = 10_485_760,
     backup_count: int = 5,
     exporters: list[ExporterBase] | None = None,
     heartbeat_interval: float = 30.0,
+    level: int | str | None = None,
 ) -> EventPipeline:
     """Initialize or return the global EventPipeline (idempotent init, AC-CORE-5).
 
@@ -252,6 +282,8 @@ def init_pipeline(
         backup_count: Backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
         heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
+        level: Minimum log level for filtering (int or string; default None=no filtering).
+               Respects CISTERNAL_LOG_LEVEL env var if not explicitly set.
 
     Returns:
         The global EventPipeline instance.
@@ -271,6 +303,18 @@ def init_pipeline(
             log_dir = resolve_log_dir_from_env()
         else:
             log_dir = Path(log_dir)
+
+        # Resolve min_level: explicit arg > env var > None (no filtering)
+        min_level = None
+        if level is not None:
+            # Explicit arg provided; normalize it
+            min_level = _normalize_level(level)
+        else:
+            # Try to get from env
+            import os
+            env_level = os.getenv("CISTERNAL_LOG_LEVEL")
+            if env_level is not None:
+                min_level = _normalize_level(env_level)
 
         # Write-probe (fall back to tempdir on failure) — spec §3.2
         import os
@@ -305,7 +349,7 @@ def init_pipeline(
         if otlp_exporter is not None:
             exporters.append(otlp_exporter)
 
-        _global_pipeline = EventPipeline(exporters=exporters)
+        _global_pipeline = EventPipeline(exporters=exporters, min_level=min_level)
 
         # Capture git provenance once per process (spec 260827), in a
         # background thread. Measured at ~70ms in a dirty repo (several git

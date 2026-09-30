@@ -109,6 +109,8 @@ class JsonlExporter(ExporterBase):
                     "request_id": record.request_id,
                     "session_id": record.session_id,
                     "phase": record.phase,
+                    "severity": record.severity,
+                    "severity_text": logging.getLevelName(record.severity),
                     "fields": record.fields,
                     "git_hash": record.git_hash,
                     "git_branch": record.git_branch,

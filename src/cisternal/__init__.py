@@ -75,6 +75,7 @@ def init(
     backup_count: int = 5,
     exporters: list[ExporterBase] | None = None,
     heartbeat_interval: float = 30.0,
+    level: int | str | None = None,
 ) -> None:
     """Initialize the telemetry pipeline (idempotent).
 
@@ -84,6 +85,8 @@ def init(
         backup_count: Number of backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
         heartbeat_interval: Seconds between liveness heartbeat probes (default 30s).
+        level: Minimum log level for emission (int or string like 'WARNING'; default None=no filtering).
+               Respects CISTERNAL_LOG_LEVEL env var if not explicitly set.
     """
     init_pipeline(
         log_dir=Path(log_dir) if log_dir is not None else None,
@@ -91,26 +94,54 @@ def init(
         backup_count=backup_count,
         exporters=exporters,
         heartbeat_interval=heartbeat_interval,
+        level=level,
     )
 
 
-def emit_event(name: str, **fields: Any) -> None:
-    """Emit a telemetry event.
+def emit_event(name: str, *, level: int | str | None = None, **fields: Any) -> None:
+    """Emit a telemetry event with optional level filtering.
 
     Snapshots contextvars on this thread, builds a Record, and enqueues
     it for non-blocking export. Never raises.
 
     Args:
         name: Event name (e.g. 'mcp.call_start').
+        level: Log level (int or string like 'DEBUG', 'INFO', 'WARNING'; keyword-only).
+               If below configured threshold, event is dropped. Defaults to logging.INFO.
         **fields: Event fields (e.g. tool='foo', request_id='xyz').
     """
+    import logging
     import time
 
     pipeline = get_pipeline()
     if pipeline is None:
         return
 
-    record = _build_record(name, ts=time.time(), **fields)
+    # Normalize and validate level
+    if level is None:
+        severity = logging.INFO
+    elif isinstance(level, int):
+        severity = level
+    elif isinstance(level, str):
+        # Try to convert string level name (e.g. 'DEBUG', 'WARNING')
+        # Invalid names default to INFO (never raise)
+        try:
+            severity = getattr(logging, level.upper(), logging.INFO)
+            if isinstance(severity, str):
+                # getattr returned a string (not a level), default to INFO
+                severity = logging.INFO
+        except (AttributeError, TypeError):
+            severity = logging.INFO
+    else:
+        severity = logging.INFO
+
+    # Check if event passes the configured minimum level threshold
+    if hasattr(pipeline, 'min_level') and pipeline.min_level is not None:
+        if severity < pipeline.min_level:
+            # Event below threshold; drop it
+            return
+
+    record = _build_record(name, ts=time.time(), severity=severity, **fields)
     if record is not None:
         pipeline.emit(record)
 

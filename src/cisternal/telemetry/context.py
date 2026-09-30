@@ -10,6 +10,7 @@ eliminating races where the consumer thread's context might be different.
 
 from contextvars import ContextVar
 import threading
+import logging
 import time
 import sys
 
@@ -70,13 +71,14 @@ _last_recovery_var: ContextVar[dict | None] = ContextVar(
 )
 
 
-def _build_record(name: str, ts: float | None = None, **fields) -> Record | None:
+def _build_record(name: str, ts: float | None = None, *, severity: int = logging.INFO, **fields) -> Record | None:
     """Build a Record by snapshotting contextvars on the PRODUCER thread.
 
     Args:
         name: Event name (e.g. 'mcp.call_start').
         ts: Unix timestamp. If None, uses time.time(). If provided, should be set
             by the caller (e.g. when calling this from emit_event, ts is already captured).
+        severity: Log severity level (int, default logging.INFO). Keyword-only to exclude from fields.
         **fields: Caller-supplied event fields.
 
     Returns:
@@ -114,6 +116,7 @@ def _build_record(name: str, ts: float | None = None, **fields) -> Record | None
             git_provenance_source=(
                 git_state.provenance_source if git_state is not None else None
             ),
+            severity=severity,
         )
     except Exception as e:
         # EC-2: Never-raise; if anything fails during record construction,
