@@ -60,6 +60,36 @@ def _wait_for_events_exported(min_count: int = 1, timeout: float = 2.0) -> None:
     pytest.fail(f"events_exported did not reach {min_count} within {timeout}s")
 
 
+def _wait_for_record(
+    shadow: "ShadowExporter", name: str, timeout: float = 5.0
+) -> None:
+    """Wait until shadow exporter has received a record with the given name.
+
+    Polls shadow.records until a record with name matching is found.
+    Ignores 'heartbeat' records (background liveness probes that can race
+    with test events).
+
+    Args:
+        shadow: ShadowExporter instance to poll.
+        name: Event name to wait for (e.g. 'test.event').
+        timeout: Max seconds to wait (default 5.0).
+
+    Raises:
+        pytest.fail if the record is not found within timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        matching = [r for r in shadow.records if r.name == name]
+        if matching:
+            return
+        time.sleep(0.001)
+    names = [r.name for r in shadow.records]
+    pytest.fail(
+        f"Record with name '{name}' not found within {timeout}s; "
+        f"shadow contains: {names}"
+    )
+
+
 class TestACCore1:
     """AC-CORE-1: emit_event writes JSONL within 100ms."""
 
@@ -407,11 +437,13 @@ class TestNeverRaise:
         # Should not raise despite RaisingExporter raising
         emit_event("test.event", field="value")
 
-        _wait_for_events_exported()
+        # Wait for the specific event (not just any export, which could be heartbeats)
+        _wait_for_record(shadow, "test.event", timeout=5.0)
 
-        # Shadow exporter should still have received it
-        assert len(shadow.records) >= 1
-        assert shadow.records[0].name == "test.event"
+        # Shadow exporter should still have received it (filter out heartbeats)
+        test_records = [r for r in shadow.records if r.name == "test.event"]
+        assert len(test_records) >= 1
+        assert test_records[0].name == "test.event"
 
 
 class TestNonSerializable:
@@ -482,13 +514,8 @@ class TestGitProvenanceWiring:
         """End-to-end: emit_event -> ShadowExporter record has git fields,
         once the background capture has completed.
 
-        Filters by event name rather than asserting an exact record count:
-        a leftover heartbeat thread from an earlier test (started with a
-        short heartbeat_interval, whose reference cleanup_pipeline() forgets
-        without actually stopping the thread -- a pre-existing test-isolation
-        gap in self_obs.py, not something this test should paper over by
-        coincidentally passing) can inject extra "heartbeat" records here
-        when running the full suite.
+        Filters by event name rather than asserting an exact record count,
+        since this pipeline's own heartbeat can also land in the exporter.
         """
         shadow = ShadowExporter()
         init(log_dir=temp_log_dir, exporters=[shadow])

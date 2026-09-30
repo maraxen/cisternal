@@ -81,12 +81,14 @@ def test_raising_otlp_exporter_does_not_break_jsonl(
     )
     cisternal.emit_event("test.event", field="value")
 
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline and len(shadow.records) < 1:
+    # Wait for our own event, not just any record (a heartbeat can land first).
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not any(
+        r.name == "test.event" for r in shadow.records
+    ):
         time.sleep(0.01)
 
-    assert len(shadow.records) >= 1
-    assert shadow.records[0].name == "test.event"
+    assert any(r.name == "test.event" for r in shadow.records)
 
 
 @pytest.mark.skipif(not otlp_sdk_available(), reason="opentelemetry-sdk not installed")
