@@ -30,33 +30,48 @@ class CompositeAssetSource:
 
     def load(self) -> LoadReport:
         manifest_report = ManifestAssetSource(self._manifest_path).load()
-        registry_meta = self._metadata or manifest_report.bundle.metadata
-        registry_b = registry_bundle(self._registry, metadata=registry_meta)
+        return merge_registry(manifest_report, self._registry, metadata=self._metadata)
 
-        warnings = list(manifest_report.warnings)
-        conflicts: list[str] = []
 
-        commands, cmd_conflicts = _merge_commands(
-            manifest_report.bundle.commands,
-            registry_b.commands,
-        )
-        conflicts.extend(cmd_conflicts)
+def merge_registry(
+    manifest_report: LoadReport,
+    registry: str = "default",
+    *,
+    metadata: BundleMetadata | None = None,
+) -> LoadReport:
+    """Merge registry-sourced commands into an already-loaded manifest report.
 
-        # Registry contributes commands only (L13); other kinds from manifest.
-        bundle = AssetBundle(
-            metadata=registry_meta,
-            commands=commands,
-            mcp_servers=manifest_report.bundle.mcp_servers,
-            skills=manifest_report.bundle.skills,
-            agents=manifest_report.bundle.agents,
-            hook_specs=manifest_report.bundle.hook_specs,
-            marketplace=manifest_report.bundle.marketplace,
-        )
-        return LoadReport(
-            bundle=bundle,
-            warnings=tuple(warnings),
-            conflicts=tuple(conflicts),
-        )
+    Split out of :class:`CompositeAssetSource` so a bundle that came from
+    somewhere other than a manifest file (a packaged snapshot, see
+    ``cisternal.assets.snapshot``) merges with the registry the same way.
+    """
+    registry_meta = metadata or manifest_report.bundle.metadata
+    registry_b = registry_bundle(registry, metadata=registry_meta)
+
+    warnings = list(manifest_report.warnings)
+    conflicts: list[str] = list(manifest_report.conflicts)
+
+    commands, cmd_conflicts = _merge_commands(
+        manifest_report.bundle.commands,
+        registry_b.commands,
+    )
+    conflicts.extend(cmd_conflicts)
+
+    # Registry contributes commands only (L13); other kinds from manifest.
+    bundle = AssetBundle(
+        metadata=registry_meta,
+        commands=commands,
+        mcp_servers=manifest_report.bundle.mcp_servers,
+        skills=manifest_report.bundle.skills,
+        agents=manifest_report.bundle.agents,
+        hook_specs=manifest_report.bundle.hook_specs,
+        marketplace=manifest_report.bundle.marketplace,
+    )
+    return LoadReport(
+        bundle=bundle,
+        warnings=tuple(warnings),
+        conflicts=tuple(conflicts),
+    )
 
 
 def _merge_commands(

@@ -57,33 +57,92 @@ registry = cisternal.wire(server, app, adapter=my_adapter)
 
 ## Agent-asset export
 
+A tool's agent plugin (skills, agents, hooks, MCP servers, declared in its
+`.praxia/manifest.toml`) reaches a coding agent by one of two paths:
+
+| | **Path 1: install through the tool** | **Path 2: direct surface export** |
+|---|---|---|
+| Who runs it | anyone who has the tool installed | the tool's developer, in its repo |
+| Command | `<tool> plugin install claude` (e.g. `bth plugin install claude`) | `cisternal assets export --manifest … --surface <s> --out DIR` |
+| Needs the `cisternal` CLI | no — the tool mounts cisternal's sub-app | yes |
+| Needs a source checkout | no — falls back to a snapshot in the wheel | yes |
+| Installs into the agent | yes (Claude Code) | no — writes files only (`assets install` / `publish-shared` also register them with Claude) |
+| Surfaces | install: `claude` · export: all seven | all seven |
+
+### Path 1 — `<tool> plugin install|update`
+
+**Users** of a tool that mounts the sub-app:
+
 ```bash
-# Preview what would be written, without touching disk
-cisternal assets export --dry-run
-
-# Write bundles for specific surfaces
-cisternal assets export --out ./dist/agent-assets
-
-# Inspect or validate an existing bundle
-cisternal assets inspect
-cisternal assets validate
+bth plugin install claude              # publish + register marketplace + install (user scope)
+bth plugin install claude --scope project
+bth plugin update claude               # republish + update the installed copy
+bth plugin export cursor --out DIR     # files only, any surface
+bth plugin info                        # where the bundle and the marketplace resolve from
+bth plugin install claude --dry-run    # show what would happen, change nothing
 ```
 
-### Install as a real Claude Code plugin
+`install` publishes into the shared marketplace, registers that marketplace
+with Claude Code if it isn't already, then installs the plugin. If the
+plugin is already installed, `install` updates it in place (or does nothing
+when it is current). `update` refuses to run when the plugin isn't installed,
+and updates at the scope the plugin was installed at. Restart Claude Code to
+load the change. cisternal dogfoods this itself: `cisternal plugin install claude`.
 
-`cisternal assets export` only writes files — nothing picks them up until
-something registers them. `cisternal assets install` does both steps: it
-writes the bundle, then drives the real `claude` CLI to register it as a
-local marketplace and install it, so its skills/agents/MCP config actually
-load in a Claude Code session.
+**Tool authors** add it in three steps:
 
-Requires a `[plugin.marketplace]` table in your manifest:
+1. Mount the sub-app in the tool's cyclopts CLI:
+
+   ```python
+   from cisternal.plugin import PluginSpec, plugin_app
+
+   app.command(plugin_app(PluginSpec(name="bathos", package="bathos", cli="bth")))
+   ```
+
+   `PluginSpec` also takes `registry`/`imports` (merge `@cisternal.tool`
+   commands, for surfaces that emit them), `version` (defaults to the
+   installed distribution's version), `snapshot` and `manifest` paths.
+
+2. Freeze the manifest into package data, so wheel installs work without the repo:
+
+   ```bash
+   cisternal assets snapshot --manifest .praxia/manifest.toml --out src/bathos/agent_plugin.json
+   ```
+
+   ```toml
+   [tool.setuptools.package-data]      # or your build backend's equivalent
+   bathos = ["agent_plugin.json"]
+   ```
+
+3. Keep it in sync in CI:
+   `cisternal assets snapshot --manifest .praxia/manifest.toml --out src/bathos/agent_plugin.json --check`
+   exits 1 if the snapshot is missing or stale.
+
+The bundle is taken from the first of: `--manifest PATH`; the tool's own
+`.praxia/manifest.toml` above the imported package, for an editable install
+(it is never searched for from inside `site-packages`, and must name this
+plugin); the packaged snapshot. `plugin info` shows which one won.
+
+### Path 2 — direct surface export (`cisternal assets …`)
+
+From the tool's source checkout, with the `cisternal` CLI:
+
+```bash
+cisternal assets export --manifest .praxia/manifest.toml --surface cursor --out ./dist/cursor
+cisternal assets export --manifest .praxia/manifest.toml --dry-run      # paths + sha256, writes nothing
+cisternal assets inspect  --manifest .praxia/manifest.toml              # JSON load report
+cisternal assets validate --manifest .praxia/manifest.toml              # structural + golden checks
+cisternal assets publish-shared --manifest .praxia/manifest.toml        # into the shared marketplace (+ refresh)
+cisternal assets update-all                                             # republish every enrolled plugin
+cisternal assets install --manifest .praxia/manifest.toml               # standalone single-plugin marketplace
+```
+
+`assets export` only writes files. Nothing loads them until something
+registers them. `assets install` makes the bundle its own single-plugin
+marketplace and registers it with Claude Code. It requires a
+`[plugin.marketplace]` table in the manifest:
 
 ```toml
-[plugin]
-name = "my-plugin"
-version = "1.0.0"
-
 [plugin.marketplace]
 name = "my-plugin-marketplace"
 
@@ -91,24 +150,35 @@ name = "my-plugin-marketplace"
 name = "Your Name"
 ```
 
-```bash
-cisternal assets install --manifest .praxia/manifest.toml
-# writes the bundle to ./, then runs:
-#   claude plugin marketplace add .
-#   claude plugin install my-plugin@my-plugin-marketplace --scope project
-```
+`publish-shared` instead adds the plugin to the shared multi-tool
+marketplace, the same one Path 1 uses. `update-all` republishes every plugin
+there from the repo that last published it. A plugin installed through Path 1
+is not rebuilt by `update-all`; instead it prints that tool's own
+`<tool> plugin update claude`, because the tool owns the recipe (version,
+snapshot vs. checkout).
 
-Both underlying `claude` commands are idempotent — re-running `install` is
-safe. `--scope project` (the default) registers the plugin in this
-project's `.claude/settings.json`, so anyone who clones the repo needs only
-one manual `claude plugin install my-plugin@my-plugin-marketplace` (Claude
-Code's own trust-on-first-use step — not something this command tries to
-bypass). To remove it later: `claude plugin uninstall
-my-plugin@my-plugin-marketplace` and `claude plugin marketplace remove
-my-plugin-marketplace`.
+### Where the shared marketplace lives
 
-Supported export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**, **OpenCode**, **Pi**, **JCode**.
+It is derived data, so its location is configuration, never a baked-in path.
+The first match wins (`<tool> plugin info` shows which):
 
+1. `--marketplace PATH`
+2. `$CISTERNAL_PLUGIN_MARKETPLACE` (`none`/empty disables)
+3. `[tool.cisternal] plugin_marketplace = "PATH"` in the nearest `pyproject.toml`
+4. `plugin_marketplace = "PATH"` in `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`
+5. `~/.cisternal/claude-plugin-marketplace`, **only if it already exists** (machines set up before this resolver)
+
+If none of these is set, the command fails and says how to set one. A malformed config file is an error; it is never skipped.
+
+### Surfaces
+
+Export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**, **OpenCode**, **Pi**, **JCode**.
+Install (`plugin install|update`) is implemented for **Claude Code**. For the
+other surfaces, `plugin install <surface>` points at `plugin export`.
+**Codex** is not supported yet: there is no emitter, and Codex's documented
+CLI can add a marketplace (`codex plugin marketplace add`) but installs only
+through its `/plugins` UI. The installer table (`INSTALLABLE_SURFACES` in
+`cisternal.plugin.app`) is where it would plug in.
 
 The CLI is fastmcp-free by design — `cisternal.cli` imports and runs even in environments without `fastmcp` installed; asset-export logic never depends on the telemetry/registration surface.
 
