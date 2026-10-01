@@ -105,6 +105,60 @@ class WiredRegistry:
 
 
 # ---------------------------------------------------------------------------
+# CLI callable builder (hoisted out of wire()'s entry loop, T0b)
+# ---------------------------------------------------------------------------
+
+
+def _make_cli_cmd(
+    original_fn: Any, cmd_name: str, *, recovery: Any, telemetry: bool
+) -> Any:
+    # Telemetry owner for the CLI path. The MCP path's silence is
+    # deliberate — CisternalMiddleware owns it there, and emitting
+    # in the composed callable too would double-count every tool
+    # call. The CLI path had no such owner, so it emitted nothing
+    # at all: identical work produced a full record through MCP and
+    # silence through the CLI. `timed_command` is the CLI's
+    # designated owner and already existed; wire() simply never
+    # applied it.
+    _dispatch = lambda *a, **k: apply_recovery_sync(  # noqa: E731
+        original_fn, recovery, *a, **k
+    )
+    if telemetry and not getattr(original_fn, "_cisternal_timed", False):
+        from cisternal.adapters.cli import timed_command
+
+        # Deliberately INSIDE the F1 handler below, so telemetry
+        # observes the original exception. Wrapping outside would
+        # record every failure as exc_type="SystemExit", since F1
+        # converts exceptions into sys.exit(1) before they escape.
+        _dispatch = timed_command(cmd_name)(_dispatch)
+
+    def _cli_cmd(*args: Any, **kwargs: Any) -> Any:
+        # F1 CLI error contract: wrap exceptions into a clean exit.
+        # AC13: the same `recovery` policy passed to wire() applies
+        # here too, via apply_recovery_sync's AC12 sync leg (no
+        # thread offload, no telemetry contextvar — see compose.py).
+        try:
+            return _dispatch(*args, **kwargs)
+        except SystemExit:
+            # Re-raise SystemExit unchanged (already a clean exit).
+            raise
+        except Exception as exc:
+            # F1: convert any other exception into a non-zero exit.
+            # Write a concise message to stderr (do NOT swallow).
+            print(
+                f"Error ({type(exc).__name__}): {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    _cli_cmd.__name__ = original_fn.__name__
+    _cli_cmd.__doc__ = original_fn.__doc__
+    cast(TaggedCallable, _cli_cmd).__signature__ = inspect.signature(original_fn)
+    _cli_cmd.__annotations__ = dict(original_fn.__annotations__)
+    return _cli_cmd
+
+
+# ---------------------------------------------------------------------------
 # wire()
 # ---------------------------------------------------------------------------
 
@@ -270,55 +324,9 @@ def wire(
             _name = entry.name
             _cli_name = entry.cli_name or entry.name
 
-            def _make_cli_cmd(original_fn: Any, cmd_name: str) -> Any:
-                # Telemetry owner for the CLI path. The MCP path's silence is
-                # deliberate — CisternalMiddleware owns it there, and emitting
-                # in the composed callable too would double-count every tool
-                # call. The CLI path had no such owner, so it emitted nothing
-                # at all: identical work produced a full record through MCP and
-                # silence through the CLI. `timed_command` is the CLI's
-                # designated owner and already existed; wire() simply never
-                # applied it.
-                _dispatch = lambda *a, **k: apply_recovery_sync(  # noqa: E731
-                    original_fn, recovery, *a, **k
-                )
-                if cli_telemetry and not getattr(
-                    original_fn, "_cisternal_timed", False
-                ):
-                    from cisternal.adapters.cli import timed_command
-
-                    # Deliberately INSIDE the F1 handler below, so telemetry
-                    # observes the original exception. Wrapping outside would
-                    # record every failure as exc_type="SystemExit", since F1
-                    # converts exceptions into sys.exit(1) before they escape.
-                    _dispatch = timed_command(cmd_name)(_dispatch)
-
-                def _cli_cmd(*args: Any, **kwargs: Any) -> Any:
-                    # F1 CLI error contract: wrap exceptions into a clean exit.
-                    # AC13: the same `recovery` policy passed to wire() applies
-                    # here too, via apply_recovery_sync's AC12 sync leg (no
-                    # thread offload, no telemetry contextvar — see compose.py).
-                    try:
-                        return _dispatch(*args, **kwargs)
-                    except SystemExit:
-                        # Re-raise SystemExit unchanged (already a clean exit).
-                        raise
-                    except Exception as exc:
-                        # F1: convert any other exception into a non-zero exit.
-                        # Write a concise message to stderr (do NOT swallow).
-                        print(
-                            f"Error ({type(exc).__name__}): {exc}",
-                            file=sys.stderr,
-                        )
-                        sys.exit(1)
-
-                _cli_cmd.__name__ = original_fn.__name__
-                _cli_cmd.__doc__ = original_fn.__doc__
-                cast(TaggedCallable, _cli_cmd).__signature__ = inspect.signature(original_fn)
-                _cli_cmd.__annotations__ = dict(original_fn.__annotations__)
-                return _cli_cmd
-
-            cli_cmd = _make_cli_cmd(_fn, _name)
+            cli_cmd = _make_cli_cmd(
+                _fn, _name, recovery=recovery, telemetry=cli_telemetry
+            )
             if entry.cli_group is not None:
                 target_app = _get_or_create_subapp(app, entry.cli_group)
                 target_app.command(name=_cli_name)(cli_cmd)

@@ -9,6 +9,7 @@ Golden values are recorded at 8730da8 and re-verified after each change.
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -129,12 +130,16 @@ def test_no_contract_wired_command_failure(log_dir, capsys):
 
     # Golden values at 8730da8: F1 line exact format
     assert exit_code == 1, "Expected exit 1 on ZeroDivisionError"
-    assert captured.err == "Error (ZeroDivisionError): integer division or modulo by zero\n"
+    assert (
+        captured.err
+        == "Error (ZeroDivisionError): integer division or modulo by zero\n"
+    )
     assert captured.out == "", "stdout must be empty on error"
 
 
 def test_golden_cli_commands_flat():
     """Test 25: WiredRegistry.cli_commands for a flat tool."""
+
     @tool(registry=REGISTRY)
     def flat_cmd() -> str:
         return "done"
@@ -148,6 +153,7 @@ def test_golden_cli_commands_flat():
 
 def test_golden_cli_commands_grouped():
     """Test 25: WiredRegistry.cli_commands for a grouped tool."""
+
     @tool(registry=REGISTRY, cli_group="jobs")
     def list_jobs() -> list:
         return []
@@ -161,6 +167,7 @@ def test_golden_cli_commands_grouped():
 
 def test_golden_async_tool(capsys):
     """Test 25: Async tool success path."""
+
     @tool(registry=REGISTRY)
     async def async_greet(name: str) -> str:
         return f"hello {name}"
@@ -217,12 +224,14 @@ def test_golden_pre_mounted_group_rejection():
         wire(None, app, registry=REGISTRY)
 
     # Golden: untouched-on-failure: no new commands were added
-    assert len(app._commands) == commands_before, \
+    assert len(app._commands) == commands_before, (
         "wire() should not register any commands if collision is detected"
+    )
 
 
 def test_golden_no_contract_int_return_becomes_exit(capsys):
     """Test 25: Int return value becomes exit code under default action."""
+
     @tool(registry=REGISTRY)
     def exit_with_code(code: int = 0) -> int:
         """Tool that returns an exit code."""
@@ -267,3 +276,49 @@ def test_golden_wrapped_tool_with_future_annotations():
 
     # Golden: wrapped tool is registered
     assert "wrapped_tool_reg" in wired.cli_commands
+
+
+def test_golden_9b_typecheck_any_registers_and_parses(capsys):
+    """Tests 9b / 25: ``Any`` imported only under TYPE_CHECKING in the tool module.
+
+    Recorded at 8730da8 (src identical at the T0b hoist commit): the tool
+    registers and parses through wire(), because ``Any`` resolves through
+    wired.py's own globals. Outcome literal: registers, runs, exit 0, stdout
+    carries the tool's print.
+    """
+    from cisternal.registration.registry import register
+    from tests.fixtures.typecheck_any_tools import tool_with_any_param
+
+    register(tool_with_any_param, registry=REGISTRY)
+    app = App(name="test")
+    wired = wire(None, app, registry=REGISTRY)
+
+    with pytest.raises(SystemExit) as excinfo:
+        app(["tool_with_any_param", "3"], exit_on_error=False)
+
+    captured = capsys.readouterr()
+    assert wired.cli_commands == ["tool_with_any_param"]
+    assert excinfo.value.code == 0
+    # rich colourises the printed str; strip ANSI escapes before comparing.
+    assert re.sub(r"\x1b\[[0-9;]*m", "", captured.out) == "x=3\n"
+    assert captured.err == ""
+
+
+def test_golden_registered_signature_string_future_annotations():
+    """Test 25: ``str(inspect.signature(registered))`` for a tool that registers today.
+
+    Recorded at 8730da8. A future-annotations tool with builtin annotations only;
+    the registered CLI callable's signature keeps the raw string annotations and
+    the return annotation.
+    """
+    import inspect
+
+    from cisternal.registration.registry import register
+    from tests.fixtures.wrapped_future_tools import simple_tool
+
+    register(simple_tool, registry=REGISTRY)
+    app = App(name="test")
+    wire(None, app, registry=REGISTRY)
+
+    registered = app["simple_tool"].default_command
+    assert str(inspect.signature(registered)) == "(x: 'int') -> 'int'"
