@@ -58,16 +58,16 @@ registry = cisternal.wire(server, app, adapter=my_adapter)
 ## Agent-asset export
 
 A tool's agent plugin (skills, agents, hooks, MCP servers, declared in its
-`.praxia/manifest.toml`) reaches a coding agent by one of two paths:
+`.praxia/manifest.toml`) reaches a coding agent by one of three paths:
 
-| | **Path 1: install through the tool** | **Path 2: direct surface export** |
-|---|---|---|
-| Who runs it | anyone who has the tool installed | the tool's developer, in its repo |
-| Command | `<tool> plugin install claude` (e.g. `bth plugin install claude`) | `cisternal assets export --manifest … --surface <s> --out DIR` |
-| Needs the `cisternal` CLI | no — the tool mounts cisternal's sub-app | yes |
-| Needs a source checkout | no — falls back to a snapshot in the wheel | yes |
-| Installs into the agent | yes (Claude Code) | no — writes files only (`assets install` / `publish-shared` also register them with Claude) |
-| Surfaces | install: `claude` · export: all seven | all seven |
+| | **Path 1: install through the tool** | **Path 2: direct surface export** | **Path 3: install from GitHub** |
+|---|---|---|---|
+| Who runs it | anyone who has the tool installed | the tool's developer, in its repo | anyone with read access to the repo |
+| Command | `<tool> plugin install claude` (e.g. `bth plugin install claude`) | `cisternal assets export --manifest … --surface <s> --out DIR` | `/plugin marketplace add maraxen/<tool>` (or the `maraxen/plugins` index) |
+| Needs the `cisternal` CLI | no — the tool mounts cisternal's sub-app | yes | no |
+| Needs the tool installed | yes | yes (source checkout) | no, with `[plugin.mcp] launch = "uvx"` |
+| Installs into the agent | yes (Claude Code) | no — writes files only (`assets install` / `publish-shared` also register them with Claude) | yes (Claude Code) |
+| Surfaces | install: `claude` · export: all seven | all seven | `claude` |
 
 ### Path 1 — `<tool> plugin install|update`
 
@@ -159,6 +159,52 @@ there from the repo that last published it. A plugin installed through Path 1
 is not rebuilt by `update-all`; instead it prints that tool's own
 `<tool> plugin update claude`, because the tool owns the recipe (version,
 snapshot vs. checkout).
+
+### Path 3 — install straight from GitHub
+
+A tool's repo becomes a one-plugin marketplace once it commits the bundle
+that `plugin repo-bundle` generates:
+
+```
+<repo>/
+├── .claude-plugin/marketplace.json   # one entry, "source": "./plugin"
+└── plugin/                           # the Claude bundle; version = <release>+<content digest>
+```
+
+```bash
+bth plugin repo-bundle            # (re)write plugin/ and .claude-plugin/marketplace.json; commit both
+bth plugin repo-bundle --check    # CI: exit 1 if either is missing or stale
+```
+
+Users then run `/plugin marketplace add maraxen/bathos` and
+`/plugin install bathos@bathos`. The bundle sits in `plugin/`, not the repo
+root, so a root `.mcp.json` never registers a duplicate project MCP server
+for people working in the repo. Private repos work for anyone whose git can
+already clone them (Claude Code uses the machine's own git credentials).
+
+The family index, `maraxen/plugins`, lists every tool from one catalog.
+Each entry is a `git-subdir` source pinned to that tool's release tag;
+`bth plugin index-entry --repo maraxen/bathos` prints it:
+
+```json
+{"name": "bathos", "source": {"source": "git-subdir", "url": "maraxen/bathos", "path": "plugin", "ref": "v0.13.0a6"}}
+```
+
+A plugin installed from GitHub gets the tool's files, not its Python
+package, so give the MCP server a launcher that fetches the matching release:
+
+```toml
+[plugin.mcp]
+command  = ["bth-mcp"]
+launch   = "uvx"                        # default "path": run `command` as-is
+uvx_from = "bathos[mcp]=={version}"     # default "<plugin>=={version}"; or
+                                        # "git+https://github.com/maraxen/<repo>@v{version}"
+```
+
+`{version}` is filled in from the release version the bundle is built from,
+so the server is always the same release as the plugin (and as the index
+entry's `ref`). Install the plugin from one marketplace per machine, either
+`cisternal-local` or GitHub: the same plugin from both appears twice.
 
 ### Where the shared marketplace lives
 

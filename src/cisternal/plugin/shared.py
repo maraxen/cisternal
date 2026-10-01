@@ -63,6 +63,28 @@ def marketplace_name(marketplace: Path) -> str:
         raise ValueError(msg) from exc
 
 
+def versioned_claude_bundle(bundle: AssetBundle) -> tuple[AssetBundle, dict[str, str]]:
+    """Version *bundle* as ``<version>+<content digest>`` and emit it for Claude.
+
+    The standalone ``[plugin.marketplace]`` table is dropped: a marketplace
+    (shared or repo-root) owns its own ``marketplace.json``. Two passes -- the
+    first, at the base version, derives the digest; the second bakes the
+    final, cache-busting version into ``plugin.json`` -- so the version changes
+    exactly when the emitted content does.
+    """
+    from cisternal.export.marketplace import content_version  # noqa: PLC0415
+    from cisternal.export.registry import get_emitter  # noqa: PLC0415
+
+    emitter = get_emitter("claude")
+    if emitter is None:
+        msg = "claude emitter is not registered"
+        raise RuntimeError(msg)
+    base = replace(bundle, marketplace=None)
+    version = content_version(base.metadata.version, emitter.emit(base))
+    versioned = replace(base, metadata=replace(base.metadata, version=version))
+    return versioned, emitter.emit(versioned)
+
+
 def publish_bundle(
     bundle: AssetBundle,
     *,
@@ -78,29 +100,16 @@ def publish_bundle(
     marketplace entry under the flock'd atomic read-modify-write.
     """
     from cisternal.export.marketplace import (  # noqa: PLC0415
-        content_version,
         default_seed,
         merge_marketplace_entry,
         plugin_output_dir,
     )
-    from cisternal.export.registry import get_emitter  # noqa: PLC0415
     from cisternal.export.write import write_bundle  # noqa: PLC0415
 
-    emitter = get_emitter("claude")
-    if emitter is None:
-        msg = "claude emitter is not registered"
-        raise RuntimeError(msg)
+    versioned, files = versioned_claude_bundle(bundle)
+    version = versioned.metadata.version
 
-    # The standalone [plugin.marketplace] table is for single-plugin
-    # self-install; a shared marketplace owns its own marketplace.json.
-    base = replace(bundle, marketplace=None)
-    # Two passes: the first (base version) derives a content digest; the
-    # second bakes the final, cache-busting version into plugin.json.
-    version = content_version(base.metadata.version, emitter.emit(base))
-    versioned = replace(base, metadata=replace(base.metadata, version=version))
-    files = emitter.emit(versioned)
-
-    name = base.metadata.name
+    name = versioned.metadata.name
     out = plugin_output_dir(marketplace, name)
     previous_version = read_plugin_version(out)
 
@@ -116,7 +125,7 @@ def publish_bundle(
         {
             "name": name,
             "source": f"./plugins/{name}",
-            "description": base.metadata.description,
+            "description": versioned.metadata.description,
         },
         seed=default_seed(),
         readme_template=MARKETPLACE_README_TEMPLATE,

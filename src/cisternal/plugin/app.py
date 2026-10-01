@@ -422,6 +422,10 @@ _ClaudeBinOpt = Annotated[
 _DryRunOpt = Annotated[
     bool, cyclopts.Parameter(name=["--dry-run"], help="Show what would happen; change nothing.")
 ]
+_PluginDirOpt = Annotated[
+    str,
+    cyclopts.Parameter(name=["--dir"], help="Repo subdirectory holding the bundle (default: plugin)."),
+]
 _PruneShadowedOpt = Annotated[
     bool,
     cyclopts.Parameter(
@@ -623,5 +627,87 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
             )
         print(f"marketplace: {root if root else '-'} [{layer}]")
         print(f"installable: {', '.join(INSTALLABLE_SURFACES)}")
+
+    @app.command(name="repo-bundle")
+    def repo_bundle(
+        *,
+        root: Annotated[
+            Path | None,
+            cyclopts.Parameter(
+                name=["--root"],
+                help="Repo root to write into (default: the checkout the manifest lives in).",
+            ),
+        ] = None,
+        plugin_dir: _PluginDirOpt = "plugin",
+        check: Annotated[
+            bool,
+            cyclopts.Parameter(
+                name=["--check"],
+                help="Write nothing; exit 1 if the committed bundle is missing or stale (CI).",
+            ),
+        ] = False,
+        manifest: _ManifestOpt = None,
+    ) -> None:
+        """Make this repo installable from GitHub (`/plugin marketplace add <owner>/<repo>`).
+
+        Writes the Claude bundle to <root>/<dir>/ and a one-entry
+        <root>/.claude-plugin/marketplace.json pointing at it. Commit both, and
+        run with --check in CI so they never drift from the manifest.
+        """
+        from cisternal.plugin.repo import (  # noqa: PLC0415
+            ROOT_MARKETPLACE,
+            check_repo_bundle,
+            repo_bundle_files,
+            write_repo_bundle,
+        )
+
+        try:
+            bundle, source = load_bundle(spec, manifest=manifest)
+            if root is None:
+                if source.kind == "snapshot":
+                    raise PluginError(
+                        "repo-bundle needs a source checkout; pass --root or --manifest"
+                    )
+                root = source.path.parent.parent  # <root>/.praxia/manifest.toml
+            version, files = repo_bundle_files(bundle, plugin_dir=plugin_dir)
+            if check:
+                problems = check_repo_bundle(root, files, plugin_dir=plugin_dir)
+                if problems:
+                    raise PluginError(
+                        "committed plugin bundle is out of date ("
+                        + "; ".join(problems[:10])
+                        + (f"; +{len(problems) - 10} more" if len(problems) > 10 else "")
+                        + f"); rerun `{spec.cli or 'plugin'} plugin repo-bundle`"
+                    )
+                print(f"repo bundle up to date: {root / plugin_dir} ({version})")
+                return
+            write_repo_bundle(root, files, plugin_dir=plugin_dir)
+        except (PluginError, ValueError, RuntimeError, OSError) as exc:
+            _fail(exc)
+        print(f"wrote {root / plugin_dir} and {root / ROOT_MARKETPLACE} ({version})")
+        print(f"install: /plugin marketplace add <owner>/<repo>  then  /plugin install {spec.name}@{spec.name}")
+
+    @app.command(name="index-entry")
+    def index_entry_cmd(
+        *,
+        repo: Annotated[
+            str, cyclopts.Parameter(name=["--repo"], help="GitHub owner/repo holding the bundle.")
+        ],
+        plugin_dir: _PluginDirOpt = "plugin",
+        ref: Annotated[
+            str | None,
+            cyclopts.Parameter(name=["--ref"], help="Tag/branch to pin (default: v<version>)."),
+        ] = None,
+        manifest: _ManifestOpt = None,
+    ) -> None:
+        """Print this plugin's entry for a family index marketplace (git-subdir, pinned)."""
+        from cisternal.plugin.repo import index_entry  # noqa: PLC0415
+
+        try:
+            bundle, _ = load_bundle(spec, manifest=manifest)
+            entry = index_entry(bundle, repo=repo, plugin_dir=plugin_dir, ref=ref)
+        except (PluginError, ValueError) as exc:
+            _fail(exc)
+        print(json.dumps(entry, indent=2))
 
     return app

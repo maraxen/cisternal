@@ -58,6 +58,10 @@ def merge_registry(
     conflicts.extend(cmd_conflicts)
 
     # Registry contributes commands only (L13); other kinds from manifest.
+    # The version is final here, so this is where `launch = "uvx"` MCP
+    # servers get their pinned `uvx --from <tool>==<version>` command.
+    from cisternal.assets.launch import resolve_mcp_launch  # noqa: PLC0415
+
     bundle = AssetBundle(
         metadata=registry_meta,
         commands=commands,
@@ -68,7 +72,7 @@ def merge_registry(
         marketplace=manifest_report.bundle.marketplace,
     )
     return LoadReport(
-        bundle=bundle,
+        bundle=resolve_mcp_launch(bundle),
         warnings=tuple(warnings),
         conflicts=tuple(conflicts),
     )
