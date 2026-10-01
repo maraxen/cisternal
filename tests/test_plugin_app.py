@@ -241,13 +241,10 @@ def test_marketplace_resolution_order(tmp_path: Path, monkeypatch: pytest.Monkey
     from cisternal.plugin import marketplace_root_source, resolve_marketplace_root
 
     assert marketplace_root_source() == (None, "unconfigured")
-
-    # The pre-resolver location is never used implicitly, only suggested.
-    legacy = tmp_path / "home" / ".cisternal" / "claude-plugin-marketplace"
-    legacy.mkdir(parents=True)
+    # An existing directory at the generated default is not used implicitly:
+    # only the config file decides.
+    (tmp_path / "home" / ".cisternal" / "claude-plugin-marketplace").mkdir(parents=True)
     assert marketplace_root_source() == (None, "unconfigured")
-    with pytest.raises(ValueError, match=r'plugin_marketplace = ".*claude-plugin-marketplace"'):
-        resolve_marketplace_root()
 
     config = tmp_path / "xdg" / "cisternal" / "config.toml"
     config.parent.mkdir(parents=True)
@@ -268,6 +265,8 @@ def test_marketplace_resolution_order(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setenv("CISTERNAL_PLUGIN_MARKETPLACE", "none")
     assert marketplace_root_source()[0] is None
+    with pytest.raises(ValueError, match="disabled"):
+        resolve_marketplace_root()  # opted out: never generated
 
 
 def test_malformed_marketplace_config_fails_loudly(tmp_path: Path) -> None:
@@ -305,15 +304,99 @@ def test_info_reports_a_malformed_config_instead_of_crashing(
     assert "invalid TOML" in capsys.readouterr().out
 
 
-def test_install_without_any_marketplace_config_explains_how(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+def test_unconfigured_resolve_generates_the_user_config(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import tomllib
+
+    from cisternal.plugin import marketplace_root_source, resolve_marketplace_root
+
+    config = tmp_path / "xdg" / "cisternal" / "config.toml"
+    root = resolve_marketplace_root()
+    assert root == tmp_path / "home" / ".cisternal" / "claude-plugin-marketplace"
+    doc = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert doc == {"plugin_marketplace": "~/.cisternal/claude-plugin-marketplace"}
+    assert str(config) in capsys.readouterr().err
+    # From now on the config file is the layer that decides; nothing is rewritten.
+    before = config.read_text(encoding="utf-8")
+    assert marketplace_root_source() == (root, str(config))
+    resolve_marketplace_root()
+    assert config.read_text(encoding="utf-8") == before
+
+
+def test_generation_keeps_an_existing_config_file(tmp_path: Path) -> None:
+    import tomllib
+
+    from cisternal.plugin import resolve_marketplace_root
+
+    config = tmp_path / "xdg" / "cisternal" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text('# mine\n[other]\nkey = 1\n', encoding="utf-8")
+    resolve_marketplace_root()
+    doc = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert doc["plugin_marketplace"] == "~/.cisternal/claude-plugin-marketplace"
+    assert doc["other"] == {"key": 1}  # key landed top-level, table untouched
+    assert "# mine" in config.read_text(encoding="utf-8")
+
+
+def test_malformed_config_is_not_overwritten(tmp_path: Path) -> None:
+    from cisternal.plugin import resolve_marketplace_root
+
+    config = tmp_path / "xdg" / "cisternal" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("[broken\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid TOML"):
+        resolve_marketplace_root()
+    assert config.read_text(encoding="utf-8") == "[broken\n"
+
+
+def test_install_with_nothing_configured_generates_config_and_installs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cisternal.plugin import plugin_app
 
     _import_from(_make_wheel(tmp_path, "fx_nomkt"), "fx_nomkt", monkeypatch)
     claude, log = _fake_claude(tmp_path)
-    _run(plugin_app(_spec("fx_nomkt")), ["install", "claude", "--claude-bin", str(claude)], exit_code=1)
-    assert "CISTERNAL_PLUGIN_MARKETPLACE" in caplog.text
+    _run(plugin_app(_spec("fx_nomkt")), ["install", "claude", "--claude-bin", str(claude)])
+    mkt = tmp_path / "home" / ".cisternal" / "claude-plugin-marketplace"
+    assert (tmp_path / "xdg" / "cisternal" / "config.toml").is_file()
+    assert (mkt / "plugins" / PLUGIN / ".claude-plugin" / "plugin.json").is_file()
+    assert ["plugin", "marketplace", "add", str(mkt)] in _calls(log)
+
+
+def test_dry_run_never_generates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                 capsys: pytest.CaptureFixture[str]) -> None:
+    from cisternal.plugin import plugin_app
+
+    _import_from(_make_wheel(tmp_path, "fx_dry"), "fx_dry", monkeypatch)
+    claude, log = _fake_claude(tmp_path)
+    _run(plugin_app(_spec("fx_dry")), ["install", "--dry-run", "--claude-bin", str(claude)])
+    assert "would write plugin_marketplace" in capsys.readouterr().out
+    assert not (tmp_path / "xdg" / "cisternal" / "config.toml").exists()
+    assert _calls(log) == []
+
+
+def test_info_never_generates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                              capsys: pytest.CaptureFixture[str]) -> None:
+    from cisternal.plugin import plugin_app
+
+    _import_from(_make_wheel(tmp_path, "fx_ro"), "fx_ro", monkeypatch)
+    _run(plugin_app(_spec("fx_ro")), ["info"])
+    assert "the first install writes plugin_marketplace" in capsys.readouterr().out
+    assert not (tmp_path / "xdg" / "cisternal" / "config.toml").exists()
+
+
+def test_disabled_marketplace_install_fails_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from cisternal.plugin import plugin_app
+
+    monkeypatch.setenv("CISTERNAL_PLUGIN_MARKETPLACE", "none")
+    _import_from(_make_wheel(tmp_path, "fx_off"), "fx_off", monkeypatch)
+    claude, log = _fake_claude(tmp_path)
+    _run(plugin_app(_spec("fx_off")), ["install", "--claude-bin", str(claude)], exit_code=1)
+    assert "disabled" in caplog.text
+    assert not (tmp_path / "xdg" / "cisternal" / "config.toml").exists()
     assert _calls(log) == []
 
 

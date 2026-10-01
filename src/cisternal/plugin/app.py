@@ -456,13 +456,26 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         try:
             _require_installable(surface)
             bundle, source = load_bundle(spec, manifest=manifest)
-            root = resolve_marketplace_root(marketplace)
             if dry_run:
+                from cisternal.plugin.config import (  # noqa: PLC0415
+                    CONFIG_KEY,
+                    GENERATED_DEFAULT,
+                    marketplace_root_source,
+                    user_config_path,
+                )
+
+                root, layer = marketplace_root_source(marketplace)
+                if root is None and layer != "unconfigured":
+                    raise PluginError(f"plugin marketplace is {layer}")
+                if root is None:  # resolve would generate the config; dry-run only says so
+                    root = Path(GENERATED_DEFAULT).expanduser()
+                    print(f'would write {CONFIG_KEY} = "{GENERATED_DEFAULT}" to {user_config_path()}')
                 print(f"bundle: {source.describe()}")
                 print(f"would publish {bundle.metadata.name} into {root}/plugins/{spec.name}")
                 verb = "update" if require_installed else "install (or update)"
                 print(f"would {verb} {spec.name}@<marketplace> in Claude Code (scope={scope})")
                 return
+            root = resolve_marketplace_root(marketplace)
             # update-all defers to this command rather than rebuilding with
             # a different recipe (it would version from the manifest).
             record = {
@@ -575,6 +588,17 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
             root, layer = None, f"error: {exc}"
         print(f"plugin:      {spec.name} (package {spec.package})")
         print(f"bundle:      {source}")
+        if root is None and layer == "unconfigured":
+            from cisternal.plugin.config import (  # noqa: PLC0415
+                CONFIG_KEY,
+                GENERATED_DEFAULT,
+                user_config_path,
+            )
+
+            layer = (
+                f"unconfigured; the first install writes {CONFIG_KEY} = "
+                f'"{GENERATED_DEFAULT}" to {user_config_path()}'
+            )
         print(f"marketplace: {root if root else '-'} [{layer}]")
         print(f"installable: {', '.join(INSTALLABLE_SURFACES)}")
 

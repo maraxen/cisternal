@@ -79,3 +79,15 @@ def _clear_all_registries() -> Any:
 
     # --- TEARDOWN: clear after the test ---
     _REGISTRIES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_config(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never read or write the real ~/.config/cisternal/config.toml.
+
+    resolve_marketplace_root() generates that file when nothing is
+    configured; a test that forgot --marketplace must not touch the
+    developer's machine config.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg")))
+    monkeypatch.delenv("CISTERNAL_PLUGIN_MARKETPLACE", raising=False)

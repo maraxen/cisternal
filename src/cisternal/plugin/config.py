@@ -11,10 +11,15 @@ Resolution order (first hit wins; :func:`marketplace_root_source` says which):
 4. ``plugin_marketplace`` in ``${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml``
    (per machine; relative paths resolve against the config dir).
 
-Otherwise nothing is configured and callers fail with :data:`HOW_TO_CONFIGURE`
--- there is no default path in this library; a machine's default lives in its
-config file. When the pre-resolver location (``~/.cisternal/claude-plugin-marketplace``)
-exists, the error names the exact config line that keeps using it.
+When none of these is set, :func:`resolve_marketplace_root` *generates*
+layer 4: it writes ``plugin_marketplace = "~/.cisternal/claude-plugin-marketplace"``
+(the family marketplace) into the user config file, says so on stderr, and
+uses it. The machine's default therefore always lives in that one file, where
+it can be read and changed -- resolution itself never falls back to a path
+the config does not name. ``$CISTERNAL_PLUGIN_MARKETPLACE=none`` opts out
+(an error instead). :func:`marketplace_root_source` is read-only and never
+generates anything.
+
 A malformed pyproject/config file raises ``ValueError`` rather than being
 skipped.
 """
@@ -22,21 +27,23 @@ skipped.
 from __future__ import annotations
 
 import os
+import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
 ENV_VAR = "CISTERNAL_PLUGIN_MARKETPLACE"
 CONFIG_KEY = "plugin_marketplace"
 PYPROJECT_TABLE = "cisternal"  # [tool.cisternal]
-# Where publish-shared used to default to; only ever suggested, never used.
-LEGACY_ROOT = Path("~/.cisternal/claude-plugin-marketplace")
+# The value written into a freshly generated user config (kept unexpanded, so
+# the file stays portable across home directories).
+GENERATED_DEFAULT = "~/.cisternal/claude-plugin-marketplace"
 
 HOW_TO_CONFIGURE = (
     "no plugin marketplace location is configured. Set one of: "
     f"--marketplace PATH; ${ENV_VAR}=PATH; "
     f"[tool.{PYPROJECT_TABLE}] {CONFIG_KEY} = \"PATH\" in pyproject.toml; or "
-    f"{CONFIG_KEY} = \"PATH\" in ~/.config/cisternal/config.toml "
-    f"(e.g. {LEGACY_ROOT}, the family marketplace)"
+    f"{CONFIG_KEY} = \"PATH\" in ~/.config/cisternal/config.toml"
 )
 
 
@@ -111,15 +118,62 @@ def marketplace_root_source(
     return None, "unconfigured"
 
 
+def write_user_config(value: str = GENERATED_DEFAULT) -> Path:
+    """Record ``plugin_marketplace = value`` in the user config file; return its path.
+
+    Creates the file (and its directory) if missing. An existing file that
+    lacks the key gets it as the first line -- a top-level key must precede
+    any table to stay top-level -- and nothing else in it changes. An existing
+    key is left alone. Written atomically (temp file + rename), so a
+    concurrent reader never sees a half-written file.
+    """
+    config = user_config_path()
+    existing = config.read_text(encoding="utf-8") if config.is_file() else None
+    if existing is not None and CONFIG_KEY in _read_toml(config):
+        return config
+    header = (
+        "# cisternal per-machine config (generated; edit freely).\n"
+        "# Shared Claude plugin marketplace used by `<tool> plugin install` and\n"
+        "# `cisternal assets publish-shared` / `update-all`.\n"
+    )
+    line = f"{CONFIG_KEY} = {_toml_string(value)}\n"
+    text = header + line if existing is None else line + existing
+    config.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=config.parent, prefix=".config.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, config)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    return config
+
+
+def _toml_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def resolve_marketplace_root(explicit: Path | str | None = None) -> Path:
-    """The marketplace root, or ``ValueError(HOW_TO_CONFIGURE)`` when none is configured."""
+    """The marketplace root, generating the user config entry when nothing is configured.
+
+    Raises ``ValueError`` only when the location is explicitly disabled
+    (``$CISTERNAL_PLUGIN_MARKETPLACE=none``) or a config file is malformed.
+    """
     root, source = marketplace_root_source(explicit)
-    if root is None:
+    if root is not None:
+        return root
+    if source != "unconfigured":
         msg = f"{HOW_TO_CONFIGURE} [resolver: {source}]"
-        if LEGACY_ROOT.expanduser().is_dir():
-            msg += (
-                f". To keep using the existing {LEGACY_ROOT}, add to {user_config_path()}: "
-                f'{CONFIG_KEY} = "{LEGACY_ROOT.expanduser()}"'
-            )
+        raise ValueError(msg)
+    config = write_user_config()
+    print(
+        f"cisternal: no plugin marketplace configured; wrote "
+        f"{CONFIG_KEY} = {_toml_string(GENERATED_DEFAULT)} to {config}",
+        file=sys.stderr,
+    )
+    root, _ = marketplace_root_source()
+    if root is None:  # pragma: no cover - the write above guarantees a value
+        msg = f"{HOW_TO_CONFIGURE} [resolver: generated {config} did not resolve]"
         raise ValueError(msg)
     return root
