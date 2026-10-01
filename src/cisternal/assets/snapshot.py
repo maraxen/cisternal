@@ -35,8 +35,20 @@ __all__ = ["SNAPSHOT_SCHEMA", "bundle_from_dict", "dumps_snapshot", "loads_snaps
 
 def dumps_snapshot(bundle: AssetBundle) -> str:
     """Serialize *bundle* deterministically (sorted keys, trailing newline)."""
-    doc = {"schema": SNAPSHOT_SCHEMA, "bundle": _serialize_bundle(bundle)}
+    data = _serialize_bundle(bundle)
+    # Fields added after schema 1 shipped are written only when non-default,
+    # so upgrading cisternal does not make every already-committed snapshot
+    # "stale" under `assets snapshot --check`. Readers default them back.
+    for srv in data.get("mcp_servers", ()):
+        for key, default in _MCP_LATE_DEFAULTS.items():
+            if srv.get(key) == default:
+                srv.pop(key)
+    doc = {"schema": SNAPSHOT_SCHEMA, "bundle": data}
     return json.dumps(doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+# McpAsset fields added in 0.1.1a14 (`[plugin.mcp] launch` / `uvx_from`).
+_MCP_LATE_DEFAULTS = {"launch": "path", "uvx_from": ""}
 
 
 def loads_snapshot(text: str) -> AssetBundle:
@@ -68,6 +80,8 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
                     name=m["name"],
                     command=tuple(m.get("command", ())),
                     env=tuple((k, v) for k, v in m.get("env", ())),
+                    launch=m.get("launch", "path"),
+                    uvx_from=m.get("uvx_from", ""),
                 )
                 for m in data.get("mcp_servers", ())
             ),

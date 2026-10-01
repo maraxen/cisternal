@@ -55,7 +55,7 @@ class ManifestAssetSource:
         skills = _load_skills(plugin, self._root, warnings)
         agents = _load_agents(plugin, self._root, warnings)
         hook_specs = _load_hook_specs(plugin, self._root, warnings)
-        mcp_servers = _load_mcp(plugin, name)
+        mcp_servers = _load_mcp(plugin, name, warnings)
         marketplace = _load_marketplace(plugin, name)
         # [plugin.export_command] is praxia session argv, not command-file paths.
         commands = ()
@@ -248,7 +248,11 @@ def _load_hook_specs(
     return tuple(specs)
 
 
-def _load_mcp(plugin: dict[str, object], plugin_name: str) -> tuple[McpAsset, ...]:
+def _load_mcp(
+    plugin: dict[str, object], plugin_name: str, warnings: list[str]
+) -> tuple[McpAsset, ...]:
+    from cisternal.assets.launch import LAUNCH_MODES  # noqa: PLC0415
+
     mcp = plugin.get("mcp")
     if not isinstance(mcp, dict):
         return ()
@@ -256,7 +260,14 @@ def _load_mcp(plugin: dict[str, object], plugin_name: str) -> tuple[McpAsset, ..
     if not isinstance(command, list) or not command:
         return ()
     argv = tuple(str(part) for part in command)
-    return (McpAsset(name=plugin_name or "mcp", command=argv),)
+    launch = str(mcp.get("launch") or "path")
+    if launch not in LAUNCH_MODES:
+        warnings.append(f"plugin.mcp.launch {launch!r} is not one of {LAUNCH_MODES}; using 'path'")
+        launch = "path"
+    uvx_from = str(mcp.get("uvx_from") or "")
+    if uvx_from and launch != "uvx":
+        warnings.append("plugin.mcp.uvx_from is set but launch is not 'uvx'; it is ignored")
+    return (McpAsset(name=plugin_name or "mcp", command=argv, launch=launch, uvx_from=uvx_from),)
 
 
 def _load_marketplace(plugin: dict[str, object], plugin_name: str) -> MarketplaceAsset | None:

@@ -76,11 +76,23 @@ class CommandAsset:
 
 @dataclass(frozen=True, slots=True)
 class McpAsset:
-    """A single MCP server entry."""
+    """A single MCP server entry.
+
+    ``launch`` (``[plugin.mcp] launch``) says how the server starts on the
+    machine that installs the plugin: ``"path"`` (default) runs ``command``
+    as-is, so the tool must already be installed; ``"uvx"`` makes the plugin
+    self-contained -- ``command`` runs via ``uvx --from <uvx_from> ...``, with
+    ``{version}`` in ``uvx_from`` filled in from the bundle version (see
+    :func:`cisternal.assets.launch.resolve_mcp_launch`). ``uvx_from`` defaults
+    to ``<plugin>=={version}``; use e.g. ``"git+https://github.com/o/r@v{version}"``
+    for a tool that is not on PyPI.
+    """
 
     name: str
     command: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
+    launch: str = "path"
+    uvx_from: str = ""
 
 
 @dataclass(frozen=True, slots=True)
