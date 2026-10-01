@@ -537,7 +537,7 @@ def test_every_stale_scope_is_updated(tmp_path: Path, wheel_app) -> None:
         installed=[(pid, current, "project"), (pid, "0.1+old", "user"), (pid, "0.2+old", "local")],
         marketplaces={"cisternal-local": str(mkt)},
     )
-    _run(wheel_app, ["install", "--marketplace", str(mkt), "--claude-bin", str(claude)])
+    _run(wheel_app, ["update", "--marketplace", str(mkt), "--claude-bin", str(claude)])
     assert _mutating(log) == [
         ["plugin", "marketplace", "update", "cisternal-local"],
         ["plugin", "update", pid, "--scope", "user"],
@@ -556,6 +556,66 @@ def test_a_failing_scope_is_reported_without_skipping_the_rest(tmp_path: Path, w
     )
     _run(wheel_app, ["update", "--marketplace", str(mkt), "--claude-bin", str(claude)], exit_code=1)
     assert ["plugin", "update", pid, "--scope", "user"] in _calls(log)
+
+
+def test_install_at_a_new_scope_ignores_installs_elsewhere(tmp_path: Path, wheel_app) -> None:
+    """`install --scope project` with only a user install must install at project."""
+    mkt = tmp_path / "mkt"
+    pid = f"{PLUGIN}@cisternal-local"
+    claude, log = _fake_claude(
+        tmp_path,
+        installed=[(pid, "0.1+old", "user")],
+        marketplaces={"cisternal-local": str(mkt)},
+    )
+    _run(wheel_app, ["install", "--scope", "project", "--marketplace", str(mkt), "--claude-bin", str(claude)])
+    assert _mutating(log) == [["plugin", "install", pid, "--scope", "project"]]
+
+
+def test_install_only_updates_its_own_scope(tmp_path: Path, wheel_app) -> None:
+    mkt = tmp_path / "mkt"
+    pid = f"{PLUGIN}@cisternal-local"
+    claude, log = _fake_claude(
+        tmp_path,
+        installed=[(pid, "0.1+old", "user"), (pid, "0.1+old", "project")],
+        marketplaces={"cisternal-local": str(mkt)},
+    )
+    _run(wheel_app, ["install", "--marketplace", str(mkt), "--claude-bin", str(claude)])
+    assert _mutating(log) == [
+        ["plugin", "marketplace", "update", "cisternal-local"],
+        ["plugin", "update", pid, "--scope", "user"],
+    ]
+
+
+def test_prune_shadowed_is_accepted_and_prunes(
+    tmp_path: Path, wheel_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shadow = tmp_path / "claude-home" / "skills" / "demo-skill"
+    shadow.mkdir(parents=True)
+    monkeypatch.setenv("CISTERNAL_SHADOW_BACKUP_DIR", str(tmp_path / "backup"))
+    claude, _ = _fake_claude(tmp_path)
+    _run(wheel_app, ["install", "--prune-shadowed", "--marketplace", str(tmp_path / "mkt"),
+                     "--claude-bin", str(claude)])
+    assert not shadow.exists()
+    assert list((tmp_path / "backup").rglob("demo-skill"))
+
+
+def test_generation_writes_through_a_symlinked_config(tmp_path: Path) -> None:
+    import tomllib
+
+    from cisternal.plugin import resolve_marketplace_root
+
+    target = tmp_path / "dotfiles" / "cisternal.toml"
+    target.parent.mkdir()
+    target.write_text("[other]\nkey = 1\n", encoding="utf-8")
+    target.chmod(0o640)
+    link = tmp_path / "xdg" / "cisternal" / "config.toml"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+
+    resolve_marketplace_root()
+    assert link.is_symlink() and link.resolve() == target
+    assert "plugin_marketplace" in tomllib.loads(target.read_text(encoding="utf-8"))
+    assert target.stat().st_mode & 0o777 == 0o640
 
 
 def test_update_command_without_cli_name(monkeypatch: pytest.MonkeyPatch) -> None:

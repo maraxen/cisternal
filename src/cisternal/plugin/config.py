@@ -125,9 +125,12 @@ def write_user_config(value: str = GENERATED_DEFAULT) -> Path:
     lacks the key gets it as the first line -- a top-level key must precede
     any table to stay top-level -- and nothing else in it changes. An existing
     key is left alone. Written atomically (temp file + rename), so a
-    concurrent reader never sees a half-written file.
+    concurrent reader never sees a half-written file. A symlinked config
+    (e.g. from a dotfiles repo) is written through to its target, keeping
+    the link and the target's permissions.
     """
-    config = user_config_path()
+    link = user_config_path()
+    config = link.resolve() if link.is_symlink() else link
     existing = config.read_text(encoding="utf-8") if config.is_file() else None
     if existing is not None and CONFIG_KEY in _read_toml(config):
         return config
@@ -139,15 +142,17 @@ def write_user_config(value: str = GENERATED_DEFAULT) -> Path:
     line = f"{CONFIG_KEY} = {_toml_string(value)}\n"
     text = header + line if existing is None else line + existing
     config.parent.mkdir(parents=True, exist_ok=True)
+    mode = config.stat().st_mode & 0o777 if existing is not None else 0o644
     fd, tmp = tempfile.mkstemp(dir=config.parent, prefix=".config.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
+        os.chmod(tmp, mode)  # mkstemp creates 0600
         os.replace(tmp, config)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
-    return config
+    return link
 
 
 def _toml_string(value: str) -> str:

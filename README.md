@@ -83,10 +83,13 @@ bth plugin install claude --dry-run    # show what would happen, change nothing
 ```
 
 `install` publishes into the shared marketplace, registers that marketplace
-with Claude Code if it isn't already, then installs the plugin. If the
-plugin is already installed, `install` updates it in place (or does nothing
-when it is current). `update` refuses to run when the plugin isn't installed,
-and updates at the scope the plugin was installed at. Restart Claude Code to
+with Claude Code if it isn't already, then installs the plugin at `--scope`.
+If the plugin is already installed at that scope, `install` updates it (or
+does nothing when it is current). Installs at other scopes are left alone.
+`update` refuses to run when the plugin isn't installed, and updates every
+stale install at the scope it was installed at. Both commands report skill and
+agent copies in `~/.claude/` that shadow the plugin; `--prune-shadowed` moves
+them into a backup. Restart Claude Code to
 load the change. cisternal dogfoods this itself: `cisternal plugin install claude`.
 
 **Tool authors** add it in three steps:

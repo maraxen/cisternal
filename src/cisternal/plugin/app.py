@@ -319,8 +319,14 @@ def claude_install(
     scope: str,
     claude_bin: str,
     require_installed: bool,
+    prune_shadowed: bool = False,
 ) -> None:
     """Install or update in Claude Code via the shared marketplace.
+
+    ``install`` (``require_installed=False``) targets exactly *scope*: it
+    updates an install at that scope, or installs there -- an install at some
+    other scope is neither touched nor mistaken for this one. ``update``
+    (``require_installed=True``) updates every stale install, whatever its scope.
 
     Every refusal (a conflicting marketplace registration, ``update`` with
     nothing installed, an unreadable listing) is checked before anything is
@@ -339,12 +345,14 @@ def claude_install(
     if entries is None:
         raise PluginError("could not list installed Claude Code plugins (see above)")
     installs = [e for e in entries if e.id == plugin_id]
+    if not require_installed:
+        installs = [e for e in installs if e.scope == scope]
     if require_installed and not installs:
         raise PluginError(f"{plugin_id} is not installed; run `plugin install claude` first")
 
     result = publish_bundle(bundle, marketplace=marketplace, source=record)
     print(f"published {result.name}@{result.version} -> {result.out}")
-    handle_shadowed([result], prune=False)
+    handle_shadowed([result], prune=prune_shadowed)
     if not registered:
         _check(
             _claude([claude_bin, "plugin", "marketplace", "add", str(marketplace)]),
@@ -414,6 +422,14 @@ _ClaudeBinOpt = Annotated[
 _DryRunOpt = Annotated[
     bool, cyclopts.Parameter(name=["--dry-run"], help="Show what would happen; change nothing.")
 ]
+_PruneShadowedOpt = Annotated[
+    bool,
+    cyclopts.Parameter(
+        name=["--prune-shadowed"],
+        help="Move ~/.claude/skills/<skill>/ and ~/.claude/agents/<plugin>-<agent>.md copies "
+        "that shadow this plugin into a timestamped backup. Without it they are only reported.",
+    ),
+]
 
 
 def _fail(exc: Exception) -> NoReturn:
@@ -450,6 +466,7 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         claude_bin: str,
         dry_run: bool,
         require_installed: bool,
+        prune_shadowed: bool,
     ) -> None:
         from cisternal.plugin.config import resolve_marketplace_root  # noqa: PLC0415
 
@@ -490,6 +507,7 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
                 scope=scope,
                 claude_bin=claude_bin,
                 require_installed=require_installed,
+                prune_shadowed=prune_shadowed,
             )
         except (PluginError, ValueError, RuntimeError, OSError) as exc:
             _fail(exc)
@@ -509,11 +527,13 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         marketplace: _MarketplaceOpt = None,
         claude_bin: _ClaudeBinOpt = "claude",
         dry_run: _DryRunOpt = False,
+        prune_shadowed: _PruneShadowedOpt = False,
     ) -> None:
-        """Publish this plugin and install it into the surface (updates if already installed)."""
+        """Publish this plugin and install it at --scope (updates an install already there)."""
         _install_or_update(
             surface, manifest=manifest, marketplace=marketplace, scope=scope,
             claude_bin=claude_bin, dry_run=dry_run, require_installed=False,
+            prune_shadowed=prune_shadowed,
         )
 
     @app.command(name="update")
@@ -525,11 +545,13 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         marketplace: _MarketplaceOpt = None,
         claude_bin: _ClaudeBinOpt = "claude",
         dry_run: _DryRunOpt = False,
+        prune_shadowed: _PruneShadowedOpt = False,
     ) -> None:
-        """Republish this plugin and update the installed copy (fails if not installed)."""
+        """Republish this plugin and update every installed copy (fails if not installed)."""
         _install_or_update(
             surface, manifest=manifest, marketplace=marketplace, scope="user",
             claude_bin=claude_bin, dry_run=dry_run, require_installed=True,
+            prune_shadowed=prune_shadowed,
         )
 
     @app.command(name="export")
