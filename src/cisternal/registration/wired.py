@@ -387,6 +387,10 @@ def wire(
 ) -> WiredRegistry:
     """Snapshot the named registry and register each tool on *server* (and *app*).
 
+    For when to use this instead of a hand-written CLI/MCP pair, the rules for
+    tool bodies, and tested ``CliContract`` recipes (exit codes, ``--json``,
+    prompts, groups, composites), see ``docs/guides/wire-onboarding.md``.
+
     Steps:
         1. Take a point-in-time snapshot of *registry* via
            :func:`~cisternal.registration.registry._snapshot`.
@@ -446,8 +450,15 @@ def wire(
                    ``add_tool`` method).  Registered MCP callables are added
                    here.
         app:       Optional ``cyclopts.App``.  When supplied, a CLI command is
-                   registered for each tool entry.  The CLI callable is a pure
-                   passthrough to the original function.
+                   registered for each tool entry.  With no contract (see
+                   *cli_contract*, *cli_contracts* and ``@tool(cli_contract=...)``)
+                   the CLI callable is a passthrough to the original function:
+                   the result goes back to cyclopts' ``result_action`` and an
+                   ``Exception`` prints ``Error (<Type>): <msg>`` and exits 1.
+                   With a contract it also applies the contract's exit-code map,
+                   success formatter, CLI-only options and ``prepare`` hook, and
+                   forwards ``help``/``show`` to ``app.command``.  The MCP callable
+                   never sees any of it.
         adapter:   Accepted but NEVER used (C5 / AC-M2-6).  Pass ``None``
                    (default).  Passing a non-None value is silently ignored.
         registry:  Which named registry partition to snapshot.  Defaults to
