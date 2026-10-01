@@ -86,16 +86,20 @@ def _run(app, args: list[str], *, exit_code: int = 0) -> None:
 def _fake_claude(
     tmp_path: Path,
     *,
-    installed: dict[str, tuple[str, str]] | None = None,
+    installed: dict[str, tuple[str, str]] | list[tuple[str, str, str]] | None = None,
     marketplaces: dict[str, str] | None = None,
+    remote_marketplaces: dict[str, str] | None = None,
+    fail_update_scopes: tuple[str, ...] = (),
 ) -> tuple[Path, Path]:
-    """installed: {id: (version, scope)}; marketplaces: {name: path}."""
-    installed = installed or {}
-    marketplaces = marketplaces or {}
+    """installed: {id: (version, scope)} or [(id, version, scope)];
+    marketplaces: {name: directory path}; remote_marketplaces: {name: repo}."""
+    if isinstance(installed, dict):
+        installed = [(i, v, sc) for i, (v, sc) in installed.items()]
+    plugins = [{"id": i, "version": v, "scope": sc} for i, v, sc in (installed or [])]
+    mkts = [{"name": n, "source": "directory", "path": p} for n, p in (marketplaces or {}).items()]
+    mkts += [{"name": n, "source": "github", "repo": r} for n, r in (remote_marketplaces or {}).items()]
     log = tmp_path / "claude_calls.jsonl"
     script = tmp_path / "fake_claude"
-    plugins = [{"id": i, "version": v, "scope": s} for i, (v, s) in installed.items()]
-    mkts = [{"name": n, "source": "directory", "path": p} for n, p in marketplaces.items()]
     script.write_text(
         f"#!{sys.executable}\n"
         "import json, sys\n"
@@ -103,7 +107,10 @@ def _fake_claude(
         "if sys.argv[1:4] == ['plugin', 'marketplace', 'list']:\n"
         f"    print(json.dumps({mkts!r}))\n"
         "elif sys.argv[1:3] == ['plugin', 'list']:\n"
-        f"    print(json.dumps({plugins!r}))\n",
+        f"    print(json.dumps({plugins!r}))\n"
+        "elif sys.argv[1:3] == ['plugin', 'update'] and '--scope' in sys.argv:\n"
+        f"    if sys.argv[sys.argv.index('--scope') + 1] in {list(fail_update_scopes)!r}:\n"
+        "        sys.exit(1)\n",
         encoding="utf-8",
     )
     script.chmod(0o755)
@@ -139,6 +146,9 @@ def test_snapshot_round_trips_and_rejects_unknown_schema() -> None:
     doc["schema"] = 999
     with pytest.raises(ValueError, match="schema"):
         loads_snapshot(json.dumps(doc))
+    for broken in ({"schema": 1}, {"schema": 1, "bundle": []}, {"schema": 1, "bundle": {"skills": [1]}}):
+        with pytest.raises(ValueError, match="malformed"):
+            loads_snapshot(json.dumps(broken))
 
 
 def test_snapshot_check_detects_drift(tmp_path: Path) -> None:
@@ -228,14 +238,16 @@ def test_checkout_and_snapshot_emit_identical_bundles(
 
 
 def test_marketplace_resolution_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from cisternal.plugin import marketplace_root_source
+    from cisternal.plugin import marketplace_root_source, resolve_marketplace_root
 
     assert marketplace_root_source() == (None, "unconfigured")
 
+    # The pre-resolver location is never used implicitly, only suggested.
     legacy = tmp_path / "home" / ".cisternal" / "claude-plugin-marketplace"
     legacy.mkdir(parents=True)
-    root, layer = marketplace_root_source()
-    assert root == legacy and layer.startswith("legacy")
+    assert marketplace_root_source() == (None, "unconfigured")
+    with pytest.raises(ValueError, match=r'plugin_marketplace = ".*claude-plugin-marketplace"'):
+        resolve_marketplace_root()
 
     config = tmp_path / "xdg" / "cisternal" / "config.toml"
     config.parent.mkdir(parents=True)
@@ -269,6 +281,28 @@ def test_malformed_marketplace_config_fails_loudly(tmp_path: Path) -> None:
     config.write_text("plugin_marketplace = 3\n", encoding="utf-8")
     with pytest.raises(ValueError, match="non-empty string"):
         marketplace_root_source()
+
+
+@pytest.mark.parametrize(
+    "body", ['[tool]\ncisternal = "~/mkt"\n', "[tool]\ncisternal = 3\n", "tool = 1\n"]
+)
+def test_non_table_tool_cisternal_is_an_error_not_a_skip(tmp_path: Path, body: str) -> None:
+    from cisternal.plugin import marketplace_root_source
+
+    (tmp_path / "pyproject.toml").write_text(body, encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a table"):
+        marketplace_root_source()
+
+
+def test_info_reports_a_malformed_config_instead_of_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cisternal.plugin import plugin_app
+
+    _import_from(_make_wheel(tmp_path, "fx_info"), "fx_info", monkeypatch)
+    (tmp_path / "pyproject.toml").write_text("[tool\n", encoding="utf-8")
+    _run(plugin_app(_spec("fx_info")), ["info"])
+    assert "invalid TOML" in capsys.readouterr().out
 
 
 def test_install_without_any_marketplace_config_explains_how(
@@ -389,6 +423,66 @@ def test_export_writes_any_surface(tmp_path: Path, wheel_app) -> None:
     _run(wheel_app, ["export", "cursor", "--out", str(out)])
     assert (out / ".cursor-plugin" / "plugin.json").is_file()
     _run(wheel_app, ["export", "nope", "--out", str(out)], exit_code=1)
+
+
+def test_update_refusal_writes_nothing(tmp_path: Path, wheel_app) -> None:
+    mkt = tmp_path / "mkt"
+    claude, log = _fake_claude(tmp_path)
+    _run(wheel_app, ["update", "--marketplace", str(mkt), "--claude-bin", str(claude)], exit_code=1)
+    assert not mkt.exists()
+    assert _mutating(log) == []
+
+
+def test_same_named_remote_marketplace_is_refused(tmp_path: Path, wheel_app) -> None:
+    mkt = tmp_path / "mkt"
+    claude, log = _fake_claude(tmp_path, remote_marketplaces={"cisternal-local": "someone/plugins"})
+    _run(wheel_app, ["install", "--marketplace", str(mkt), "--claude-bin", str(claude)], exit_code=1)
+    assert not mkt.exists()  # refused before publishing
+    assert _mutating(log) == []
+
+
+def test_every_stale_scope_is_updated(tmp_path: Path, wheel_app) -> None:
+    mkt = tmp_path / "mkt"
+    first, _ = _fake_claude(tmp_path)
+    _run(wheel_app, ["install", "--marketplace", str(mkt), "--claude-bin", str(first)])
+    current = _published_version(mkt)
+    (tmp_path / "claude_calls.jsonl").unlink()
+
+    pid = f"{PLUGIN}@cisternal-local"
+    claude, log = _fake_claude(
+        tmp_path,
+        installed=[(pid, current, "project"), (pid, "0.1+old", "user"), (pid, "0.2+old", "local")],
+        marketplaces={"cisternal-local": str(mkt)},
+    )
+    _run(wheel_app, ["install", "--marketplace", str(mkt), "--claude-bin", str(claude)])
+    assert _mutating(log) == [
+        ["plugin", "marketplace", "update", "cisternal-local"],
+        ["plugin", "update", pid, "--scope", "user"],
+        ["plugin", "update", pid, "--scope", "local"],
+    ]
+
+
+def test_a_failing_scope_is_reported_without_skipping_the_rest(tmp_path: Path, wheel_app) -> None:
+    mkt = tmp_path / "mkt"
+    pid = f"{PLUGIN}@cisternal-local"
+    claude, log = _fake_claude(
+        tmp_path,
+        installed=[(pid, "0.1+old", "project"), (pid, "0.1+old", "user")],
+        marketplaces={"cisternal-local": str(mkt)},
+        fail_update_scopes=("project",),
+    )
+    _run(wheel_app, ["update", "--marketplace", str(mkt), "--claude-bin", str(claude)], exit_code=1)
+    assert ["plugin", "update", pid, "--scope", "user"] in _calls(log)
+
+
+def test_update_command_without_cli_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cisternal.plugin import PluginSpec
+
+    spec = PluginSpec(name="x", package="xpkg")
+    monkeypatch.setattr(sys, "argv", ["/venv/lib/xpkg/__main__.py", "plugin"])
+    assert spec.update_command() == "python -m xpkg plugin update claude"
+    monkeypatch.setattr(sys, "argv", ["/venv/bin/xp", "plugin"])
+    assert spec.update_command() == "xp plugin update claude"
 
 
 def test_update_all_defers_to_the_owning_tool(

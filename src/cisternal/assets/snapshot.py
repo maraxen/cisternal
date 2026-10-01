@@ -50,6 +50,9 @@ def loads_snapshot(text: str) -> AssetBundle:
         found = doc.get("schema") if isinstance(doc, dict) else None
         msg = f"unsupported bundle snapshot schema {found!r} (expected {SNAPSHOT_SCHEMA})"
         raise ValueError(msg)
+    if not isinstance(doc.get("bundle"), dict):
+        msg = "malformed bundle snapshot: 'bundle' must be an object"
+        raise ValueError(msg)
     return bundle_from_dict(doc["bundle"])
 
 
@@ -101,6 +104,6 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
             ),
             marketplace=MarketplaceAsset(**marketplace) if marketplace else None,
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
         msg = f"malformed bundle snapshot: {exc!r}"
         raise ValueError(msg) from exc

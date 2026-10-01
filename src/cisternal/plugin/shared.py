@@ -17,11 +17,11 @@ import os
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from cisternal.assets.bundle import AssetBundle, BundleMetadata
+from cisternal.assets.bundle import AssetBundle
 
 _log = logging.getLogger("cisternal.plugin")
 
@@ -93,29 +93,11 @@ def publish_bundle(
 
     # The standalone [plugin.marketplace] table is for single-plugin
     # self-install; a shared marketplace owns its own marketplace.json.
-    base = AssetBundle(
-        metadata=bundle.metadata,
-        agents=bundle.agents,
-        skills=bundle.skills,
-        commands=bundle.commands,
-        hook_specs=bundle.hook_specs,
-        mcp_servers=bundle.mcp_servers,
-    )
+    base = replace(bundle, marketplace=None)
     # Two passes: the first (base version) derives a content digest; the
     # second bakes the final, cache-busting version into plugin.json.
     version = content_version(base.metadata.version, emitter.emit(base))
-    versioned = AssetBundle(
-        metadata=BundleMetadata(
-            name=base.metadata.name,
-            version=version,
-            description=base.metadata.description,
-        ),
-        agents=base.agents,
-        skills=base.skills,
-        commands=base.commands,
-        hook_specs=base.hook_specs,
-        mcp_servers=base.mcp_servers,
-    )
+    versioned = replace(base, metadata=replace(base.metadata, version=version))
     files = emitter.emit(versioned)
 
     name = base.metadata.name
@@ -197,12 +179,20 @@ def handle_shadowed(results: list[PublishResult], *, prune: bool) -> None:
         print(f"pruned: {path} (duplicate of plugin {r.name}) -> {dest}")
 
 
-def installed_plugins(claude_bin: str) -> dict[str, str | None] | None:
-    """``{plugin_id: version}`` from ``claude plugin list --json``, or None if unavailable.
+@dataclass(frozen=True)
+class InstalledPlugin:
+    id: str
+    version: str | None
+    scope: str | None
 
-    None (with a printed reason) means the listing could not be obtained --
-    a missing binary or unparseable output -- which callers treat as "unknown",
-    never as "nothing installed".
+
+def installed_entries(claude_bin: str) -> list[InstalledPlugin] | None:
+    """One entry per install from ``claude plugin list --json``, or None if unavailable.
+
+    A plugin installed at several scopes yields several entries. None (with a
+    printed reason) means the listing could not be obtained -- a missing binary
+    or unparseable output -- which callers treat as "unknown", never as
+    "nothing installed".
     """
     try:
         listing = subprocess.run(
@@ -215,10 +205,19 @@ def installed_plugins(claude_bin: str) -> dict[str, str | None] | None:
         print(f"claude: `plugin list` failed: {listing.stderr.strip()}")
         return None
     try:
-        return {p["id"]: p.get("version") for p in json.loads(listing.stdout)}
+        return [
+            InstalledPlugin(id=p["id"], version=p.get("version"), scope=p.get("scope"))
+            for p in json.loads(listing.stdout)
+        ]
     except (ValueError, KeyError, TypeError):
         print("claude: could not parse `plugin list --json` output")
         return None
+
+
+def installed_plugins(claude_bin: str) -> dict[str, str | None] | None:
+    """``{plugin_id: version}`` view of :func:`installed_entries` (last scope wins)."""
+    entries = installed_entries(claude_bin)
+    return None if entries is None else {e.id: e.version for e in entries}
 
 
 def refresh_claude(

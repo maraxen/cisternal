@@ -166,9 +166,17 @@ The first match wins (`<tool> plugin info` shows which):
 2. `$CISTERNAL_PLUGIN_MARKETPLACE` (`none`/empty disables)
 3. `[tool.cisternal] plugin_marketplace = "PATH"` in the nearest `pyproject.toml`
 4. `plugin_marketplace = "PATH"` in `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`
-5. `~/.cisternal/claude-plugin-marketplace`, **only if it already exists** (machines set up before this resolver)
 
 If none of these is set, the command fails and says how to set one. A malformed config file is an error; it is never skipped.
+
+There is no built-in default. On a machine that used `publish-shared` before
+this resolver existed, add the old default to the per-machine config once
+(the error message prints this line when that directory exists):
+
+```toml
+# ~/.config/cisternal/config.toml
+plugin_marketplace = "~/.cisternal/claude-plugin-marketplace"
+```
 
 ### Surfaces
 

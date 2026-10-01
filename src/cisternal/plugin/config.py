@@ -9,12 +9,12 @@ Resolution order (first hit wins; :func:`marketplace_root_source` says which):
 3. ``[tool.cisternal] plugin_marketplace`` in the nearest ``pyproject.toml``
    at or above the start dir (relative paths resolve against that file);
 4. ``plugin_marketplace`` in ``${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml``
-   (per machine; relative paths resolve against the config dir);
-5. legacy: ``~/.cisternal/claude-plugin-marketplace`` **only if it already
-   exists** -- machines set up before this resolver keep working, but a fresh
-   machine is never given a silently-invented path.
+   (per machine; relative paths resolve against the config dir).
 
-Otherwise nothing is configured and callers fail with :data:`HOW_TO_CONFIGURE`.
+Otherwise nothing is configured and callers fail with :data:`HOW_TO_CONFIGURE`
+-- there is no default path in this library; a machine's default lives in its
+config file. When the pre-resolver location (``~/.cisternal/claude-plugin-marketplace``)
+exists, the error names the exact config line that keeps using it.
 A malformed pyproject/config file raises ``ValueError`` rather than being
 skipped.
 """
@@ -28,6 +28,7 @@ from pathlib import Path
 ENV_VAR = "CISTERNAL_PLUGIN_MARKETPLACE"
 CONFIG_KEY = "plugin_marketplace"
 PYPROJECT_TABLE = "cisternal"  # [tool.cisternal]
+# Where publish-shared used to default to; only ever suggested, never used.
 LEGACY_ROOT = Path("~/.cisternal/claude-plugin-marketplace")
 
 HOW_TO_CONFIGURE = (
@@ -59,13 +60,21 @@ def _value(raw: object, where: Path) -> str:
     return raw.strip()
 
 
+def _table(raw: object, where: Path, name: str) -> dict:
+    if not isinstance(raw, dict):
+        msg = f"{where}: [{name}] must be a table, got {type(raw).__name__}"
+        raise ValueError(msg)
+    return raw
+
+
 def _nearest_pyproject_value(start: Path) -> tuple[Path, Path] | None:
     """(resolved root, pyproject path) from the nearest pyproject with the key."""
     for directory in (start, *start.parents):
         candidate = directory / "pyproject.toml"
         if not candidate.is_file():
             continue
-        table = _read_toml(candidate).get("tool", {}).get(PYPROJECT_TABLE, {})
+        tool = _table(_read_toml(candidate).get("tool", {}), candidate, "tool")
+        table = _table(tool.get(PYPROJECT_TABLE, {}), candidate, f"tool.{PYPROJECT_TABLE}")
         if CONFIG_KEY in table:
             raw = _value(table[CONFIG_KEY], candidate)
             return (directory / Path(raw).expanduser()).resolve(), candidate
@@ -99,10 +108,6 @@ def marketplace_root_source(
             raw = _value(doc[CONFIG_KEY], config)
             return (config.parent / Path(raw).expanduser()).resolve(), str(config)
 
-    legacy = LEGACY_ROOT.expanduser()
-    if legacy.is_dir():
-        return legacy, f"legacy default (existing {LEGACY_ROOT})"
-
     return None, "unconfigured"
 
 
@@ -111,5 +116,10 @@ def resolve_marketplace_root(explicit: Path | str | None = None) -> Path:
     root, source = marketplace_root_source(explicit)
     if root is None:
         msg = f"{HOW_TO_CONFIGURE} [resolver: {source}]"
+        if LEGACY_ROOT.expanduser().is_dir():
+            msg += (
+                f". To keep using the existing {LEGACY_ROOT}, add to {user_config_path()}: "
+                f'{CONFIG_KEY} = "{LEGACY_ROOT.expanduser()}"'
+            )
         raise ValueError(msg)
     return root

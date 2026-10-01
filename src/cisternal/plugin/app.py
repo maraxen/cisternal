@@ -84,7 +84,11 @@ class PluginSpec:
     cli: str | None = None
 
     def update_command(self, subapp: str = "plugin") -> str:
-        prog = self.cli or Path(sys.argv[0]).name or self.package
+        prog = self.cli
+        if not prog:
+            argv0 = Path(sys.argv[0]).name
+            # `python -m pkg` gives __main__.py; a script path ends in .py.
+            prog = argv0 if argv0 and not argv0.endswith(".py") else f"python -m {self.package}"
         return f"{prog} {subapp} update claude"
 
 
@@ -122,15 +126,38 @@ def _manifest_plugin_name(path: Path) -> str | None:
     return str(plugin.get("name") or "") if isinstance(plugin, dict) else None
 
 
+def _is_editable_install(spec: PluginSpec) -> bool | None:
+    """PEP 610: True/False from the dist's ``direct_url.json``; None without metadata."""
+    try:
+        dist = importlib.metadata.distribution(spec.distribution or spec.package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    raw = dist.read_text("direct_url.json")
+    if raw is None:
+        return False  # installed from an index: a regular, non-editable install
+    try:
+        return bool(json.loads(raw).get("dir_info", {}).get("editable", False))
+    except (ValueError, AttributeError):
+        return False
+
+
 def find_checkout_manifest(spec: PluginSpec) -> Path | None:
     """The tool's own manifest when the package is imported from a source checkout.
 
-    Never searches from inside ``site-packages`` (a wheel install), and only
-    accepts a manifest whose ``[plugin].name`` is this plugin's -- so a venv
-    nested in some *other* project never picks up that project's manifest.
+    Searches only for an editable install (PEP 610 ``direct_url.json``); a
+    package with no dist metadata at all (bare ``PYTHONPATH``/``src`` on the
+    path) is treated as a checkout unless it sits under ``site-packages`` or
+    ``dist-packages``. Only a manifest whose ``[plugin].name`` is this plugin's
+    is accepted, so a tree nested in some *other* project never picks up that
+    project's manifest.
     """
     pkg_dir = _package_dir(spec.package)
-    if pkg_dir is None or "site-packages" in pkg_dir.parts:
+    if pkg_dir is None:
+        return None
+    editable = _is_editable_install(spec)
+    if editable is False:
+        return None
+    if editable is None and {"site-packages", "dist-packages"} & set(pkg_dir.parts):
         return None
     for directory in pkg_dir.parents:
         candidate = directory / spec.manifest
@@ -242,45 +269,46 @@ def _check(result: subprocess.CompletedProcess[str], what: str) -> None:
         raise PluginError(f"`{what}` failed (exit {result.returncode}): {detail}")
 
 
-def _registered_marketplaces(claude_bin: str) -> dict[str, str | None]:
-    """``{name: local path}`` from ``claude plugin marketplace list --json``."""
+def _registered_marketplaces(claude_bin: str) -> dict[str, dict[str, Any]]:
+    """``{name: entry}`` from ``claude plugin marketplace list --json``."""
     result = _claude([claude_bin, "plugin", "marketplace", "list", "--json"])
     _check(result, "claude plugin marketplace list --json")
     try:
-        return {m["name"]: m.get("path") for m in json.loads(result.stdout)}
+        return {m["name"]: m for m in json.loads(result.stdout)}
     except (ValueError, KeyError, TypeError) as exc:
         raise PluginError(f"could not parse `claude plugin marketplace list --json`: {exc}") from exc
 
 
-def _ensure_marketplace(root: Path, name: str, *, claude_bin: str) -> None:
-    registered = _registered_marketplaces(claude_bin)
-    if name in registered:
-        path = registered[name]
-        if path is not None and Path(path).expanduser().resolve() != root:
-            raise PluginError(
-                f"Claude Code already has a marketplace named {name!r} at {path}, not {root}; "
-                f"remove it (`{claude_bin} plugin marketplace remove {name}`) or point "
-                "--marketplace at that directory"
-            )
-        return
-    _check(
-        _claude([claude_bin, "plugin", "marketplace", "add", str(root)]),
-        f"claude plugin marketplace add {root}",
-    )
-    print(f"claude: registered marketplace {name} -> {root}")
+def _marketplace_is_registered(root: Path, name: str, *, claude_bin: str) -> bool:
+    """Whether *name* is already registered as *root*. Raises on any other registration.
+
+    Only a ``directory`` marketplace at *root* counts: a same-named one from a
+    remote repo (no local ``path``) or another directory would make
+    ``plugin install <tool>@<name>`` install from there, silently ignoring the
+    bundle just published into *root*.
+    """
+    entry = _registered_marketplaces(claude_bin).get(name)
+    if entry is None:
+        return False
+    local = entry.get("path") if entry.get("source") == "directory" else None
+    if local is None or Path(local).expanduser().resolve() != root:
+        where = local or entry.get("repo") or entry.get("url") or entry.get("source") or "elsewhere"
+        raise PluginError(
+            f"Claude Code already has a marketplace named {name!r} ({where}), not {root}; "
+            f"remove it (`{claude_bin} plugin marketplace remove {name}`) or point "
+            "--marketplace at the directory it uses"
+        )
+    return True
 
 
-def _update_installed(
-    plugin_id: str, mkt_name: str, scope: str | None, *, claude_bin: str
-) -> None:
-    _check(
-        _claude([claude_bin, "plugin", "marketplace", "update", mkt_name]),
-        f"claude plugin marketplace update {mkt_name}",
-    )
-    argv = [claude_bin, "plugin", "update", plugin_id]
-    if scope:
-        argv += ["--scope", scope]
-    _check(_claude(argv), " ".join(argv[1:]))
+def _target_marketplace_name(root: Path) -> str:
+    """The name *root* has (or will get on first publish)."""
+    from cisternal.export.marketplace import DEFAULT_MARKETPLACE_NAME  # noqa: PLC0415
+    from cisternal.plugin.shared import marketplace_name  # noqa: PLC0415
+
+    if (root / ".claude-plugin" / "marketplace.json").is_file():
+        return marketplace_name(root)
+    return DEFAULT_MARKETPLACE_NAME
 
 
 def claude_install(
@@ -292,47 +320,70 @@ def claude_install(
     claude_bin: str,
     require_installed: bool,
 ) -> None:
-    """Publish to the shared marketplace, then install or update in Claude Code."""
+    """Install or update in Claude Code via the shared marketplace.
+
+    Every refusal (a conflicting marketplace registration, ``update`` with
+    nothing installed, an unreadable listing) is checked before anything is
+    written, so a failing command leaves the marketplace untouched.
+    """
     from cisternal.plugin.shared import (  # noqa: PLC0415
         handle_shadowed,
-        marketplace_name,
+        installed_entries,
         publish_bundle,
     )
 
+    mkt_name = _target_marketplace_name(marketplace)
+    plugin_id = f"{bundle.metadata.name}@{mkt_name}"
+    registered = _marketplace_is_registered(marketplace, mkt_name, claude_bin=claude_bin)
+    entries = installed_entries(claude_bin)
+    if entries is None:
+        raise PluginError("could not list installed Claude Code plugins (see above)")
+    installs = [e for e in entries if e.id == plugin_id]
+    if require_installed and not installs:
+        raise PluginError(f"{plugin_id} is not installed; run `plugin install claude` first")
+
     result = publish_bundle(bundle, marketplace=marketplace, source=record)
-    mkt_name = marketplace_name(marketplace)
-    plugin_id = f"{result.name}@{mkt_name}"
     print(f"published {result.name}@{result.version} -> {result.out}")
     handle_shadowed([result], prune=False)
+    if not registered:
+        _check(
+            _claude([claude_bin, "plugin", "marketplace", "add", str(marketplace)]),
+            f"claude plugin marketplace add {marketplace}",
+        )
+        print(f"claude: registered marketplace {mkt_name} -> {marketplace}")
 
-    _ensure_marketplace(marketplace, mkt_name, claude_bin=claude_bin)
-    installed = _installed(claude_bin)
-    if plugin_id not in installed:
-        if require_installed:
-            raise PluginError(f"{plugin_id} is not installed; run `plugin install claude` first")
+    if not installs:
         _check(
             _claude([claude_bin, "plugin", "install", plugin_id, "--scope", scope]),
             f"claude plugin install {plugin_id} --scope {scope}",
         )
         print(f"installed {plugin_id} (scope={scope}); restart Claude Code to load it")
         return
-    current, installed_scope = installed[plugin_id]
-    if current == result.version:
+
+    stale = [e for e in installs if e.version != result.version]
+    if not stale:
         print(f"{plugin_id} is already up to date ({result.version})")
         return
-    # Update at the scope it was installed at, not the --scope default.
-    _update_installed(plugin_id, mkt_name, installed_scope or scope, claude_bin=claude_bin)
-    print(f"{plugin_id}: {current} -> {result.version}; restart Claude Code to load it")
-
-
-def _installed(claude_bin: str) -> dict[str, tuple[str | None, str | None]]:
-    """``{plugin_id: (version, scope)}`` from ``claude plugin list --json``."""
-    result = _claude([claude_bin, "plugin", "list", "--json"])
-    _check(result, "claude plugin list --json")
-    try:
-        return {p["id"]: (p.get("version"), p.get("scope")) for p in json.loads(result.stdout)}
-    except (ValueError, KeyError, TypeError) as exc:
-        raise PluginError(f"could not parse `claude plugin list --json`: {exc}") from exc
+    _check(
+        _claude([claude_bin, "plugin", "marketplace", "update", mkt_name]),
+        f"claude plugin marketplace update {mkt_name}",
+    )
+    # Update each stale install at the scope it was installed at. A
+    # project/local install belonging to another project can fail from this
+    # cwd; report it rather than abort the others.
+    failures: list[str] = []
+    for e in stale:
+        argv = [claude_bin, "plugin", "update", plugin_id]
+        if e.scope:
+            argv += ["--scope", e.scope]
+        upd = _claude(argv)
+        if upd.returncode != 0:
+            failures.append(f"scope={e.scope}: {(upd.stderr or upd.stdout).strip()}")
+        else:
+            print(f"{plugin_id} (scope={e.scope}): {e.version} -> {result.version}")
+    if failures:
+        raise PluginError(f"`claude plugin update {plugin_id}` failed for " + "; ".join(failures))
+    print("restart Claude Code to load it")
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +478,7 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
                 claude_bin=claude_bin,
                 require_installed=require_installed,
             )
-        except (PluginError, ValueError, RuntimeError) as exc:
+        except (PluginError, ValueError, RuntimeError, OSError) as exc:
             _fail(exc)
 
     @app.command(name="install")
@@ -496,12 +547,14 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
                     f"{', '.join(sorted(list_emitter_surfaces()))}"
                 )
             bundle, source = load_bundle(spec, manifest=manifest)
-        except PluginError as exc:
+            emitter = get_emitter(
+                surface, emit_command_bodies=emit_command_bodies and surface == "claude"
+            )
+            if emitter is None:
+                raise PluginError(f"could not load emitter for surface {surface!r}")
+            result = write_bundle(emitter.emit(bundle), out, dry_run=dry_run)
+        except (PluginError, ValueError, OSError) as exc:
             _fail(exc)
-        emitter = get_emitter(surface, emit_command_bodies=emit_command_bodies and surface == "claude")
-        if emitter is None:
-            _fail(PluginError(f"could not load emitter for surface {surface!r}"))
-        result = write_bundle(emitter.emit(bundle), out, dry_run=dry_run)
         for path, sha256 in result.files:
             print(f"{path}  {sha256}" if dry_run else path)
         if not dry_run:
@@ -516,7 +569,10 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
             source = locate_bundle(spec).describe()
         except PluginError as exc:
             source = f"none ({exc})"
-        root, layer = marketplace_root_source()
+        try:
+            root, layer = marketplace_root_source()
+        except ValueError as exc:
+            root, layer = None, f"error: {exc}"
         print(f"plugin:      {spec.name} (package {spec.package})")
         print(f"bundle:      {source}")
         print(f"marketplace: {root if root else '-'} [{layer}]")
