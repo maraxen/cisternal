@@ -36,10 +36,14 @@ import inspect
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, Mapping, cast
 
 from cisternal._typed_callable import TaggedCallable
-from cisternal.registration.cli_contract import _resolve_cli_hints
+from cisternal.registration.cli_contract import (
+    CliContract,
+    _build_cli_callable,
+    _resolve_cli_hints,
+)
 from cisternal.registration.compose import apply_recovery_sync, compose_mcp_callable
 from cisternal.registration.errors import CisternalWireError
 from cisternal.registration.registry import snapshot
@@ -165,6 +169,203 @@ def _make_cli_cmd(
 
 
 # ---------------------------------------------------------------------------
+# wire-time pre-pass (spec 5.1)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _CliPlan:
+    """One entry's pre-built CLI registration, produced by :func:`_plan_cli`."""
+
+    cli_cmd: Any
+    cli_name: str
+    group: str | None
+    command: str  # the joined path: ctx.command and WiredRegistry.cli_commands
+    extra: dict[str, Any]  # ``help=`` / ``show=``, only when the contract sets them
+
+
+def _check_contract_args(
+    snapshot_view: Mapping[str, Any],
+    cli_contract: CliContract | None,
+    cli_contracts: Mapping[str, CliContract] | None,
+    registry: str,
+) -> None:
+    """Stage 1 of the pre-pass: the checks that run even when ``app is None``."""
+    if cli_contract is not None and not isinstance(cli_contract, CliContract):
+        raise TypeError(
+            f"cisternal.wire(): cli_contract must be a CliContract or None, "
+            f"got {cli_contract!r}"
+        )
+    if not cli_contracts:
+        return
+    by_name = {entry.name: entry for entry in snapshot_view.values()}
+    for key, contract in cli_contracts.items():
+        if not isinstance(contract, CliContract):
+            raise TypeError(
+                f"cisternal.wire(): cli_contracts[{key!r}] must be a CliContract, "
+                f"got {contract!r}"
+            )
+        if key not in by_name:
+            raise CisternalWireError(
+                message=(
+                    f"cisternal.wire(): cli_contracts names {key!r}, which is not a "
+                    f"tool of registry {registry!r}"
+                )
+            )
+        if by_name[key].cli_contract is not None:
+            raise CisternalWireError(
+                message=(
+                    f"cisternal.wire(): tool {key!r} has both a decorator "
+                    "cli_contract and a cli_contracts entry; use one"
+                )
+            )
+
+
+def _effective_contract(
+    entry: Any,
+    cli_contract: CliContract | None,
+    cli_contracts: Mapping[str, CliContract] | None,
+) -> CliContract | None:
+    """T.merged_over(W) when the tool has a contract, else W (spec 5.1)."""
+    tool_contract = entry.cli_contract
+    if tool_contract is None and cli_contracts:
+        tool_contract = cli_contracts.get(entry.name)
+    if tool_contract is None:
+        return cli_contract
+    try:
+        return tool_contract.merged_over(cli_contract)
+    except ValueError as exc:
+        raise CisternalWireError(message=f"tool {entry.name!r}: {exc}") from exc
+
+
+def _where(level: tuple[str, ...]) -> str:
+    return f"group {' '.join(level)!r}" if level else "the root"
+
+
+def _plan_name(
+    planned: dict[tuple[str, ...], dict[str, str]],
+    level: tuple[str, ...],
+    name: str,
+    kind: str,
+) -> None:
+    """Record *name* as planned at *level*; raise if it clashes with an earlier plan."""
+    kinds = planned.setdefault(level, {})
+    previous = kinds.get(name)
+    if previous is None:
+        kinds[name] = kind
+    elif not (previous == "group" and kind == "group"):
+        raise CisternalWireError(
+            message=(
+                f"cisternal.wire(): CLI name {name!r} is planned twice at "
+                f"{_where(level)} (as a {previous} and as a {kind})"
+            )
+        )
+
+
+def _resolved_default_parameter(*apps: Any) -> Any:
+    """The ``default_parameter`` cyclopts applies below *apps* (root first, A28)."""
+    chain = [
+        p
+        for p in (getattr(a, "default_parameter", None) for a in apps)
+        if p is not None
+    ]
+    if not chain:
+        return None
+    from cyclopts import Parameter
+
+    return Parameter.combine(*chain)
+
+
+def _plan_cli(
+    app: Any,
+    snapshot_view: Mapping[str, Any],
+    cli_contract: CliContract | None,
+    cli_contracts: Mapping[str, CliContract] | None,
+    recovery: Any,
+    cli_telemetry: bool,
+) -> dict[str, _CliPlan]:
+    """Stage 2 of the pre-pass (``app is not None``): build every CLI callable.
+
+    For each entry, in order: resolve the effective contract; check the planned
+    and already-present names; probe the (single-segment) group read-only against
+    ``_CLI_SUBAPPS``; compute the target App's ``default_parameter``; build the
+    callable. It mounts nothing and writes no cache entry, so any
+    :class:`CisternalWireError` leaves *app* untouched.
+    """
+    planned: dict[tuple[str, ...], dict[str, str]] = {}
+    plans: dict[str, _CliPlan] = {}
+    for entry in snapshot_view.values():
+        effective = _effective_contract(entry, cli_contract, cli_contracts)
+        cli_name = entry.cli_name or entry.name
+
+        group_path: tuple[str, ...] = ()
+        if entry.cli_group is not None:
+            group_path = (
+                (entry.cli_group,)
+                if isinstance(entry.cli_group, str)
+                else tuple(entry.cli_group)
+            )
+            if len(group_path) != 1:
+                # T2 widened ToolEntry.cli_group to ``str | tuple[str, ...]``.
+                # Nested group paths are implemented in T4g; until then a
+                # multi-segment tuple is rejected rather than mis-mounted.
+                raise CisternalWireError(
+                    message=(
+                        f"cisternal.wire(): tool {entry.name!r} has nested "
+                        f"cli_group {entry.cli_group!r}; nested groups are not "
+                        "supported yet"
+                    )
+                )
+
+        # Planned names: each group segment at its parent level, the leaf at
+        # the group's level.
+        for i, segment in enumerate(group_path):
+            _plan_name(planned, group_path[:i], segment, "group")
+        _plan_name(planned, group_path, cli_name, "command")
+
+        # Read-only probe: the group, if an earlier call already created it.
+        sub_app = _CLI_SUBAPPS.get((id(app), group_path[0])) if group_path else None
+
+        # A leaf already `in` an existing target level is a clash. Levels
+        # cisternal will create are empty; a group segment that already exists
+        # is not a clash (adoption and rejection are T4g's).
+        target = sub_app if group_path else app
+        if target is not None and cli_name in target:
+            raise CisternalWireError(
+                message=(
+                    f"cisternal.wire(): tool {entry.name!r}: CLI name {cli_name!r} "
+                    f"is already registered at {_where(group_path)}"
+                )
+            )
+
+        extra: dict[str, Any] = {}
+        if effective is not None:
+            if effective.help is not None:
+                extra["help"] = effective.help
+            if effective.show is not None:
+                extra["show"] = effective.show
+
+        command = " ".join((*group_path, cli_name))
+        cli_cmd = _build_cli_callable(
+            entry.fn,
+            tool_name=entry.name,
+            command=command,
+            contract=effective,
+            recovery=recovery,
+            telemetry=cli_telemetry,
+            app_default_parameter=_resolved_default_parameter(app, sub_app),
+        )
+        plans[entry.name] = _CliPlan(
+            cli_cmd=cli_cmd,
+            cli_name=cli_name,
+            group=group_path[0] if group_path else None,
+            command=command,
+            extra=extra,
+        )
+    return plans
+
+
+# ---------------------------------------------------------------------------
 # wire()
 # ---------------------------------------------------------------------------
 
@@ -179,6 +380,8 @@ def wire(
     validate: bool = True,
     recovery: tuple[Callable[[BaseException], bool], Callable[[], None]] | None = None,
     cli_telemetry: bool = True,
+    cli_contract: CliContract | None = None,
+    cli_contracts: Mapping[str, CliContract] | None = None,
 ) -> WiredRegistry:
     """Snapshot the named registry and register each tool on *server* (and *app*).
 
@@ -197,7 +400,11 @@ def wire(
            it registers flat on *app* directly (default, unchanged
            behavior). The CLI callable dispatches to the original function
            and, unless ``cli_telemetry=False``, is instrumented with
-           :func:`~cisternal.adapters.cli.timed_command`.
+           :func:`~cisternal.adapters.cli.timed_command`. Every CLI callable
+           is built, and every name and contract checked, in a pre-pass that
+           runs before the first ``add_tool`` / ``app.command`` call, so a
+           :class:`CisternalWireError` raised there leaves *server* and *app*
+           untouched (spec 5.1).
         4. Validate *expected* names (AC-M2-9 / AC-M2-10).
         5. Return a :class:`WiredRegistry` instance (TBD-M2-5).
 
@@ -264,12 +471,32 @@ def wire(
                    ``None`` (default) preserves today's exact behaviour for
                    every other cisternal consumer.
 
+        cli_contract:
+                   Optional :class:`~cisternal.registration.cli_contract.CliContract`
+                   applied to every CLI command of this call (W, the default).
+                   A per-tool contract refines it field by field
+                   (``T.merged_over(W)``, spec 5.1). ``None`` (default, and the
+                   case when no tool has a contract either) keeps the legacy
+                   CLI closure unchanged. Inert with ``app=None``.
+        cli_contracts:
+                   Optional ``{tool_name: CliContract}`` applied at tool (T)
+                   precedence, for tools you cannot decorate. A key that names
+                   no tool of *registry*, or a tool that also has a decorator
+                   ``cli_contract``, raises :class:`CisternalWireError` (also
+                   when ``app is None``).
+
     Returns:
         A :class:`WiredRegistry` recording which tools were wired.
 
     Raises:
         CisternalWireError: If *expected* names are absent from the snapshot
-            and ``validate=True``.
+            and ``validate=True``; or, before anything is registered, if
+            ``cli_contracts`` has an unknown key or a tool with two contracts,
+            a W/T option name is duplicated, a CLI callable cannot be built
+            (unresolvable parameter annotation, option collision), or two CLI
+            names clash at one level or with a name already on *app*.
+        TypeError: If *cli_contract* or a ``cli_contracts`` value is not a
+            :class:`CliContract`.
     """
     # C6: snapshot at wire-time; post-wire decorations are excluded.
     snapshot_view = snapshot(registry)
@@ -286,6 +513,17 @@ def wire(
                     registry,
                     missing,
                 )
+
+    _check_contract_args(snapshot_view, cli_contract, cli_contracts, registry)
+
+    # Wire-time pre-pass (spec 5.1): everything that can raise a
+    # CisternalWireError runs here, before the first add_tool/app.command call,
+    # so a failure leaves both `server` and `app` untouched.
+    cli_plans: dict[str, _CliPlan] = {}
+    if app is not None:
+        cli_plans = _plan_cli(
+            app, snapshot_view, cli_contract, cli_contracts, recovery, cli_telemetry
+        )
 
     mcp_tool_names: list[str] = []
     cli_command_names: list[str] = []
@@ -324,36 +562,15 @@ def wire(
         #   - The MCP callable (above) is an unmodified passthrough — MCP
         #     exceptions propagate to FastMCP/CisternalMiddleware, which is
         #     M1's responsibility.
+        # The callable was built (and every check run) in the pre-pass.
         if app is not None:
-            # Capture entry.fn in the closure to avoid late-binding.
-            _fn = entry.fn
-            _name = entry.name
-            _cli_name = entry.cli_name or entry.name
-
-            cli_cmd = _make_cli_cmd(
-                _fn, _name, recovery=recovery, telemetry=cli_telemetry
-            )
-            if entry.cli_group is not None:
-                _group = entry.cli_group
-                if not isinstance(_group, str):
-                    # T2 widened ToolEntry.cli_group to ``str | tuple[str, ...]``.
-                    # Nested group paths are implemented in T4g; until then a
-                    # multi-segment tuple is rejected rather than mis-mounted.
-                    if len(_group) != 1:
-                        raise CisternalWireError(
-                            message=(
-                                f"cisternal.wire(): tool {_name!r} has nested "
-                                f"cli_group {_group!r}; nested groups are not "
-                                "supported yet"
-                            )
-                        )
-                    _group = _group[0]
-                target_app = _get_or_create_subapp(app, _group)
-                target_app.command(name=_cli_name)(cli_cmd)
-                cli_command_names.append(f"{_group} {_cli_name}")
+            plan = cli_plans[entry.name]
+            if plan.group is not None:
+                target_app = _get_or_create_subapp(app, plan.group)
+                target_app.command(name=plan.cli_name, **plan.extra)(plan.cli_cmd)
             else:
-                app.command(name=_cli_name)(cli_cmd)
-                cli_command_names.append(_cli_name)
+                app.command(name=plan.cli_name, **plan.extra)(plan.cli_cmd)
+            cli_command_names.append(plan.command)
 
     return WiredRegistry(
         registry_name=registry,

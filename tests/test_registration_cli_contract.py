@@ -2199,3 +2199,797 @@ def test_bathos_style_mutated_annotations_work_on_the_contract_path():
     fn = bathos_style_tools.tool_with_mutated_annotations
     app = _app_for(fn, CliContract())
     assert _exit(app, ["tool_with_mutated_annotations", "-n", "3"]) == 6
+
+
+# =============================================================================
+# T4: wire() integration (pre-pass, cli_contract / cli_contracts, help / show)
+#
+# Spec rev 8, section 5.1 and tests 3b, 7, 9 (contract variant), 9d (contract
+# half), 16a (wire() half), 16b, 21, 23, 34, 35, 36. Groups beyond a single
+# segment (adoption, nesting, cli_group_help) are T4g's and are not exercised.
+# =============================================================================
+
+import asyncio  # noqa: E402
+
+import fastmcp  # noqa: E402
+
+from cisternal.registration import wired as wired_module  # noqa: E402
+
+
+def _server_tools(server: fastmcp.FastMCP) -> list[str]:
+    return sorted(t.name for t in asyncio.run(server.list_tools()))
+
+
+def _state(server: fastmcp.FastMCP, app: App) -> tuple[list[str], list[str], set[Any]]:
+    """What a failed wire() must leave unchanged (spec 5.1, test 35)."""
+    return (_server_tools(server), sorted(app), set(wired_module._CLI_SUBAPPS))
+
+
+@pytest.fixture(autouse=True)
+def _clear_subapp_cache():
+    """Isolate the module-level sub-app cache between tests."""
+    saved = dict(wired_module._CLI_SUBAPPS)
+    yield
+    wired_module._CLI_SUBAPPS.clear()
+    wired_module._CLI_SUBAPPS.update(saved)
+
+
+def _assert_wire_error_leaves_everything_untouched(
+    app: App,
+    match: str,
+    **wire_kwargs: Any,
+) -> CisternalWireError:
+    server = fastmcp.FastMCP("t4")
+    before = _state(server, app)
+    with pytest.raises(CisternalWireError, match=match) as excinfo:
+        wire(server, app, registry=REGISTRY, **wire_kwargs)
+    assert _state(server, app) == before
+    return excinfo.value
+
+
+# --- test 9 (contract variant) -----------------------------------------------
+
+
+_PATH_ANNOTATED = Annotated[Path, Parameter(name=["--path", "-p"], help="A path.")]
+
+
+@pytest.mark.parametrize(
+    ("fn", "expected"),
+    [
+        (future_annot_tools.tool_with_cyclopts_param, {"p": _PATH_ANNOTATED}),
+        (future_annot_tools.tool_with_path_param, {"p": Path}),
+        (
+            future_annot_tools.tool_with_annotated_param,
+            {"p": Annotated[Path, "description"]},
+        ),
+        (future_annot_tools.tool_with_type_checking_return, {}),
+    ],
+    ids=["cyclopts-param", "path", "annotated", "type-checking-return"],
+)
+def test_9_contract_variant_registers_with_resolved_hints(fn, expected):
+    register(fn, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    registered = app[fn.__name__].default_command
+
+    assert {k: v for k, v in registered.__annotations__.items() if k != "json_out"} == expected
+    assert "json_out" in registered.__annotations__
+    assert "return" not in registered.__annotations__
+    assert all(not isinstance(v, str) for v in registered.__annotations__.values())
+    assert not hasattr(registered, "__wrapped__")
+
+
+def test_9_contract_variant_empty_contract_keeps_the_signature(capsys):
+    fn = future_annot_tools.tool_with_cyclopts_param
+    register(fn, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract())
+    registered = app[fn.__name__].default_command
+
+    assert inspect.signature(registered) == inspect.signature(fn)
+    assert inspect.signature(registered).return_annotation == "str"
+    assert _run(app, ["tool_with_cyclopts_param", "-p", "/tmp/x"]) == 0
+    assert _stdout(capsys) == "/tmp/x\n"
+
+
+def test_9_contract_variant_type_checking_return_tool_parses():
+    fn = future_annot_tools.tool_with_type_checking_return
+    register(fn, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract())
+    assert _run(app, [fn.__name__]) == 0
+
+
+def test_9_contract_variant_decorator_contract_resolves_the_same_way(capsys):
+    fn = future_annot_tools.tool_with_cyclopts_param
+    register(fn, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    registered = app[fn.__name__].default_command
+    assert registered.__annotations__["p"] == _PATH_ANNOTATED
+    assert "json_out" in registered.__annotations__  # the contract path was taken
+    assert _run(app, [fn.__name__, "--path", "/tmp/y"]) == 0
+    assert _stdout(capsys) == "/tmp/y\n"
+
+
+def test_16c_unresolvable_parameter_through_wire_names_tool_and_parameter():
+    fn = future_annot_tools.tool_with_unresolvable_param
+    register(fn, registry=REGISTRY)
+    err = _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "tool_with_unresolvable_param", cli_contract=CliContract()
+    )
+    assert "'x'" in str(err)
+
+
+# --- test 9d (contract half) -------------------------------------------------
+
+
+def test_9d_contract_half_wrapped_timed_tool_registers_and_parses(capsys):
+    fn = wrapped_future_tools.wrapped_tool
+    register(fn, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    registered = app[fn.__name__].default_command
+
+    # ``Path`` resolves only through the unwrapped function's globals.
+    assert registered.__annotations__["p"] is Path
+    assert "return" not in registered.__annotations__
+    assert not hasattr(registered, "__wrapped__")
+    assert _run(app, ["_wrapped_tool_impl", "/tmp/x"]) == 0
+    assert _stdout(capsys) == "/tmp/x\n"
+
+
+# --- test 16a (wire() half) ----------------------------------------------------
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+@pytest.mark.parametrize(
+    ("tool_name", "options"),
+    [pytest.param(t, o, id=i) for i, t, o in _COLLISIONS],
+)
+def test_16a_wire_half_collision_raises_naming_the_tool(module, tool_name, options):
+    fn = getattr(module, tool_name)
+    register(fn, registry=REGISTRY)
+    err = _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), tool_name, cli_contract=CliContract(options=options)
+    )
+    assert tool_name in str(err)
+
+
+def test_16a_wire_half_collision_through_a_decorator_contract():
+    fn = collision_tools_plain.tool_json
+    register(fn, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    _assert_wire_error_leaves_everything_untouched(App(name="cli"), "tool_json")
+
+
+def test_16a_wire_half_collision_on_the_second_of_two_entries_registers_nothing():
+    register(adds, registry=REGISTRY)
+    register(collision_tools_plain.tool_json, registry=REGISTRY)
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "tool_json", cli_contract=CliContract(options=[json_option()])
+    )
+
+
+def test_16a_wire_half_collision_in_a_grouped_tool_registers_nothing():
+    register(adds, registry=REGISTRY, cli_group="g")
+    register(collision_tools_plain.tool_json, registry=REGISTRY, cli_group="g")
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "tool_json", cli_contract=CliContract(options=[json_option()])
+    )
+
+
+# The same pairs raise through cli_command() / a plain App (R8) and do not raise
+# when the target App's resolved default_parameter drops the negatives (A28).
+_DEFAULT_PARAMETER_PAIRS = [
+    pytest.param(collision_tools_plain.tool_x, CliOption("x2", _NO_X, False), id="x"),
+    pytest.param(collision_tools_plain.tool_no_x2, CliOption("x2", bool, False), id="x2"),
+]
+
+
+@pytest.mark.parametrize(("fn", "opt"), _DEFAULT_PARAMETER_PAIRS)
+def test_16a_wire_half_root_default_parameter_removes_negatives(fn, opt):
+    contract = CliContract(options=[opt])
+    register(fn, registry=REGISTRY)
+
+    # Control: a plain App raises (cyclopts' own defaults).
+    with pytest.raises(CisternalWireError):
+        wire(None, App(name="cli"), registry=REGISTRY, cli_contract=contract)
+
+    app = App(name="cli", default_parameter=Parameter(negative=()))
+    wire(None, app, registry=REGISTRY, cli_contract=contract)
+    assert fn.__name__ in app
+
+
+@pytest.mark.parametrize(("fn", "opt"), _DEFAULT_PARAMETER_PAIRS)
+def test_16a_wire_half_existing_subapp_default_parameter_removes_negatives(fn, opt):
+    """When the group already exists, its own default_parameter joins the chain."""
+    contract = CliContract(options=[opt])
+    register(adds, registry=REGISTRY, cli_group="g")
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    sub = wired_module._CLI_SUBAPPS[(id(app), "g")]
+    sub.default_parameter = Parameter(negative=())
+
+    clear_registry(REGISTRY)
+    register(fn, registry=REGISTRY, cli_group="g")
+
+    # Control: a group that does not exist yet contributes no default_parameter,
+    # so the same tool raises when its group is new.
+    with pytest.raises(CisternalWireError):
+        wire(None, App(name="cli2"), registry=REGISTRY, cli_contract=contract)
+
+    wire(None, app, registry=REGISTRY, cli_contract=contract)
+    assert fn.__name__ in sub
+
+
+def test_16a_wire_half_root_and_subapp_default_parameters_combine_root_first():
+    """Root says ``negative=()``; the sub-App then re-adds ``off`` (spike A28)."""
+    fn = collision_tools_plain.tool_x
+    register(adds, registry=REGISTRY, cli_group="g")
+    app = App(name="cli", default_parameter=Parameter(negative=()))
+    wire(None, app, registry=REGISTRY)
+    sub = wired_module._CLI_SUBAPPS[(id(app), "g")]
+    sub.default_parameter = Parameter(negative="off")
+
+    clear_registry(REGISTRY)
+    register(fn, registry=REGISTRY, cli_group="g")
+    # The combined negative of ``x`` is ``--off``: an option claiming it collides,
+    # one claiming ``--no-x`` does not.
+    off = CliOption("o", _OFF, False)
+    with pytest.raises(CisternalWireError, match="--off"):
+        wire(None, app, registry=REGISTRY, cli_contract=CliContract(options=[off]))
+    wire(
+        None,
+        app,
+        registry=REGISTRY,
+        cli_contract=CliContract(options=[CliOption("n", _NO_X, False)]),
+    )
+    assert "tool_x" in sub
+
+
+def test_16a_wire_half_controls_that_must_not_raise():
+    contract = CliContract(options=[json_option()])
+    register(collision_tools_plain.tool_star_json, registry=REGISTRY)
+    short = CliOption("jj", Annotated[bool, Parameter(name="-j", negative="")], False)
+    register(
+        collision_tools_plain.tool_short_j,
+        registry=REGISTRY,
+        cli_contract=CliContract(options=[short]),
+    )
+    chdir = CliOption(
+        "chdir_to", Annotated[Path | None, Parameter(name="--working-dir")], None
+    )
+    register(
+        collision_tools_plain.tool_parse_false,
+        registry=REGISTRY,
+        cli_contract=CliContract(options=[chdir]),
+    )
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=contract)
+    assert {"tool_star_json", "tool_short_j", "tool_parse_false"} <= set(app)
+
+
+# --- test 16b ------------------------------------------------------------------
+
+
+def test_16b_duplicate_option_across_w_and_t_is_a_wire_error_naming_the_tool():
+    register(adds, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    err = _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "adds", cli_contract=CliContract(options=[json_option()])
+    )
+    assert "json_out" in str(err)
+
+
+def test_16b_duplicate_option_across_w_and_map_entry():
+    register(adds, registry=REGISTRY)
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"),
+        "adds",
+        cli_contract=CliContract(options=[json_option()]),
+        cli_contracts={"adds": CliContract(options=[json_option()])},
+    )
+
+
+# --- test 3b -------------------------------------------------------------------
+
+
+def raises_kind(kind: str = "config") -> None:
+    raise {"config": ConfigErrorLike, "other": OtherMyxcelErrorLike}[kind]("msg")
+
+
+def test_3b_mro_specificity_through_wire_w_and_decorator_t(capsys):
+    w = CliContract(exit_codes={ConfigErrorLike: 2})
+    t = CliContract(exit_codes={MyxcelErrorLike: 9})
+    register(raises_kind, registry=REGISTRY, cli_contract=t)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=w)
+
+    assert _run(app, ["raises_kind", "--kind", "config"]) == 2
+    assert _run(app, ["raises_kind", "--kind", "other"]) == 9
+
+
+def test_3b_mro_specificity_through_wire_w_and_map_t():
+    w = CliContract(exit_codes={ConfigErrorLike: 2})
+    t = CliContract(exit_codes={MyxcelErrorLike: 9})
+    register(raises_kind, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=w, cli_contracts={"raises_kind": t})
+
+    assert _run(app, ["raises_kind", "--kind", "config"]) == 2
+    assert _run(app, ["raises_kind", "--kind", "other"]) == 9
+
+
+# --- test 7 --------------------------------------------------------------------
+
+
+def test_7_grouped_tool_with_a_contract_is_reachable_with_the_joined_command():
+    seen: list[str] = []
+
+    def fmt(result: Any, ctx: CliContext) -> None:
+        seen.append(ctx.command)
+
+    register(adds, registry=REGISTRY, cli_group="g", cli_name="n")
+    register(sub_tool, registry=REGISTRY)
+    app = App(name="cli")
+    result = wire(None, app, registry=REGISTRY, cli_contract=CliContract(format_success=fmt))
+
+    assert app["g"]["n"].default_command is not None
+    assert _run(app, ["g", "n", "1"]) == 0
+    assert _run(app, ["sub_tool", "1"]) == 0
+    assert seen == ["g n", "sub_tool"]
+    assert result.cli_commands == ["g n", "sub_tool"]
+
+
+def test_7_ctx_command_uses_cli_name_for_a_flat_tool():
+    seen: list[str] = []
+    contract = CliContract(format_success=lambda r, c: seen.append(c.command))
+    register(adds, registry=REGISTRY, cli_name="plus", cli_contract=contract)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    assert _run(app, ["plus", "1"]) == 0
+    assert seen == ["plus"]
+
+
+# --- test 21 (wire half) ------------------------------------------------------
+
+
+def test_21_cli_telemetry_false_with_a_contract_emits_no_events_via_wire(events):
+    register(adds, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_telemetry=False, cli_contract=CliContract())
+    assert _run(app, ["adds", "1"]) == 0
+    assert _cmd_events(events) == []
+
+
+def test_21_control_telemetry_on_via_wire_emits_events(events):
+    register(adds, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract())
+    assert _run(app, ["adds", "1"]) == 0
+    assert [n for n, _ in _cmd_events(events)] == ["cli.cmd_start", "cli.cmd_end"]
+
+
+# --- test 23 -------------------------------------------------------------------
+
+
+def _schemas(server: fastmcp.FastMCP) -> dict[str, Any]:
+    return {t.name: t.parameters for t in asyncio.run(server.list_tools())}
+
+
+class _CountingAdapter:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        def record(*a: Any, **k: Any) -> None:
+            self.calls.append(name)
+
+        return record
+
+
+def test_23_mcp_schema_equals_the_no_contract_schema_for_both_contract_forms():
+    contract = CliContract(options=[json_option(), CliOption("flag", bool, False)])
+
+    register(adds, registry="t4-plain")
+    plain = fastmcp.FastMCP("plain")
+    wire(plain, registry="t4-plain")
+
+    register(adds, registry="t4-deco", cli_contract=contract)
+    deco = fastmcp.FastMCP("deco")
+    adapter = _CountingAdapter()
+    wire(deco, App(name="cli"), registry="t4-deco", adapter=adapter)
+
+    register(adds, registry="t4-map")
+    mapped = fastmcp.FastMCP("mapped")
+    wire(mapped, App(name="cli"), registry="t4-map", cli_contracts={"adds": contract})
+
+    register(adds, registry="t4-w")
+    wide = fastmcp.FastMCP("wide")
+    wire(wide, App(name="cli"), registry="t4-w", cli_contract=contract)
+
+    try:
+        expected = _schemas(plain)
+        assert "json_out" not in str(expected)
+        assert _schemas(deco) == expected
+        assert _schemas(mapped) == expected
+        assert _schemas(wide) == expected
+        assert adapter.calls == []
+    finally:
+        for r in ("t4-plain", "t4-deco", "t4-map", "t4-w"):
+            clear_registry(r)
+
+
+# --- test 34 -------------------------------------------------------------------
+
+
+def test_34_hidden_defaulted_argument_through_wire():
+    seen_before: list[Any] = []
+
+    def prepare(ctx: CliContext) -> None:
+        seen_before.append(ctx.arguments["token"])
+        ctx.arguments["token"] = "from-env"
+
+    register(hidden_default, registry=REGISTRY)
+    server = fastmcp.FastMCP("t4")
+    app = App(name="cli")
+    wire(
+        server,
+        app,
+        registry=REGISTRY,
+        cli_contracts={"hidden_default": CliContract(prepare=prepare)},
+    )
+
+    with pytest.raises(Exception, match="--token") as excinfo:
+        app(["hidden_default", "x", "--token", "t"], exit_on_error=False)
+    assert type(excinfo.value).__name__ == "UnknownOptionError"
+
+    assert _run(app, ["hidden_default", "x"]) == 0
+    assert seen_before == [None]
+    assert _SEEN == [("x", "from-env")]
+    assert "token" in _schemas(server)["hidden_default"]["properties"]
+
+
+def test_34_hidden_required_argument_through_wire(capsys):
+    present: list[bool] = []
+
+    def prepare(ctx: CliContext) -> None:
+        present.append("token" in ctx.arguments)
+        ctx.arguments["token"] = "from-env"
+
+    register(hidden_required, registry=REGISTRY)
+    server = fastmcp.FastMCP("t4")
+    app = App(name="cli")
+    wire(
+        server,
+        app,
+        registry=REGISTRY,
+        cli_contracts={"hidden_required": CliContract(prepare=prepare)},
+    )
+
+    assert _run(app, ["hidden_required", "x"]) == 0
+    assert present == [False]
+    assert _SEEN == [("x", "from-env")]
+    with pytest.raises(Exception) as excinfo:
+        app(["hidden_required", "x", "--token", "t"], exit_on_error=False)
+    assert type(excinfo.value).__name__ == "UnknownOptionError"
+    schema = _schemas(server)["hidden_required"]
+    assert "token" in schema["properties"]
+    assert "token" in schema["required"]
+
+
+def test_34_hidden_required_unset_by_prepare_never_reaches_the_tool(events, capsys):
+    register(hidden_required, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract(prepare=lambda ctx: None))
+    capsys.readouterr()
+    assert _run(app, ["hidden_required", "x"]) == 1
+    assert (
+        capsys.readouterr().err
+        == "Error (TypeError): prepare removed required argument 'token'\n"
+    )
+    assert _SEEN == []
+    assert _cmd_events(events) == []
+
+
+# --- test 35 -------------------------------------------------------------------
+
+
+def test_35_map_path_applies_at_t_precedence_and_merges_options():
+    def fmt_w(result: Any, ctx: CliContext) -> None:
+        print(f"W {sorted(ctx.options)}")
+
+    def fmt_t(result: Any, ctx: CliContext) -> None:
+        print(f"T {sorted(ctx.options)}")
+
+    w = CliContract(format_success=fmt_w, options=[json_option()])
+    t = CliContract(format_success=fmt_t, options=[CliOption("flag", bool, False)])
+    register(adds, registry=REGISTRY)
+    register(sub_tool, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=w, cli_contracts={"adds": t})
+
+    params = inspect.signature(app["adds"].default_command).parameters
+    assert list(params) == ["a", "b", "json_out", "flag"]
+    # A tool without a map entry gets W only.
+    assert list(inspect.signature(app["sub_tool"].default_command).parameters) == [
+        "x",
+        "json_out",
+    ]
+
+
+def test_35_map_path_formatter_wins(capsys):
+    seen: list[str] = []
+    w = CliContract(format_success=lambda r, c: seen.append("W"))
+    t = CliContract(format_success=lambda r, c: seen.append("T"))
+    register(adds, registry=REGISTRY)
+    register(sub_tool, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=w, cli_contracts={"adds": t})
+    assert _run(app, ["adds", "1"]) == 0
+    assert _run(app, ["sub_tool", "1"]) == 0
+    assert seen == ["T", "W"]
+
+
+def test_35_conflict_decorator_contract_plus_map_entry():
+    register(adds, registry=REGISTRY, cli_contract=CliContract())
+    err = _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "adds", cli_contracts={"adds": CliContract()}
+    )
+    assert "adds" in str(err)
+
+
+def test_35_conflict_is_checked_even_with_app_none():
+    register(adds, registry=REGISTRY, cli_contract=CliContract())
+    server = fastmcp.FastMCP("t4")
+    with pytest.raises(CisternalWireError, match="adds"):
+        wire(server, None, registry=REGISTRY, cli_contracts={"adds": CliContract()})
+    assert _server_tools(server) == []
+
+
+def test_35_unknown_key_names_the_key():
+    register(adds, registry=REGISTRY)
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "nope", cli_contracts={"nope": CliContract()}
+    )
+
+
+def test_35_unknown_key_is_checked_even_with_app_none():
+    register(adds, registry=REGISTRY)
+    server = fastmcp.FastMCP("t4")
+    with pytest.raises(CisternalWireError, match="nope"):
+        wire(server, None, registry=REGISTRY, cli_contracts={"nope": CliContract()})
+    assert _server_tools(server) == []
+
+
+def test_35_per_tool_contract_with_app_none_is_inert():
+    register(adds, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    register(
+        collision_tools_plain.tool_json,
+        registry=REGISTRY,
+        cli_contract=CliContract(options=[json_option()]),
+    )
+    server = fastmcp.FastMCP("t4")
+    result = wire(server, None, registry=REGISTRY)
+    assert sorted(result.mcp_tools) == ["adds", "tool_json"]
+    assert result.cli_commands == []
+
+
+@pytest.mark.parametrize("order", ["flat-first", "group-first"])
+def test_35_planned_name_clash_flat_command_versus_group(order):
+    flat = {"cli_name": "jobs"}
+    group = {"cli_group": "jobs"}
+    kwargs = [flat, group] if order == "flat-first" else [group, flat]
+    register(adds, registry=REGISTRY, **kwargs[0])
+    register(sub_tool, registry=REGISTRY, **kwargs[1])
+    err = _assert_wire_error_leaves_everything_untouched(App(name="cli"), "jobs")
+    assert "jobs" in str(err)
+
+
+def test_35_planned_name_clash_duplicate_leaf_in_one_group():
+    register(adds, registry=REGISTRY, cli_group="g", cli_name="run")
+    register(sub_tool, registry=REGISTRY, cli_group="g", cli_name="run")
+    _assert_wire_error_leaves_everything_untouched(App(name="cli"), "run")
+
+
+def test_35_planned_name_clash_duplicate_flat_name():
+    register(adds, registry=REGISTRY, cli_name="run")
+    register(sub_tool, registry=REGISTRY, cli_name="run")
+    _assert_wire_error_leaves_everything_untouched(App(name="cli"), "run")
+
+
+def test_35_the_same_leaf_in_different_groups_is_not_a_clash():
+    register(adds, registry=REGISTRY, cli_group="g", cli_name="run")
+    register(sub_tool, registry=REGISTRY, cli_group="h", cli_name="run")
+    register(fails, registry=REGISTRY, cli_name="run")
+    app = App(name="cli")
+    result = wire(None, app, registry=REGISTRY)
+    assert sorted(result.cli_commands) == ["g run", "h run", "run"]
+
+
+def test_35_name_already_on_the_root_from_an_earlier_wire_call():
+    register(adds, registry="t4-first", cli_name="t1")
+    register(sub_tool, registry=REGISTRY, cli_name="t1")
+    app = App(name="cli")
+    try:
+        wire(None, app, registry="t4-first")
+        assert "t1" in app
+        server = fastmcp.FastMCP("t4-second")
+        before = _state(server, app)
+        with pytest.raises(CisternalWireError, match="t1"):
+            wire(server, app, registry=REGISTRY)
+        assert _state(server, app) == before
+        assert _server_tools(server) == []
+    finally:
+        clear_registry("t4-first")
+
+
+def test_35_leaf_already_in_an_existing_group_from_an_earlier_wire_call():
+    register(adds, registry="t4-first", cli_group="g", cli_name="run")
+    register(sub_tool, registry=REGISTRY, cli_group="g", cli_name="run")
+    app = App(name="cli")
+    try:
+        wire(None, app, registry="t4-first")
+        sub = wired_module._CLI_SUBAPPS[(id(app), "g")]
+        before = (sorted(app), sorted(sub))
+        with pytest.raises(CisternalWireError, match="run"):
+            wire(None, app, registry=REGISTRY)
+        assert (sorted(app), sorted(sub)) == before
+    finally:
+        clear_registry("t4-first")
+
+
+def test_35_flat_name_clashing_with_an_existing_group_from_an_earlier_call():
+    register(adds, registry="t4-first", cli_group="jobs")
+    register(sub_tool, registry=REGISTRY, cli_name="jobs")
+    app = App(name="cli")
+    try:
+        wire(None, app, registry="t4-first")
+        _assert_wire_error_leaves_everything_untouched(app, "jobs")
+    finally:
+        clear_registry("t4-first")
+
+
+def test_35_a_group_that_already_exists_in_the_cache_is_reused_not_a_clash():
+    register(adds, registry="t4-first", cli_group="g", cli_name="a")
+    register(sub_tool, registry=REGISTRY, cli_group="g", cli_name="b")
+    app = App(name="cli")
+    try:
+        wire(None, app, registry="t4-first")
+        wire(None, app, registry=REGISTRY)
+        assert {"a", "b"} <= set(app["g"])
+    finally:
+        clear_registry("t4-first")
+
+
+# --- test 36 -------------------------------------------------------------------
+
+
+def test_36_contract_help_overrides_the_docstring(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    register(adds, registry=REGISTRY, cli_contract=CliContract(help="Custom help"))
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    _run(app, ["adds", "--help"])
+    out = _stdout(capsys)
+    assert "Custom help" in out
+    assert "Add two numbers." not in out
+
+
+def test_36_docstring_passthrough_when_help_is_none(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    register(adds, registry=REGISTRY, cli_contract=CliContract(options=[json_option()]))
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    _run(app, ["adds", "--help"])
+    out = _stdout(capsys)
+    assert "Add two numbers." in out
+    assert "The first addend." in out
+
+    cmd = app["adds"].default_command
+    assert cmd.__name__ == adds.__name__
+    assert cmd.__doc__ == adds.__doc__
+    assert not hasattr(cmd, "__wrapped__")
+
+
+def test_36_show_false_hides_the_command_but_it_still_runs(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    register(adds, registry=REGISTRY, cli_contract=CliContract(show=False))
+    register(sub_tool, registry=REGISTRY)
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    _run(app, ["--help"])
+    out = _stdout(capsys)
+    assert "sub_tool" in out
+    assert "adds" not in out
+    assert _run(app, ["adds", "1"]) == 0
+
+
+def test_36_merge_w_help_with_t_help_none_and_t_help_set(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    register(adds, registry=REGISTRY)
+    register(sub_tool, registry=REGISTRY, cli_contract=CliContract(help="t-help"))
+    register(fails, registry=REGISTRY, cli_contract=CliContract())
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract(help="w-help"))
+    _run(app, ["adds", "--help"])
+    assert "w-help" in _stdout(capsys)
+    _run(app, ["sub_tool", "--help"])
+    out = _stdout(capsys)
+    assert "t-help" in out
+    assert "w-help" not in out
+    _run(app, ["fails", "--help"])
+    assert "w-help" in _stdout(capsys)
+
+
+def test_36_help_and_show_reach_a_grouped_command(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    register(
+        adds,
+        registry=REGISTRY,
+        cli_group="g",
+        cli_contract=CliContract(help="grouped help"),
+    )
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    _run(app, ["g", "adds", "--help"])
+    assert "grouped help" in _stdout(capsys)
+
+
+@pytest.fixture
+def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Record the keyword arguments of every named ``App.command`` registration."""
+    calls: list[dict[str, Any]] = []
+    original = App.command
+
+    def spy(self: App, obj: Any = None, /, **kwargs: Any) -> Any:
+        if obj is None:
+            calls.append(dict(kwargs))
+        return original(self, obj, **kwargs)
+
+    monkeypatch.setattr(App, "command", spy)
+    return calls
+
+
+def test_36_control_unset_help_and_show_pass_name_only(command_calls):
+    register(adds, registry=REGISTRY, cli_contract=CliContract())
+    register(sub_tool, registry=REGISTRY)
+    register(
+        fails,
+        registry=REGISTRY,
+        cli_group="g",
+        cli_contract=CliContract(help=None, show=None),
+    )
+    wire(None, App(name="cli"), registry=REGISTRY)
+    assert command_calls == [{"name": "adds"}, {"name": "sub_tool"}, {"name": "fails"}]
+
+
+def test_36_help_and_show_are_forwarded_only_when_set(command_calls):
+    register(adds, registry=REGISTRY, cli_contract=CliContract(help="H"))
+    register(sub_tool, registry=REGISTRY, cli_contract=CliContract(show=False))
+    register(fails, registry=REGISTRY, cli_contract=CliContract(help="H2", show=True))
+    wire(None, App(name="cli"), registry=REGISTRY)
+    assert command_calls == [
+        {"name": "adds", "help": "H"},
+        {"name": "sub_tool", "show": False},
+        {"name": "fails", "help": "H2", "show": True},
+    ]
+
+
+_COLLISION_DERIVATION = [
+    pytest.param(
+        "tool_foo_named", CliOption("g", _NO_FOO, False), id="explicit-name-negative"
+    ),
+    pytest.param(
+        "tool_unannotated_flag", CliOption("g", _NO_FLAG, False), id="unannotated-default"
+    ),
+    pytest.param("tool_any_x", CliOption("g", _NO_X, False), id="any-default"),
+]
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+@pytest.mark.parametrize(("tool_name", "opt"), _COLLISION_DERIVATION)
+def test_36_collision_derivation_negatives_through_wire(module, tool_name, opt):
+    register(getattr(module, tool_name), registry=REGISTRY)
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), tool_name, cli_contract=CliContract(options=[opt])
+    )

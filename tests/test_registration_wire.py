@@ -24,6 +24,7 @@ import fastmcp
 import pytest
 from cyclopts import App
 
+from cisternal.registration.cli_contract import CliContract
 from cisternal.registration.decorator import tool
 from cisternal.registration.errors import CisternalWireError
 from cisternal.registration.registry import clear_registry
@@ -711,3 +712,67 @@ class TestCliGrouping:
 
         assert result.cli_commands == ["run"]
         assert app["run"].default_command is not None  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# T4: the wire-time pre-pass applies to the no-contract path too (spec 5.1)
+# ---------------------------------------------------------------------------
+
+
+class TestWirePrePassWithoutContracts:
+    """Name clashes surface as CisternalWireError before anything is registered."""
+
+    @pytest.mark.asyncio
+    async def test_flat_name_clashing_with_group_registers_nothing(self):
+        @tool(name="a_tool", cli_name="jobs")
+        def a_tool() -> dict:
+            return {}
+
+        @tool(name="b_tool", cli_group="jobs")
+        def b_tool() -> dict:
+            return {}
+
+        server = fastmcp.FastMCP("t4-clash")
+        app = App(name="bth")
+        before = sorted(app)
+        with pytest.raises(CisternalWireError, match="jobs"):
+            wire(server, app)
+
+        assert await _tool_names(server) == []
+        assert sorted(app) == before
+
+    def test_duplicate_leaf_in_one_group_is_a_wire_error(self):
+        @tool(name="a_tool", cli_group="g", cli_name="run")
+        def a_tool() -> dict:
+            return {}
+
+        @tool(name="b_tool", cli_group="g", cli_name="run")
+        def b_tool() -> dict:
+            return {}
+
+        with pytest.raises(CisternalWireError, match="run"):
+            wire(None, App(name="bth"))
+
+    def test_name_already_on_the_app_is_a_wire_error(self):
+        @tool(name="existing")
+        def existing() -> dict:
+            return {}
+
+        app = App(name="bth")
+
+        @app.command(name="existing")
+        def existing_cmd() -> None: ...
+
+        with pytest.raises(CisternalWireError, match="existing"):
+            wire(None, app)
+
+    @pytest.mark.asyncio
+    async def test_contract_checks_run_with_app_none(self):
+        @tool(name="a_tool")
+        def a_tool() -> dict:
+            return {}
+
+        server = fastmcp.FastMCP("t4-none")
+        with pytest.raises(CisternalWireError, match="nope"):
+            wire(server, None, cli_contracts={"nope": CliContract()})
+        assert await _tool_names(server) == []
