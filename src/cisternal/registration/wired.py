@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from cisternal._typed_callable import TaggedCallable
+from cisternal.registration.cli_contract import _resolve_cli_hints
 from cisternal.registration.compose import apply_recovery_sync, compose_mcp_callable
 from cisternal.registration.errors import CisternalWireError
 from cisternal.registration.registry import snapshot
@@ -154,7 +155,12 @@ def _make_cli_cmd(
     _cli_cmd.__name__ = original_fn.__name__
     _cli_cmd.__doc__ = original_fn.__doc__
     cast(TaggedCallable, _cli_cmd).__signature__ = inspect.signature(original_fn)
-    _cli_cmd.__annotations__ = dict(original_fn.__annotations__)
+    # A9: resolve the parameters' annotations against the tool module's own
+    # globals (not wired.py's). cyclopts calls get_type_hints on this closure,
+    # whose __globals__ are wired.py's, so raw string annotations from a
+    # `from __future__ import annotations` module used to raise NameError.
+    # __signature__ above is deliberately left unresolved and unchanged.
+    _cli_cmd.__annotations__ = _resolve_cli_hints(original_fn, strict=False)
     return _cli_cmd
 
 
