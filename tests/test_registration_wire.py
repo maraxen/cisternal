@@ -688,16 +688,18 @@ class TestCliGrouping:
         assert result.cli_commands == ["campaign ls"]
         assert app["campaign"]["ls"].default_command is not None  # type: ignore[attr-defined]
 
-    def test_multi_segment_tuple_group_rejected_until_t4g(self):
-        """Interim stopgap: nested groups arrive in T4g; reject, never mis-mount."""
+    def test_multi_segment_tuple_group_nests(self):
+        """T4g: a multi-segment cli_group mounts one sub-App per level."""
 
-        @tool(name="x", cli_group=("flow", "visuals"))
+        @tool(name="x", cli_group=("flow", "visuals"), cli_name="show")
         def x_tool() -> dict:
             return {}
 
         app = App(name="bth")
-        with pytest.raises(CisternalWireError, match="nested"):
-            wire(None, app)
+        result = wire(None, app)
+
+        assert result.cli_commands == ["flow visuals show"]
+        assert app["flow"]["visuals"]["show"].default_command is not None  # type: ignore[attr-defined]
 
     def test_ungrouped_tool_still_registers_flat(self):
         """cli_group=None (the default, and every pre-existing consumer's

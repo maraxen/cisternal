@@ -2206,7 +2206,7 @@ def test_bathos_style_mutated_annotations_work_on_the_contract_path():
 #
 # Spec rev 8, section 5.1 and tests 3b, 7, 9 (contract variant), 9d (contract
 # half), 16a (wire() half), 16b, 21, 23, 34, 35, 36. Groups beyond a single
-# segment (adoption, nesting, cli_group_help) are T4g's and are not exercised.
+# segment (adoption, nesting, cli_group_help) are T4g's, at the end of the file.
 # =============================================================================
 
 import asyncio  # noqa: E402
@@ -2220,18 +2220,31 @@ def _server_tools(server: fastmcp.FastMCP) -> list[str]:
     return sorted(t.name for t in asyncio.run(server.list_tools()))
 
 
-def _state(server: fastmcp.FastMCP, app: App) -> tuple[list[str], list[str], set[Any]]:
-    """What a failed wire() must leave unchanged (spec 5.1, test 35)."""
-    return (_server_tools(server), sorted(app), set(wired_module._CLI_SUBAPPS))
+def _state(
+    server: fastmcp.FastMCP, app: App
+) -> tuple[list[str], list[str], set[Any], set[Any]]:
+    """What a failed wire() must leave unchanged (spec 5.1, test 35).
+
+    T4g: ``_CLI_CREATED_HELP`` must gain no key either.
+    """
+    return (
+        _server_tools(server),
+        sorted(app),
+        set(wired_module._CLI_SUBAPPS),
+        set(cli_contract_module._CLI_CREATED_HELP),
+    )
 
 
 @pytest.fixture(autouse=True)
 def _clear_subapp_cache():
     """Isolate the module-level sub-app cache between tests."""
     saved = dict(wired_module._CLI_SUBAPPS)
+    saved_help = dict(cli_contract_module._CLI_CREATED_HELP)
     yield
     wired_module._CLI_SUBAPPS.clear()
     wired_module._CLI_SUBAPPS.update(saved)
+    cli_contract_module._CLI_CREATED_HELP.clear()
+    cli_contract_module._CLI_CREATED_HELP.update(saved_help)
 
 
 def _assert_wire_error_leaves_everything_untouched(
@@ -2993,3 +3006,659 @@ def test_36_collision_derivation_negatives_through_wire(module, tool_name, opt):
     _assert_wire_error_leaves_everything_untouched(
         App(name="cli"), tool_name, cli_contract=CliContract(options=[opt])
     )
+
+
+# =============================================================================
+# T4g: groups (cli_group, cli_group_help, adoption, nesting)
+#
+# Spec rev 8, section 5.6 and tests 30-33, 35 (T4g extension), A20, A28, A29,
+# R7, R9. The A20/A29 characterisation tests come first: adoption rests on
+# them, so a cyclopts upgrade that changes them must fail here, not in a
+# consumer.
+# =============================================================================
+
+from cyclopts import CommandCollisionError  # noqa: E402
+
+
+
+def cli_group(*args: Any, **kwargs: Any) -> Any:
+    """``cisternal.registration.cli_contract.cli_group``, imported lazily.
+
+    Lazy so that a missing function fails the tests that need it, not the
+    collection of this whole file. (The package-root export is T5's.)
+    """
+    from cisternal.registration.cli_contract import cli_group as _cli_group
+
+    return _cli_group(*args, **kwargs)
+
+
+def _noop() -> None:
+    return None
+
+
+def _command_names(app: App) -> list[str]:
+    return sorted(app)
+
+
+def _premounted(
+    app: App,
+    name: str = "jobs",
+    *,
+    help: str | None = "Job ops",
+    commands: tuple[str, ...] = ("existing",),
+    parent: App | None = None,
+    **app_kwargs: Any,
+) -> App:
+    """A user-constructed sub-App, mounted directly the way a consumer would."""
+    kwargs: dict[str, Any] = dict(app_kwargs)
+    if help is not None:
+        kwargs["help"] = help
+    sub = App(name=name, **kwargs)
+    for command in commands:
+        sub.command(name=command)(_noop)
+    (parent if parent is not None else app).command(sub)
+    return sub
+
+
+def _root_help(app: App, capsys: pytest.CaptureFixture[str], monkeypatch) -> str:
+    monkeypatch.setenv("COLUMNS", "240")
+    _run(app, ["--help"])
+    return _stdout(capsys)
+
+
+# --- A20 / A29: the cyclopts facts adoption rests on -------------------------
+
+
+def test_a20_user_app_has_no_default_command_and_a_function_wrapper_has_one():
+    app = App(name="cli")
+    user = App(name="g")
+    app.command(user)
+
+    def jobs() -> None:
+        return None
+
+    app.command(name="jobs")(jobs)
+
+    assert app["g"] is user
+    assert user.default_command is None
+    wrapper = app["jobs"]
+    assert isinstance(wrapper, App)
+    assert wrapper.default_command is jobs
+    assert "g" in app
+    assert "jobs" in app
+    with pytest.raises(CommandCollisionError):
+        app.command(App(name="g"))
+
+
+def test_a20_a_user_app_declaring_its_own_default_is_indistinguishable_from_a_wrapper():
+    """R9's known false negative: such an App fails the discriminator."""
+    app = App(name="cli")
+    user = App(name="g")
+    user.default(_noop)
+    app.command(user)
+    assert user.default_command is not None
+
+
+def test_a29_unset_help_reads_empty_and_a_post_mount_assignment_shows(capsys, monkeypatch):
+    app = App(name="cli")
+    sub = App(name="gg")
+    assert sub.help == ""
+    app.command(sub)
+    sub.help = "Late help"
+    out = _root_help(app, capsys, monkeypatch)
+    assert re.search(r"gg\s+Late help", out)
+
+
+def test_wired_and_cli_contract_share_the_group_cache():
+    assert wired_module._CLI_SUBAPPS is cli_contract_module._CLI_SUBAPPS
+    assert wired_module._get_or_create_subapp is cli_contract_module._get_or_create_subapp
+
+
+# --- _probe_group_path is read-only -------------------------------------------
+
+
+def test_probe_group_path_returns_existing_apps_and_writes_nothing():
+    from cisternal.registration.cli_contract import _probe_group_path
+
+    app = App(name="cli")
+    keys = (set(wired_module._CLI_SUBAPPS), set(cli_contract_module._CLI_CREATED_HELP))
+
+    assert _probe_group_path(app, ("flow", "visuals"), helps=None) == []
+
+    flow = _premounted(app, "flow", commands=())
+    assert _probe_group_path(app, ("flow", "visuals"), helps=None) == [flow]
+    visuals = _premounted(app, "visuals", parent=flow, commands=())
+    assert _probe_group_path(app, ("flow", "visuals"), helps=None) == [flow, visuals]
+
+    assert "flow" in app and "visuals" in flow
+    assert (
+        set(wired_module._CLI_SUBAPPS),
+        set(cli_contract_module._CLI_CREATED_HELP),
+    ) == keys
+
+
+def test_probe_group_path_raises_where_the_walk_would_and_mounts_nothing():
+    from cisternal.registration.cli_contract import _probe_group_path
+
+    app = App(name="cli")
+    app.command(name="jobs")(_noop)
+    before = (sorted(app), set(wired_module._CLI_SUBAPPS))
+    with pytest.raises(CisternalWireError, match="jobs"):
+        _probe_group_path(app, ("jobs",), helps=None)
+    assert (sorted(app), set(wired_module._CLI_SUBAPPS)) == before
+
+
+# --- test 30: pre-mounted groups -------------------------------------------------
+
+
+def test_30_a_premounted_group_is_adopted_and_keeps_its_help(capsys):
+    app = App(name="cli")
+    pre = _premounted(app, "jobs", help="Job ops")
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="n")
+
+    result = wire(None, app, registry=REGISTRY)
+
+    assert app["jobs"] is pre
+    assert pre.help == "Job ops"
+    assert {"existing", "n"} <= set(pre)
+    assert wired_module._CLI_SUBAPPS[(id(app), "jobs")] is pre
+    assert (id(app), "jobs") not in cli_contract_module._CLI_CREATED_HELP
+    assert result.cli_commands == ["jobs n"]
+    assert _run(app, ["jobs", "existing"]) == 0
+    assert _run(app, ["jobs", "n", "1"]) == 0
+    assert "sum" in _stdout(capsys)
+
+
+def test_30_cli_group_help_never_overrides_an_adopted_help():
+    app = App(name="cli")
+    pre = _premounted(app, "jobs", help="Job ops")
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="n")
+    wire(None, app, registry=REGISTRY, cli_group_help={"jobs": "other"})
+    assert app["jobs"] is pre
+    assert pre.help == "Job ops"
+    assert (id(app), "jobs") not in cli_contract_module._CLI_CREATED_HELP
+
+
+def test_30_a_helpless_adopted_group_is_not_given_help():
+    app = App(name="cli")
+    pre = _premounted(app, "jobs", help=None)
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="n")
+    wire(None, app, registry=REGISTRY, cli_group_help={"jobs": "ignored"})
+    assert pre.help == ""
+
+
+def test_30_a_second_wire_call_reuses_the_adopted_group():
+    app = App(name="cli")
+    pre = _premounted(app, "jobs")
+    register(adds, registry="t4g-first", cli_group="jobs", cli_name="a")
+    register(sub_tool, registry=REGISTRY, cli_group="jobs", cli_name="b")
+    try:
+        wire(None, app, registry="t4g-first")
+        wire(None, app, registry=REGISTRY)
+    finally:
+        clear_registry("t4g-first")
+    assert app["jobs"] is pre
+    assert {"existing", "a", "b"} <= set(pre)
+
+
+def test_30_negative_a_function_command_is_not_a_group():
+    app = App(name="cli")
+
+    @app.command(name="jobs")
+    def jobs_fn() -> str:
+        return "pre"
+
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="n")
+    err = _assert_wire_error_leaves_everything_untouched(app, "jobs")
+    assert "already a command" in str(err)
+
+
+def test_30_negative_rejection_on_the_second_entry_mounts_nothing():
+    app = App(name="cli")
+    app.command(name="jobs")(_noop)
+    register(adds, registry=REGISTRY, cli_group="fresh", cli_name="n")
+    register(sub_tool, registry=REGISTRY, cli_group="jobs", cli_name="m")
+    _assert_wire_error_leaves_everything_untouched(app, "jobs")
+    assert "fresh" not in app
+
+
+def test_30_negative_a_user_app_with_its_own_default_is_rejected_r9():
+    app = App(name="cli")
+    user = App(name="jobs")
+    user.default(_noop)
+    app.command(user)
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="n")
+    err = _assert_wire_error_leaves_everything_untouched(app, "jobs")
+    assert "already a command" in str(err)
+
+
+def test_30_negative_leaf_clash_in_an_adopted_group():
+    app = App(name="cli")
+    pre = _premounted(app, "jobs", commands=("submit",))
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="submit")
+    server = fastmcp.FastMCP("t4g")
+    app_before, pre_before = _command_names(app), _command_names(pre)
+    before = _state(server, app)
+    with pytest.raises(CisternalWireError, match="submit"):
+        wire(server, app, registry=REGISTRY)
+    assert _state(server, app) == before
+    assert _server_tools(server) == []
+    assert (_command_names(app), _command_names(pre)) == (app_before, pre_before)
+
+
+def test_30_negative_leaf_clash_in_an_adopted_group_is_checked_for_every_entry():
+    app = App(name="cli")
+    pre = _premounted(app, "jobs", commands=("submit",))
+    register(adds, registry=REGISTRY, cli_group="jobs", cli_name="fine")
+    register(sub_tool, registry=REGISTRY, cli_group="jobs", cli_name="submit")
+    before = _command_names(pre)
+    _assert_wire_error_leaves_everything_untouched(app, "submit")
+    assert _command_names(pre) == before
+    assert "fine" not in pre
+
+
+# --- test 31: cli_group_help ---------------------------------------------------
+
+
+def test_31_cli_group_help_is_applied_to_a_group_cisternal_creates(capsys, monkeypatch):
+    register(adds, registry=REGISTRY, cli_group="g")
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_group_help={"g": "Group help"})
+    assert app["g"].help == "Group help"
+    assert cli_contract_module._CLI_CREATED_HELP[(id(app), "g")] == "Group help"
+    assert re.search(r"g\s+Group help", _root_help(app, capsys, monkeypatch))
+
+
+def test_31_a_group_without_a_help_entry_is_created_without_help():
+    register(adds, registry=REGISTRY, cli_group="g")
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_group_help={})
+    assert app["g"].help == ""
+    assert cli_contract_module._CLI_CREATED_HELP[(id(app), "g")] is None
+
+
+def test_31_negative_unknown_key_names_the_key_and_registers_nothing():
+    register(adds, registry=REGISTRY, cli_group="g")
+    err = _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "nope", cli_group_help={"nope": "x"}
+    )
+    assert "nope" in str(err)
+
+
+def test_31_negative_unknown_key_is_checked_when_no_entry_has_a_group():
+    register(adds, registry=REGISTRY)  # flat: no entry has any group path
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "g", cli_group_help={"g": "x"}
+    )
+
+
+def test_31_a_strict_prefix_key_does_not_raise():
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_group_help={"flow": "F"})
+    assert app["flow"].help == "F"
+    assert app["flow"]["visuals"].help == ""
+
+
+def test_31_a_non_prefix_extension_of_a_group_path_is_unknown():
+    register(adds, registry=REGISTRY, cli_group="flow")
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "visuals", cli_group_help={"flow visuals": "V"}
+    )
+
+
+@pytest.mark.parametrize("key", ["", "  ", ("a", ""), ("a b",)], ids=repr)
+def test_31_a_malformed_key_raises_a_wire_error(key):
+    register(adds, registry=REGISTRY, cli_group="g")
+    _assert_wire_error_leaves_everything_untouched(
+        App(name="cli"), "cli group", cli_group_help={key: "x"}
+    )
+
+
+def test_31_a_tuple_key_and_a_string_key_are_the_same_key():
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY, cli_group_help={("flow", "visuals"): "V"})
+    assert app["flow"]["visuals"].help == "V"
+
+
+# --- test 32: cli_group() ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("order", ["before", "after"])
+def test_32_cli_group_and_wire_share_one_object_in_either_order(order, capsys, monkeypatch):
+    register(adds, registry=REGISTRY, cli_group="g", cli_name="a")
+    app = App(name="cli")
+    if order == "before":
+        grp = cli_group(app, "g", help="H")
+        wire(None, app, registry=REGISTRY)
+    else:
+        wire(None, app, registry=REGISTRY)
+        grp = cli_group(app, "g", help="H")
+
+    assert grp is app["g"]
+    assert grp is wired_module._CLI_SUBAPPS[(id(app), "g")]
+    assert grp.help == "H"
+    assert "a" in grp
+    assert re.search(r"g\s+H", _root_help(app, capsys, monkeypatch))
+
+
+def test_32_a_command_registered_on_the_group_is_reachable(capsys):
+    app = App(name="cli")
+    grp = cli_group(app, "g")
+    grp.command(name="x")(cli_command(adds))
+    assert app["g"] is grp
+    assert _run(app, ["g", "x", "1"]) == 0
+    assert "sum" in _stdout(capsys)
+
+
+def test_32_the_same_object_whichever_call_creates_the_group():
+    register(adds, registry=REGISTRY, cli_group="g", cli_name="a")
+    app = App(name="cli")
+    wire(None, app, registry=REGISTRY)
+    assert cli_group(app, "g") is app["g"]
+    assert cli_group(app, "g") is cli_group(app, ("g",))
+
+
+def test_32_the_same_help_again_is_a_no_op_and_a_different_help_raises():
+    app = App(name="cli")
+    grp = cli_group(app, "g", help="H")
+    assert cli_group(app, "g", help="H") is grp
+    assert cli_group(app, "g") is grp  # no help given: nothing to compare
+    with pytest.raises(CisternalWireError, match="help already set"):
+        cli_group(app, "g", help="other")
+    assert grp.help == "H"
+
+
+def test_32_wire_help_that_conflicts_with_a_cli_group_help_raises_in_the_pre_pass():
+    app = App(name="cli")
+    cli_group(app, "g", help="H")
+    register(adds, registry=REGISTRY, cli_group="g")
+    err = _assert_wire_error_leaves_everything_untouched(
+        app, "help already set", cli_group_help={"g": "other"}
+    )
+    assert "'g'" in str(err)
+
+
+def test_32_wire_help_equal_to_the_recorded_help_is_fine():
+    app = App(name="cli")
+    cli_group(app, "g", help="H")
+    register(adds, registry=REGISTRY, cli_group="g")
+    wire(None, app, registry=REGISTRY, cli_group_help={"g": "H"})
+    assert app["g"].help == "H"
+
+
+def test_32_wire_help_reaches_a_group_cli_group_created_without_help():
+    app = App(name="cli")
+    grp = cli_group(app, "g")
+    register(adds, registry=REGISTRY, cli_group="g")
+    wire(None, app, registry=REGISTRY, cli_group_help={"g": "Late"})
+    assert grp.help == "Late"
+    assert cli_contract_module._CLI_CREATED_HELP[(id(app), "g")] == "Late"
+
+
+def test_32_cli_group_leaves_an_adopted_group_untouched():
+    app = App(name="cli")
+    pre = _premounted(app, "jobs", help="Job ops")
+    assert cli_group(app, "jobs", help="ignored") is pre
+    assert pre.help == "Job ops"
+    assert (id(app), "jobs") not in cli_contract_module._CLI_CREATED_HELP
+    assert cli_group(app, "jobs") is pre
+
+
+def test_32_cli_group_rejects_a_function_command():
+    app = App(name="cli")
+    app.command(name="jobs")(_noop)
+    before = (_command_names(app), set(wired_module._CLI_SUBAPPS))
+    with pytest.raises(CisternalWireError, match="jobs"):
+        cli_group(app, "jobs")
+    assert (_command_names(app), set(wired_module._CLI_SUBAPPS)) == before
+
+
+def test_32_cli_group_help_is_keyword_only():
+    with pytest.raises(TypeError):
+        cli_group(App(name="cli"), "g", "H")  # type: ignore[misc]
+
+
+# --- test 33: nested groups -------------------------------------------------------
+
+
+def test_33_a_nested_group_is_reachable_with_the_joined_command():
+    seen: list[str] = []
+    register(
+        adds,
+        registry=REGISTRY,
+        cli_group="flow visuals",
+        cli_name="show",
+        cli_contract=CliContract(format_success=lambda r, c: seen.append(c.command)),
+    )
+    app = App(name="cli")
+    result = wire(None, app, registry=REGISTRY)
+
+    assert app["flow"]["visuals"]["show"].default_command is not None
+    assert _run(app, ["flow", "visuals", "show", "1"]) == 0
+    assert seen == ["flow visuals show"]
+    assert "flow visuals show" in result.cli_commands
+
+
+def test_33_a_nested_group_without_a_contract_records_the_joined_command(capsys):
+    register(adds, registry=REGISTRY, cli_group=("flow", "visuals"), cli_name="show")
+    app = App(name="cli")
+    result = wire(None, app, registry=REGISTRY)
+    assert result.cli_commands == ["flow visuals show"]
+    assert _run(app, ["flow", "visuals", "show", "1"]) == 0
+    assert "sum" in _stdout(capsys)
+
+
+def test_33_every_spelling_of_a_path_reaches_the_same_object():
+    app = App(name="cli")
+    a = cli_group(app, "flow visuals")
+    b = cli_group(cli_group(app, "flow"), "visuals")
+    c = cli_group(app, ("flow", "visuals"))
+    assert a is b is c
+    assert app["flow"]["visuals"] is a
+    assert wired_module._CLI_SUBAPPS[(id(app["flow"]), "visuals")] is a
+
+
+def test_33_the_cache_is_keyed_per_level():
+    app = App(name="cli")
+    cli_group(app, "x y")
+    cli_group(app, "z y")
+    assert app["x"]["y"] is not app["z"]["y"]
+    assert wired_module._CLI_SUBAPPS[(id(app), "x")] is app["x"]
+
+
+def test_33_cli_group_help_per_level(capsys, monkeypatch):
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+    app = App(name="cli")
+    wire(
+        None,
+        app,
+        registry=REGISTRY,
+        cli_group_help={"flow": "F", "flow visuals": "V"},
+    )
+    assert app["flow"].help == "F"
+    assert app["flow"]["visuals"].help == "V"
+    assert re.search(r"flow\s+F", _root_help(app, capsys, monkeypatch))
+    monkeypatch.setenv("COLUMNS", "240")
+    _run(app, ["flow", "--help"])
+    assert re.search(r"visuals\s+V", _stdout(capsys))
+
+
+def test_33_entries_share_the_intermediate_level():
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="a")
+    register(sub_tool, registry=REGISTRY, cli_group="flow review", cli_name="b")
+    register(fails, registry=REGISTRY, cli_group="flow", cli_name="c")
+    app = App(name="cli")
+    result = wire(None, app, registry=REGISTRY)
+    assert sorted(result.cli_commands) == ["flow c", "flow review b", "flow visuals a"]
+    assert {"visuals", "review", "c"} <= set(app["flow"])
+
+
+def test_33_adoption_applies_at_the_inner_level():
+    app = App(name="cli")
+    flow = _premounted(app, "flow", help="pre-flow", commands=())
+    visuals = _premounted(app, "visuals", help="pre", parent=flow, commands=("old",))
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+
+    wire(
+        None,
+        app,
+        registry=REGISTRY,
+        cli_group_help={"flow": "F", "flow visuals": "V"},
+    )
+
+    assert app["flow"] is flow
+    assert flow["visuals"] is visuals
+    assert flow.help == "pre-flow"
+    assert visuals.help == "pre"
+    assert {"old", "show"} <= set(visuals)
+    assert (id(app), "flow") not in cli_contract_module._CLI_CREATED_HELP
+    assert (id(flow), "visuals") not in cli_contract_module._CLI_CREATED_HELP
+
+
+def test_33_an_adopted_outer_level_with_a_created_inner_level_gets_the_inner_help():
+    app = App(name="cli")
+    flow = _premounted(app, "flow", help="pre-flow", commands=())
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+    wire(
+        None,
+        app,
+        registry=REGISTRY,
+        cli_group_help={"flow": "ignored", "flow visuals": "V"},
+    )
+    assert flow.help == "pre-flow"
+    assert flow["visuals"].help == "V"
+    assert (id(app), "flow") not in cli_contract_module._CLI_CREATED_HELP
+    assert cli_contract_module._CLI_CREATED_HELP[(id(flow), "visuals")] == "V"
+
+
+def test_33_a_leaf_clash_in_a_nested_adopted_group():
+    app = App(name="cli")
+    flow = _premounted(app, "flow", commands=())
+    _premounted(app, "visuals", parent=flow, commands=("show",))
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+    _assert_wire_error_leaves_everything_untouched(app, "show")
+
+
+def test_33_a_function_command_at_an_inner_level_is_rejected():
+    app = App(name="cli")
+    flow = _premounted(app, "flow", commands=("visuals",))
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="show")
+    before = _command_names(flow)
+    err = _assert_wire_error_leaves_everything_untouched(app, "flow visuals")
+    assert "already a command" in str(err)
+    assert _command_names(flow) == before
+
+
+@pytest.mark.parametrize("path", [("flow", ""), "", "   ", ("a b",), (), ("a", " ")], ids=repr)
+def test_33_negative_malformed_paths_raise_a_wire_error(path):
+    app = App(name="cli")
+    before = (_command_names(app), set(wired_module._CLI_SUBAPPS))
+    with pytest.raises(CisternalWireError):
+        cli_group(app, path)
+    assert (_command_names(app), set(wired_module._CLI_SUBAPPS)) == before
+
+
+def test_33_negative_a_non_string_segment_raises_a_wire_error():
+    with pytest.raises(CisternalWireError):
+        cli_group(App(name="cli"), ("flow", 3))  # type: ignore[arg-type]
+
+
+def test_33_trailing_whitespace_is_split_not_an_error():
+    app = App(name="cli")
+    assert cli_group(app, "flow  ") is cli_group(app, "flow")
+    assert cli_group(app, ("  flow ", " visuals")) is cli_group(app, "flow visuals")
+
+
+def test_33_a_malformed_tool_group_raises_in_the_pre_pass():
+    register(adds, registry=REGISTRY, cli_group=("flow", ""))
+    _assert_wire_error_leaves_everything_untouched(App(name="cli"), "cli group")
+
+
+# --- test 35 (T4g extension): nothing registered --------------------------------
+
+
+def test_35_t4g_function_command_group_registers_nothing():
+    app = App(name="cli")
+    app.command(name="jobs")(_noop)
+    register(adds, registry=REGISTRY, cli_group="jobs")
+    _assert_wire_error_leaves_everything_untouched(app, "jobs")
+
+
+@pytest.mark.parametrize("order", ["flat-first", "group-first"])
+def test_35_t4g_flat_flow_plus_a_nested_group_registers_nothing(order):
+    flat = {"cli_name": "flow"}
+    nested = {"cli_group": "flow visuals", "cli_name": "show"}
+    kwargs = [flat, nested] if order == "flat-first" else [nested, flat]
+    register(adds, registry=REGISTRY, **kwargs[0])
+    register(sub_tool, registry=REGISTRY, **kwargs[1])
+    _assert_wire_error_leaves_everything_untouched(App(name="cli"), "flow")
+
+
+def test_35_t4g_a_failure_after_a_nested_entry_mounts_and_records_nothing():
+    register(adds, registry=REGISTRY, cli_group="flow visuals", cli_name="a")
+    register(
+        future_annot_tools.tool_with_unresolvable_param,
+        registry=REGISTRY,
+        cli_group="flow visuals",
+    )
+    app = App(name="cli")
+    _assert_wire_error_leaves_everything_untouched(
+        app, "tool_with_unresolvable_param", cli_contract=CliContract()
+    )
+    assert "flow" not in app
+
+
+def test_35_t4g_a_help_conflict_after_an_entry_that_would_create_a_level():
+    app = App(name="cli")
+    cli_group(app, "old", help="H")
+    register(adds, registry=REGISTRY, cli_group="new", cli_name="a")
+    register(sub_tool, registry=REGISTRY, cli_group="old", cli_name="b")
+    _assert_wire_error_leaves_everything_untouched(
+        app, "help already set", cli_group_help={"new": "N", "old": "other"}
+    )
+    assert "new" not in app
+
+
+# --- A28 across a multi-level path ----------------------------------------------
+
+
+def test_a28_every_existing_app_on_a_multi_level_path_contributes():
+    """Root, an adopted middle level and an adopted leaf level combine root first."""
+    fn = collision_tools_plain.tool_x
+    app = App(name="cli", default_parameter=Parameter(negative=()))
+    flow = _premounted(app, "flow", commands=())
+    _premounted(
+        app,
+        "visuals",
+        parent=flow,
+        commands=(),
+        default_parameter=Parameter(negative="off"),
+    )
+    register(fn, registry=REGISTRY, cli_group="flow visuals")
+    off = CliOption("o", _OFF, False)
+    no_x = CliOption("n", _NO_X, False)
+
+    with pytest.raises(CisternalWireError, match="--off"):
+        wire(None, app, registry=REGISTRY, cli_contract=CliContract(options=[off]))
+    wire(None, app, registry=REGISTRY, cli_contract=CliContract(options=[no_x]))
+    assert fn.__name__ in flow["visuals"]
+
+
+@pytest.mark.parametrize(("fn", "opt"), _DEFAULT_PARAMETER_PAIRS)
+def test_a28_a_middle_level_default_parameter_removes_negatives(fn, opt):
+    """The middle App is neither the root nor the target, and still counts."""
+    contract = CliContract(options=[opt])
+    register(fn, registry=REGISTRY, cli_group="flow visuals")
+
+    # Control: with no default_parameter anywhere the same tool raises.
+    plain = App(name="plain")
+    _premounted(plain, "flow", commands=())
+    with pytest.raises(CisternalWireError):
+        wire(None, plain, registry=REGISTRY, cli_contract=contract)
+
+    app = App(name="cli")
+    flow = _premounted(app, "flow", commands=(), default_parameter=Parameter(negative=()))
+    wire(None, app, registry=REGISTRY, cli_contract=contract)
+    assert fn.__name__ in flow["visuals"]

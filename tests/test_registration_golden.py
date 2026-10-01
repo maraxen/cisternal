@@ -189,18 +189,24 @@ def test_golden_async_tool(capsys):
     assert "hello async" in captured.out
 
 
+# What wiring a tool into a group name that is already taken raised at 8730da8.
+# T0a verified this (the pre-mounted-group setup raised cyclopts'
+# CommandCollisionError, from the unconditional mount in the old
+# _get_or_create_subapp) and recorded it here. T4g changed the behaviour on
+# purpose, so this literal is now a RECORD of the change: nothing below asserts
+# that CommandCollisionError is still raised.
+_LEGACY_8730DA8_PRE_MOUNTED_GROUP_EXCEPTION = "CommandCollisionError"
+
+
 def test_golden_pre_mounted_group_rejection():
-    """Test 30: Baseline collision detection.
+    """Test 30: behaviour change record for a group name that is a function command.
 
-    At 8730da8, pre-registering a function command and then trying to wire
-    into that group name should raise CommandCollisionError before any
-    registration happens.
-
-    This test documents the baseline exception type that the implementation
-    changes will replace with CisternalWireError.
-
-    Spec §7: untouched-on-failure guarantee — rejection happens before any
-    registration.
+    At 8730da8, pre-registering a function command and then wiring a tool into
+    that group name raised ``CommandCollisionError``
+    (``_LEGACY_8730DA8_PRE_MOUNTED_GROUP_EXCEPTION``), from the mount in the
+    registration loop. Since T4g the pre-pass rejects it before any registration
+    with ``CisternalWireError`` (spec 5.6, step 2: a function command is not a
+    group), and the untouched-on-failure guarantee still holds (spec 5.1).
     """
     app = App(name="test")
 
@@ -209,24 +215,30 @@ def test_golden_pre_mounted_group_rejection():
     def pre_existing() -> str:
         return "pre"
 
-    # Record the command count before the collision attempt
     commands_before = len(app._commands)
 
-    # Now try to define a tool with cli_group="jobs"
     @tool(registry=REGISTRY, cli_group="jobs", name="list_jobs")
     def list_jobs() -> str:
         return "list"
 
-    # This should raise before registration completes
-    from cyclopts import CommandCollisionError
+    from cisternal.registration.cli_contract import _CLI_CREATED_HELP, _CLI_SUBAPPS
+    from cisternal.registration.errors import CisternalWireError
 
-    with pytest.raises(CommandCollisionError):
+    subapps_before = set(_CLI_SUBAPPS)
+    helps_before = set(_CLI_CREATED_HELP)
+
+    with pytest.raises(CisternalWireError, match="jobs") as excinfo:
         wire(None, app, registry=REGISTRY)
 
-    # Golden: untouched-on-failure: no new commands were added
+    assert _LEGACY_8730DA8_PRE_MOUNTED_GROUP_EXCEPTION == "CommandCollisionError"
+    assert type(excinfo.value).__name__ != _LEGACY_8730DA8_PRE_MOUNTED_GROUP_EXCEPTION
+
+    # Untouched-on-failure: no new commands, no cached or recorded group.
     assert len(app._commands) == commands_before, (
-        "wire() should not register any commands if collision is detected"
+        "wire() should not register any commands if a group is rejected"
     )
+    assert set(_CLI_SUBAPPS) == subapps_before
+    assert set(_CLI_CREATED_HELP) == helps_before
 
 
 def test_golden_no_contract_int_return_becomes_exit(capsys):

@@ -6,7 +6,9 @@ Holds the public contract types (:class:`CliContext`, :class:`CliOption`,
 (:func:`_resolve_exit`), the annotation resolution of the A9 fix
 (:func:`_resolve_cli_hints`), the CLI callable builder
 (:func:`_build_cli_callable`, with :func:`_rebind` and the long-flag collision
-check) and the public :func:`cli_command` over it.
+check) and the public :func:`cli_command` over it, and the group machinery
+(:data:`_CLI_SUBAPPS`, :data:`_CLI_CREATED_HELP`, :func:`_get_or_create_subapp`,
+:func:`_probe_group_path` and the public :func:`cli_group`).
 
 This module stays fastmcp-free and import-cycle-free (R10): its only
 module-scope cisternal import is :mod:`cisternal.registration.errors`.
@@ -14,7 +16,7 @@ module-scope cisternal import is :mod:`cisternal.registration.errors`.
 and ``cisternal.registration.wired`` (which imports this module) are imported
 inside the function that needs them.
 
-Spec: ``.praxia/docs/specs/261001_wire-cli-contract.md`` (sections 4, 5.1-5.5).
+Spec: ``.praxia/docs/specs/261001_wire-cli-contract.md`` (sections 4, 5.1-5.6).
 """
 
 from __future__ import annotations
@@ -834,4 +836,221 @@ def cli_command(
         recovery=recovery,
         telemetry=telemetry,
         app_default_parameter=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Groups (spec 5.6): the sub-App cache, path normalisation, the per-level walk,
+# the read-only probe and the public cli_group().
+# ---------------------------------------------------------------------------
+
+# Keyed by (id(parent_app), segment) -> the cyclopts.App at that level of a
+# group path. Repeated wire() / cli_group() calls against the SAME app object
+# (e.g. one wire() call per registry partition targeting a shared CLI app)
+# must reuse the same sub-app rather than mounting a second one under the same
+# name — cyclopts does not dedupe app.command(sub_app) calls. Keying by
+# id(app), not a global singleton, keeps test suites that construct a fresh
+# App() per test isolated from each other (R7: id reuse after garbage
+# collection is an existing hazard, unchanged by nesting).
+_CLI_SUBAPPS: dict[tuple[int, str], Any] = {}
+
+# For each cache key whose level cisternal CREATED: the help cisternal applied,
+# or None if it applied none. A key in _CLI_SUBAPPS but missing here is an
+# ADOPTED level (a user App found already mounted). cisternal records the help
+# it applied because it cannot read "no help" off the App: a cyclopts App built
+# without help reads ``help == ""``, not None (A29).
+_CLI_CREATED_HELP: dict[tuple[int, str], str | None] = {}
+
+
+def _normalise_group_path(path: GroupPath) -> tuple[str, ...]:
+    """Normalise a ``cli_group`` path to a tuple of segments (spec 5.6).
+
+    A ``str`` is split on whitespace (``"flow visuals"`` -> ``("flow",
+    "visuals")``); a ``tuple[str, ...]`` is used as given with each element
+    ``.strip()``ped.
+
+    Raises:
+        CisternalWireError: the path is empty, has an empty or whitespace-only
+            segment, has a segment that itself contains whitespace, or is not
+            a ``str`` / tuple of ``str``.
+    """
+    if isinstance(path, str):
+        segments: tuple[Any, ...] = tuple(path.split())
+    elif isinstance(path, tuple):
+        segments = tuple(s.strip() if isinstance(s, str) else s for s in path)
+    else:
+        raise CisternalWireError(
+            message=(
+                f"cli group {path!r}: a group path must be a str or a tuple of "
+                f"str, got {type(path).__name__}"
+            )
+        )
+    if not segments:
+        raise CisternalWireError(message=f"cli group {path!r}: the group path is empty")
+    for segment in segments:
+        if not isinstance(segment, str):
+            raise CisternalWireError(
+                message=(
+                    f"cli group {path!r}: segment {segment!r} is not a str "
+                    f"(got {type(segment).__name__})"
+                )
+            )
+        if not segment:
+            raise CisternalWireError(
+                message=f"cli group {path!r}: the group path has an empty segment"
+            )
+        if any(ch.isspace() for ch in segment):
+            raise CisternalWireError(
+                message=(
+                    f"cli group {path!r}: segment {segment!r} contains whitespace; "
+                    "pass nested groups as 'a b' or ('a', 'b')"
+                )
+            )
+    return typing.cast("tuple[str, ...]", segments)
+
+
+def _walk_group_path(
+    app: Any,
+    path: tuple[str, ...],
+    helps: Mapping[tuple[str, ...], str] | None,
+    *,
+    mount: bool,
+) -> list[Any]:
+    """Walk *path* one segment at a time from *app* (spec 5.6).
+
+    At each level, with ``parent`` the current App, ``key = (id(parent), seg)``
+    and ``h = helps.get(path up to and including seg)``:
+
+    1. cache hit: reuse the cached App. A level cisternal created takes ``h``
+       if it has no help yet (recorded ``None``), ignores an equal help, and
+       raises on a different one. An adopted level ignores ``h``.
+    2. ``seg in parent``: adopt a user App (``default_command is None``, A20a)
+       or raise for anything else (a function command's wrapper, A20b, and a
+       user App that declares its own ``@default``, R9).
+    3. otherwise create ``cyclopts.App(name=seg[, help=h])``.
+
+    With ``mount=False`` (the read-only probe) nothing is mounted, cached,
+    recorded or assigned: it raises exactly where the mounting walk would,
+    and stops descending at the first level it would create. Returns the Apps
+    that already exist along the path, outermost first (mounting returns every
+    level, the last being the leaf).
+    """
+    import cyclopts
+
+    levels: list[Any] = []
+    parent = app
+    for i, segment in enumerate(path):
+        prefix = path[: i + 1]
+        joined = " ".join(prefix)
+        key = (id(parent), segment)
+        help_text = helps.get(prefix) if helps else None
+        sub = _CLI_SUBAPPS.get(key)
+        if sub is not None:
+            if key in _CLI_CREATED_HELP and help_text is not None:
+                recorded = _CLI_CREATED_HELP[key]
+                if recorded is None:
+                    if mount:
+                        sub.help = help_text
+                        _CLI_CREATED_HELP[key] = help_text
+                elif recorded != help_text:
+                    raise CisternalWireError(
+                        message=f"cli group {joined!r}: help already set to {recorded!r}"
+                    )
+        elif segment in parent:
+            entry = parent[segment]
+            if not (isinstance(entry, cyclopts.App) and entry.default_command is None):
+                raise CisternalWireError(
+                    message=(
+                        f"cli group {joined!r}: {segment!r} is already a command, "
+                        "not a group"
+                    )
+                )
+            sub = entry
+            if mount:
+                _CLI_SUBAPPS[key] = sub  # adopted: never recorded in _CLI_CREATED_HELP
+        else:
+            if not mount:
+                return levels
+            sub = (
+                cyclopts.App(name=segment)
+                if help_text is None
+                else cyclopts.App(name=segment, help=help_text)
+            )
+            parent.command(sub)
+            _CLI_SUBAPPS[key] = sub
+            _CLI_CREATED_HELP[key] = help_text
+        levels.append(sub)
+        parent = sub
+    return levels
+
+
+def _get_or_create_subapp(
+    app: Any,
+    path: GroupPath,
+    *,
+    helps: Mapping[tuple[str, ...], str] | None = None,
+) -> Any:
+    """Return the cyclopts sub-App at *path* on *app*, creating levels as needed.
+
+    Walks the normalised path one level at a time (spec 5.6), reusing the
+    cache, adopting a pre-mounted user App, creating and mounting the rest,
+    and applying per-level help from *helps* (keys are normalised segment
+    tuples).
+
+    Raises:
+        CisternalWireError: a bad path, a segment that names a function
+            command, or a help that conflicts with the one cisternal applied.
+    """
+    return _walk_group_path(app, _normalise_group_path(path), helps, mount=True)[-1]
+
+
+def _probe_group_path(
+    app: Any,
+    path: GroupPath,
+    *,
+    helps: Mapping[tuple[str, ...], str] | None = None,
+) -> list[Any]:
+    """Read-only twin of :func:`_get_or_create_subapp` for the wire() pre-pass.
+
+    Raises exactly where the mounting walk would (a rejection or a help
+    conflict), stops descending at the first level the walk would create, and
+    returns the Apps that already exist on the path, outermost first (for the
+    A28 ``default_parameter`` computation and the leaf-clash check). Mounts
+    nothing and writes nothing to ``_CLI_SUBAPPS`` or ``_CLI_CREATED_HELP``.
+    """
+    return _walk_group_path(app, _normalise_group_path(path), helps, mount=False)
+
+
+def cli_group(app: Any, path: GroupPath, *, help: str | None = None) -> Any:
+    """Return the cyclopts sub-App at *path* on *app*, through the cache ``wire()`` uses.
+
+    Walks the path one segment at a time (spec 5.6) and applies the adoption
+    rule at each level, so a hand-registered command lands in the very group
+    object ``wire()`` populates, whichever of the two is called first::
+
+        cisternal.cli_group(app, "flow visuals").command(name="x")(cli_command(x))
+
+    ``help`` applies only to the leaf:
+
+    * when ``cli_group`` creates the leaf, it is created with that help;
+    * on a cache hit for a leaf cisternal created without help, the help is
+      applied;
+    * on a cache hit for a cisternal-created leaf that already has a different
+      help, :class:`CisternalWireError` is raised (the same help again is a
+      no-op);
+    * an adopted user App is left untouched and the help is ignored.
+
+    ``cli_group(app, "flow visuals")`` is
+    ``cli_group(cli_group(app, "flow"), "visuals")``.
+
+    Raises:
+        CisternalWireError: empty segments, a segment that names a function
+            command, or a conflicting help.
+        TypeError: *help* is neither ``None`` nor a ``str``.
+    """
+    if help is not None and not isinstance(help, str):
+        raise TypeError(f"cli_group: help must be a str or None, got {help!r}")
+    segments = _normalise_group_path(path)
+    return _get_or_create_subapp(
+        app, segments, helps=None if help is None else {segments: help}
     )
