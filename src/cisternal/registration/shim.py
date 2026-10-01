@@ -43,7 +43,7 @@ from cisternal._typed_callable import NamedCallable
 from cisternal.registration.errors import CisternalWireError
 
 
-async def dispatch(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+async def dispatch(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
     """Dispatch a call to *fn*, awaiting if it is a coroutine function.
 
     This is the E1 inner shim used inside the ``async def`` generated callable
@@ -79,7 +79,7 @@ def is_async(fn: Callable[..., Any]) -> bool:
     return asyncio.iscoroutinefunction(fn)
 
 
-def cli_dispatch(fn: NamedCallable, *args: Any, **kwargs: Any) -> Any:
+def cli_dispatch(fn: NamedCallable, /, *args: Any, **kwargs: Any) -> Any:
     """CLI-path helper: run *fn* from a synchronous context.
 
     For sync originals: calls ``fn(*args, **kwargs)`` directly and returns

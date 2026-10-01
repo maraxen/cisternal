@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, cast
 
 from cisternal._typed_callable import TaggedCallable
 from cisternal.registration.cli_contract import (
+    CYCLOPTS_BUILTIN_FLAGS,
     # The group cache and its helpers live in cli_contract (spec 4, 5.6) and are
     # re-exported here: ``wired._CLI_SUBAPPS`` is the same dict object.
     _CLI_SUBAPPS,  # noqa: F401
@@ -170,6 +171,16 @@ def _check_contract_args(
             f"cisternal.wire(): cli_contract must be a CliContract or None, "
             f"got {cli_contract!r}"
         )
+    # A decorator-supplied contract is checked at registration, but an entry can
+    # also reach the registry without going through register().
+    for entry in snapshot_view.values():
+        if entry.cli_contract is not None and not isinstance(
+            entry.cli_contract, CliContract
+        ):
+            raise TypeError(
+                f"cisternal.wire(): tool {entry.name!r}: cli_contract must be a "
+                f"CliContract, got {entry.cli_contract!r}"
+            )
     if not cli_contracts:
         return
     by_name = {entry.name: entry for entry in snapshot_view.values()}
@@ -248,6 +259,26 @@ def _resolved_default_parameter(*apps: Any) -> Any:
     from cyclopts import Parameter
 
     return Parameter.combine(*chain)
+
+
+def _reserved_flags(
+    apps: tuple[Any, ...], creates_leaf: bool
+) -> frozenset[str]:
+    """The long flags cyclopts reserves for the command's own App chain.
+
+    Each App on the path (root first) contributes its ``help_flags`` and
+    ``version_flags`` (a sub-App also answers to its parent's version flags, so
+    the union is the safe over-approximation).  When ``wire()`` will create the
+    leaf level itself, that fresh App carries cyclopts' defaults as well.
+    """
+    flags: set[str] = set(CYCLOPTS_BUILTIN_FLAGS) if creates_leaf else set()
+    for a in apps:
+        for attr in ("help_flags", "version_flags"):
+            value = getattr(a, attr, None) or ()
+            for flag in (value,) if isinstance(value, str) else value:
+                if isinstance(flag, str) and flag.startswith("--"):
+                    flags.add(flag)
+    return frozenset(flags)
 
 
 def _entry_group_path(entry: Any) -> tuple[str, ...]:
@@ -355,6 +386,9 @@ def _plan_cli(
             recovery=recovery,
             telemetry=cli_telemetry,
             app_default_parameter=_resolved_default_parameter(app, *existing),
+            reserved_flags=_reserved_flags(
+                (app, *existing), creates_leaf=len(existing) != len(group_path)
+            ),
         )
         plans[entry.name] = _CliPlan(
             cli_cmd=cli_cmd,
@@ -527,9 +561,10 @@ def wire(
             ``cli_group`` path is malformed or names a function command (not a
             group), or a ``cli_group_help`` key is unknown or conflicts with a
             help already applied.
-        TypeError: If *cli_contract* or a ``cli_contracts`` value is not a
-            :class:`CliContract`, or a ``cli_group_help`` value is not a
-            ``str``.
+        TypeError: If *cli_contract*, a ``cli_contracts`` value or a tool's
+            decorator ``cli_contract`` is not a :class:`CliContract` (the
+            decorator form is also rejected when the tool is registered, and
+            with ``app=None``), or a ``cli_group_help`` value is not a ``str``.
     """
     # C6: snapshot at wire-time; post-wire decorations are excluded.
     snapshot_view = snapshot(registry)

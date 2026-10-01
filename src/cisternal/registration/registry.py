@@ -142,7 +142,18 @@ def register(
         cli_name:  Optional CLI-visible command name within cli_group (or
                    top-level).  Defaults to ``name`` when ``None``.
         cli_contract: Optional per-tool :class:`CliContract`, stored as given.
+
+    Raises:
+        TypeError: *cli_contract* is neither ``None`` nor a :class:`CliContract`.
     """
+    if cli_contract is not None:
+        from cisternal.registration.cli_contract import CliContract  # lazy: R10
+
+        if not isinstance(cli_contract, CliContract):
+            raise TypeError(
+                f"cisternal.register(): cli_contract must be a CliContract or "
+                f"None, got {cli_contract!r}"
+            )
     tool_name = name if name is not None else fn.__name__
     entry = ToolEntry(
         name=tool_name,

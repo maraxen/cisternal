@@ -106,6 +106,10 @@ def tool(
 
     Returns:
         The original *fn* (not a wrapper).
+
+    Raises:
+        TypeError: *cli_contract* is neither ``None`` nor a :class:`CliContract`
+            (raised when the decorator is applied, not at ``wire()`` time).
     """
     def _register_and_return(f: NamedCallable) -> NamedCallable:
         register(

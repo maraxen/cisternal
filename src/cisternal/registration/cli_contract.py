@@ -28,7 +28,7 @@ import re
 import sys
 import types
 import typing
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, TypeAlias
 
@@ -43,6 +43,11 @@ SuccessFormatter = Callable[[Any, "CliContext"], Any]
 PrepareHook = Callable[["CliContext"], None]
 ReportFn = Callable[[BaseException], None]
 GroupPath: TypeAlias = str | tuple[str, ...]  # "flow visuals" == ("flow", "visuals")
+
+# The long flags a default cyclopts App reserves for itself (``help_flags``,
+# ``version_flags``). cyclopts handles them before a command parses its own, so a
+# ``CliOption`` that claims one can never be set.
+CYCLOPTS_BUILTIN_FLAGS: frozenset[str] = frozenset({"--help", "--version"})
 
 
 @dataclass(frozen=True)
@@ -556,6 +561,11 @@ def _claimed_long_flags(
         if not parsed:
             return None
 
+    if any("*" in n for n in (param.name or ())):
+        # A flattened parameter (``Parameter(name="*")`` on a dataclass): its
+        # fields, not the parameter itself, own the flags.
+        return _flattened_long_flags(identifier, hint, default, app_default_parameter)
+
     explicit = tuple(
         n if n.startswith("-") else f"--{n}" for n in (param.name or ())
     )
@@ -571,6 +581,48 @@ def _claimed_long_flags(
     return {n for n in (*names, *negatives) if n.startswith("--")}
 
 
+def _flattened_long_flags(
+    identifier: str,
+    hint: Any,
+    default: Any,
+    app_default_parameter: Any,
+) -> set[str]:
+    """The long flags of a parameter whose ``Parameter(name=...)`` contains ``*``.
+
+    Flattening hands the parameter's fields to cyclopts as flags of their own
+    (``Parameter(name="*")`` on a dataclass makes ``--<field>``, nested
+    dataclasses included), so the flags cannot be derived from the parameter's
+    names.  Derivation is delegated to cyclopts: a one-parameter stand-in with
+    the same hint and default goes through ``ArgumentCollection``, and every
+    ``--`` name of every resulting argument counts, negatives included
+    (they are already among ``Argument.names``).  The root argument's own
+    name is ``*``-shaped and drops out, because it is not a ``--`` name.
+    """
+    from cyclopts.argument import ArgumentCollection
+
+    def stand_in() -> None: ...
+
+    has_hint = hint is not inspect.Parameter.empty
+    param = inspect.Parameter(
+        identifier,
+        inspect.Parameter.KEYWORD_ONLY,
+        default=default,
+        annotation=hint if has_hint else inspect.Parameter.empty,
+    )
+    typing.cast("Any", stand_in).__signature__ = inspect.Signature([param])
+    stand_in.__annotations__ = {identifier: hint} if has_hint else {}
+
+    defaults = () if app_default_parameter is None else (app_default_parameter,)
+    collection = ArgumentCollection._from_callable(stand_in, *defaults)
+    return {
+        name
+        for argument in collection
+        if argument.parameter.parse is not False
+        for name in argument.names
+        if name.startswith("--")
+    }
+
+
 def _check_cli_collisions(
     sig: inspect.Signature,
     hints: Mapping[str, Any],
@@ -578,6 +630,7 @@ def _check_cli_collisions(
     *,
     tool_name: str,
     app_default_parameter: Any,
+    reserved_flags: Collection[str] = CYCLOPTS_BUILTIN_FLAGS,
 ) -> None:
     """Reject a ``CliOption`` that collides with the tool or with another option.
 
@@ -588,7 +641,11 @@ def _check_cli_collisions(
     annotations``).  Positional-only, ``*args`` and ``**kwargs`` parameters, and
     parameters cyclopts never parses, claim no flag.  cyclopts itself lets the
     first-declared parameter silently win a duplicated flag (A24), so this is the
-    only guard.
+    only guard.  A flattened parameter (``Parameter(name="*")`` on a dataclass)
+    claims its fields' flags.  An option may also not claim one of
+    *reserved_flags* (cyclopts' own ``--help`` / ``--version`` by default; ``wire()``
+    passes the flags of the App the command lands on), because cyclopts acts on
+    those before the command sees its arguments.
 
     Raises:
         CisternalWireError: naming *tool_name* and the clashing identifier/flag.
@@ -626,6 +683,13 @@ def _check_cli_collisions(
             opt.name, opt.annotation, opt.default, app_default_parameter
         )
         for flag in sorted(flags or ()):
+            if flag in reserved_flags:
+                raise CisternalWireError(
+                    message=(
+                        f"tool {tool_name!r}: CliOption {opt.name!r} claims {flag!r}, "
+                        f"which is a built-in cyclopts flag and can never be set"
+                    )
+                )
             if flag in claimed:
                 raise CisternalWireError(
                     message=(
@@ -659,6 +723,7 @@ def _build_cli_callable(
     recovery: tuple[Callable[[BaseException], bool], Callable[[], None]] | None,
     telemetry: bool,
     app_default_parameter: Any = None,
+    reserved_flags: Collection[str] = CYCLOPTS_BUILTIN_FLAGS,
 ) -> Callable[..., Any]:
     """Build the CLI callable for *fn* (what ``wire()`` registers on cyclopts).
 
@@ -693,10 +758,13 @@ def _build_cli_callable(
                      The target App's resolved ``default_parameter`` (A28), used
                      only by the collision check.  ``cli_command()`` passes
                      ``None`` (R8).
+        reserved_flags:
+                     Long flags an option may not claim: cyclopts' own help and
+                     version flags (``cli_command()`` assumes the defaults).
 
     Raises:
         CisternalWireError: an unresolvable parameter annotation, or an option
-            that collides with the tool's parameters (spec 5.4).
+            that collides with the tool's parameters or a built-in flag (spec 5.4).
     """
     if contract is None:
         from cisternal.registration import wired  # lazy: wired imports this module
@@ -714,6 +782,7 @@ def _build_cli_callable(
         options,
         tool_name=tool_name,
         app_default_parameter=app_default_parameter,
+        reserved_flags=reserved_flags,
     )
 
     # __signature__: fn's, plus each option keyword-only, before any **kwargs.
