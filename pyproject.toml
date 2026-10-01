@@ -73,6 +73,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "cisternal.assets" = ["data/*.toml"]
+# `cisternal plugin install` falls back to this when installed from a wheel;
+# regenerate with `cisternal assets snapshot --out src/cisternal/agent_plugin.json`.
+"cisternal" = ["agent_plugin.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

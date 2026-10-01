@@ -63,6 +63,19 @@ uv run cisternal assets validate --manifest .praxia/manifest.toml --surface clau
 `assets export` always exits `0` — see Gotchas. Check stderr, not the
 exit code, to know whether an export silently dropped something.
 
+The `plugin` sub-app (the same one other tools mount as `<tool> plugin`)
+is the install path; `--dry-run` and `info` touch nothing:
+
+```bash
+uv run cisternal plugin info                     # bundle source + marketplace layer
+uv run cisternal plugin install claude --dry-run
+uv run cisternal plugin export cursor --out /tmp/cisternal_cursor
+```
+
+Editing `.praxia/manifest.toml` or any skill/agent it lists makes the
+packaged snapshot stale; `tests/test_plugin_app.py` fails until you run
+`uv run cisternal assets snapshot --out src/cisternal/agent_plugin.json`.
+
 ### Direct invocation (most PRs touch this layer)
 
 Most changes to cisternal are library-level (registration/, telemetry/,

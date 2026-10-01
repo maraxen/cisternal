@@ -9,6 +9,10 @@ Subcommand tree:
     cisternal assets validate [OPTIONS]
     cisternal assets install [OPTIONS]
     cisternal assets publish-shared [OPTIONS]
+    cisternal assets update-all [OPTIONS]
+    cisternal assets snapshot [OPTIONS]
+    cisternal plugin install|update|export|info   (cisternal.plugin sub-app,
+                                                   mountable by any tool's CLI)
     cisternal telemetry doctor
 
 This module is FASTMCP-FREE by design (spec M4): importing ``cisternal.cli``
@@ -39,13 +43,10 @@ import importlib
 import importlib.metadata
 import json
 import logging
-import os
-import shutil
 import subprocess
 import sys
 import tempfile
-import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -69,6 +70,12 @@ telemetry_app = cyclopts.App(
 )
 app.command(assets_app)
 app.command(telemetry_app)
+
+# cisternal's own plugin, through the same sub-app every tool can mount
+# (`cisternal plugin install claude`). Dogfoods cisternal.plugin.
+from cisternal.plugin import PluginSpec, plugin_app  # noqa: E402
+
+app.command(plugin_app(PluginSpec(name="cisternal", package="cisternal", cli="cisternal")))
 
 
 @telemetry_app.command(name="doctor")
@@ -531,12 +538,14 @@ def publish_shared(
         ),
     ] = None,
     marketplace: Annotated[
-        Path,
+        Path | None,
         cyclopts.Parameter(
             name=["--marketplace"],
-            help="Marketplace root (default: ~/.cisternal/claude-plugin-marketplace).",
+            help="Marketplace root (default: resolved -- $CISTERNAL_PLUGIN_MARKETPLACE, "
+            "[tool.cisternal] plugin_marketplace, ~/.config/cisternal/config.toml; "
+            "see cisternal.plugin.config).",
         ),
-    ] = Path("~/.cisternal/claude-plugin-marketplace").expanduser(),
+    ] = None,
     refresh: Annotated[
         bool,
         cyclopts.Parameter(
@@ -594,46 +603,31 @@ def publish_shared(
     itself must be registered once per machine
     (``/plugin marketplace add <marketplace>``).
     """
+    from cisternal.plugin.shared import handle_shadowed, refresh_claude  # noqa: PLC0415
+
+    root = _resolve_marketplace(marketplace)
     result = _publish_shared_core(
         manifest=manifest,
         registry=registry,
         name=name,
         description=description,
-        marketplace=marketplace,
+        marketplace=root,
     )
     print(f"published {result.name}@{result.version} -> {result.out}")
-    print(f"marketplace: {marketplace}")
-    _handle_shadowed([result], prune=prune_shadowed)
-    if refresh and _refresh_claude(marketplace, [result], claude_bin=claude_bin) != 0:
+    print(f"marketplace: {root}")
+    handle_shadowed([result], prune=prune_shadowed)
+    if refresh and refresh_claude(root, [result], claude_bin=claude_bin) != 0:
         raise SystemExit(1)
 
 
-# Written next to plugin.json by publish-shared; read by update-all. Claude
-# Code ignores unknown files in .claude-plugin/.
-SOURCE_SIDECAR = "cisternal-source.json"
+def _resolve_marketplace(marketplace: Path | None) -> Path:
+    from cisternal.plugin.config import resolve_marketplace_root  # noqa: PLC0415
 
-
-@dataclass(frozen=True)
-class _PublishResult:
-    name: str
-    previous_version: str | None
-    version: str
-    out: Path
-    skill_names: tuple[str, ...] = ()
-    agent_names: tuple[str, ...] = ()
-
-    @property
-    def changed(self) -> bool:
-        return self.previous_version != self.version
-
-
-def _read_plugin_version(plugin_dir: Path) -> str | None:
     try:
-        doc = json.loads((plugin_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    version = doc.get("version") if isinstance(doc, dict) else None
-    return version if isinstance(version, str) else None
+        return resolve_marketplace_root(marketplace)
+    except ValueError as exc:
+        _log.error("cisternal.cli: %s", exc)
+        raise SystemExit(2) from exc
 
 
 def _publish_shared_core(
@@ -643,18 +637,11 @@ def _publish_shared_core(
     name: str | None,
     description: str | None,
     marketplace: Path,
-) -> _PublishResult:
-    """Export + scrub + write + merge one plugin; shared by publish-shared and update-all."""
-    from cisternal.assets.bundle import AssetBundle, BundleMetadata  # noqa: PLC0415
+):
+    """Load a manifest strictly, then publish it into the shared marketplace."""
+    from cisternal.assets.bundle import BundleMetadata  # noqa: PLC0415
     from cisternal.assets.load import load_asset_report  # noqa: PLC0415
-    from cisternal.export.marketplace import (  # noqa: PLC0415
-        content_version,
-        default_seed,
-        merge_marketplace_entry,
-        plugin_output_dir,
-    )
-    from cisternal.export.registry import get_emitter  # noqa: PLC0415
-    from cisternal.export.write import write_bundle  # noqa: PLC0415
+    from cisternal.plugin.shared import publish_bundle  # noqa: PLC0415
 
     report = load_asset_report(manifest=manifest, registry=registry)
     if report.conflicts:
@@ -664,233 +651,40 @@ def _publish_shared_core(
         _log.error("cisternal.cli: publish-shared failed — warnings: %s", report.warnings)
         raise SystemExit(1)
 
-    resolved_name = name or report.bundle.metadata.name
-    resolved_description = description or report.bundle.metadata.description
-    base_bundle = AssetBundle(
+    meta = report.bundle.metadata
+    bundle = replace(
+        report.bundle,
         metadata=BundleMetadata(
-            name=resolved_name,
-            version=report.bundle.metadata.version,
-            description=resolved_description,
+            name=name or meta.name,
+            version=meta.version,
+            description=description or meta.description,
         ),
-        agents=report.bundle.agents,
-        skills=report.bundle.skills,
-        commands=report.bundle.commands,
-        hook_specs=report.bundle.hook_specs,
-        mcp_servers=report.bundle.mcp_servers,
     )
-
-    emitter = get_emitter("claude")
-    if emitter is None:
-        _log.error("cisternal.cli: publish-shared failed — claude emitter is not registered")
-        raise SystemExit(2)
-
-    # Two passes: the first (base version) derives a content digest; the
-    # second bakes the final, cache-busting version into plugin.json.
-    version = content_version(
-        base_bundle.metadata.version,
-        emitter.emit(base_bundle),
-    )
-    versioned_bundle = AssetBundle(
-        metadata=BundleMetadata(
-            name=resolved_name,
-            version=version,
-            description=resolved_description,
-        ),
-        agents=base_bundle.agents,
-        skills=base_bundle.skills,
-        commands=base_bundle.commands,
-        hook_specs=base_bundle.hook_specs,
-        mcp_servers=base_bundle.mcp_servers,
-    )
-    files = emitter.emit(versioned_bundle)
-
-    out = plugin_output_dir(marketplace, resolved_name)
-    previous_version = _read_plugin_version(out)
-
-    # write_bundle does not prune stale files, so scrub any previous export
-    # of this same plugin before writing the fresh one.
-    shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True, exist_ok=True)
-
-    write_bundle(files, out)
     source = {
         "manifest": str(manifest.expanduser().resolve()),
         "registry": registry,
         "name": name,
         "description": description,
     }
-    (out / ".claude-plugin" / SOURCE_SIDECAR).write_text(
-        json.dumps(source, indent=2) + "\n", encoding="utf-8"
-    )
-
-    entry: dict[str, object] = {
-        "name": resolved_name,
-        "source": f"./plugins/{resolved_name}",
-        "description": resolved_description,
-    }
-    merge_marketplace_entry(
-        marketplace,
-        entry,
-        seed=default_seed(),
-        readme_template=_MARKETPLACE_README_TEMPLATE,
-    )
-    return _PublishResult(
-        name=resolved_name,
-        previous_version=previous_version,
-        version=version,
-        out=out,
-        skill_names=tuple(s.name for s in versioned_bundle.skills),
-        agent_names=tuple(a.name for a in versioned_bundle.agents),
-    )
-
-
-def _claude_home() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
-
-
-def _find_shadowed(result: _PublishResult, claude_home: Path) -> list[Path]:
-    """User-level copies that duplicate what this plugin already ships.
-
-    Claude Code lists a plugin's skills as ``<plugin>:<skill>``; a same-named
-    ``<claude_home>/skills/<skill>/`` is a second, unnamespaced listing of the
-    same skill (and wins over the plugin's copy when they drift). Agents are
-    matched by the ``<plugin>-<agent>.md`` name that legacy per-tool exporters
-    wrote, so a user's own same-named agent is never touched.
-    """
-    found = [
-        claude_home / "skills" / skill
-        for skill in result.skill_names
-        if (claude_home / "skills" / skill).exists()
-    ]
-    found += [
-        claude_home / "agents" / f"{result.name}-{agent}.md"
-        for agent in result.agent_names
-        if (claude_home / "agents" / f"{result.name}-{agent}.md").is_file()
-    ]
-    return found
-
-
-def _handle_shadowed(results: list[_PublishResult], *, prune: bool) -> None:
-    """Report (or with *prune*, move into a backup) copies shadowing published plugins."""
-    claude_home = _claude_home()
-    shadowed = [(r, p) for r in results for p in _find_shadowed(r, claude_home)]
-    if not shadowed:
-        return
-    if not prune:
-        for r, path in shadowed:
-            print(f"shadowed: {path} duplicates plugin {r.name}")
-        print("rerun with --prune-shadowed to move these into a backup")
-        return
-    stamp = time.strftime("%Y%m%dT%H%M%S")
-    backup_root = Path(
-        os.environ.get("CISTERNAL_SHADOW_BACKUP_DIR") or "~/.cisternal/shadowed"
-    ).expanduser() / stamp
-    for r, path in shadowed:
-        dest = backup_root / path.relative_to(claude_home)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(dest))
-        print(f"pruned: {path} (duplicate of plugin {r.name}) -> {dest}")
-
-
-def _refresh_claude(
-    marketplace: Path, results: list[_PublishResult], *, claude_bin: str
-) -> int:
-    """Bring installed plugins up to the just-published versions. Returns an exit code.
-
-    Compares each INSTALLED version against the published one, not merely
-    "did this publish change the marketplace copy": the marketplace can already
-    be ahead of the install (e.g. published by another tool or an earlier run
-    with --no-refresh). A published-but-not-installed plugin gets an install
-    hint rather than being installed unasked. A missing ``claude`` binary is
-    not an error (the publish itself succeeded) -- it prints the equivalent
-    slash commands instead.
-    """
-    if not results:
-        return 0
     try:
-        mkt_doc = json.loads(
-            (marketplace / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
-        )
-        mkt_name = mkt_doc["name"]
-    except (OSError, ValueError, KeyError) as exc:
-        _log.error("cisternal.cli: cannot read marketplace name for refresh: %s", exc)
-        return 1
-
-    def manual_hint(targets: list[_PublishResult]) -> None:
-        print(f"refresh manually in Claude Code: /plugin marketplace update {mkt_name}")
-        for r in targets:
-            print(f"  /plugin update {r.name}@{mkt_name}")
-
-    try:
-        listing = subprocess.run(
-            [claude_bin, "plugin", "list", "--json"], capture_output=True, text=True
-        )
-    except OSError as exc:
-        print(f"claude: could not run {claude_bin!r} ({exc})")
-        manual_hint([r for r in results if r.changed])
-        return 0
-    if listing.returncode != 0:
-        print(f"claude: `plugin list` failed: {listing.stderr.strip()}")
-        manual_hint([r for r in results if r.changed])
-        return 0
-    try:
-        installed = {p["id"]: p.get("version") for p in json.loads(listing.stdout)}
-    except (ValueError, KeyError, TypeError):
-        print("claude: could not parse `plugin list --json` output")
-        manual_hint([r for r in results if r.changed])
-        return 0
-
-    stale = [
-        r for r in results
-        if f"{r.name}@{mkt_name}" in installed and installed[f"{r.name}@{mkt_name}"] != r.version
-    ]
-    for r in results:
-        if r.changed and f"{r.name}@{mkt_name}" not in installed:
-            print(f"{r.name}@{mkt_name}: published, not installed -- "
-                  f"claude plugin install {r.name}@{mkt_name} --scope user")
-    if not stale:
-        print("claude: installed plugins already match the published versions")
-        return 0
-
-    update = subprocess.run(
-        [claude_bin, "plugin", "marketplace", "update", mkt_name], capture_output=True, text=True
-    )
-    if update.returncode != 0:
-        _log.error(
-            "cisternal.cli: `claude plugin marketplace update %s` failed (exit %d): %s",
-            mkt_name, update.returncode, update.stderr.strip(),
-        )
-        return 1
-
-    failures = 0
-    for r in stale:
-        plugin_id = f"{r.name}@{mkt_name}"
-        upd = subprocess.run(
-            [claude_bin, "plugin", "update", plugin_id], capture_output=True, text=True
-        )
-        if upd.returncode != 0:
-            _log.error(
-                "cisternal.cli: `claude plugin update %s` failed (exit %d): %s",
-                plugin_id, upd.returncode, upd.stderr.strip(),
-            )
-            failures += 1
-        else:
-            print(f"{plugin_id}: {installed[plugin_id]} -> {r.version}")
-    if failures == 0:
-        print("restart Claude Code to load the updated plugin(s)")
-    return 1 if failures else 0
+        return publish_bundle(bundle, marketplace=marketplace, source=source)
+    except RuntimeError as exc:
+        _log.error("cisternal.cli: publish-shared failed — %s", exc)
+        raise SystemExit(2) from exc
 
 
 @assets_app.command(name="update-all")
 def update_all(
     *,
     marketplace: Annotated[
-        Path,
+        Path | None,
         cyclopts.Parameter(
             name=["--marketplace"],
-            help="Marketplace root (default: ~/.cisternal/claude-plugin-marketplace).",
+            help="Marketplace root (default: resolved -- $CISTERNAL_PLUGIN_MARKETPLACE, "
+            "[tool.cisternal] plugin_marketplace, ~/.config/cisternal/config.toml; "
+            "see cisternal.plugin.config).",
         ),
-    ] = Path("~/.cisternal/claude-plugin-marketplace").expanduser(),
+    ] = None,
     refresh: Annotated[
         bool,
         cyclopts.Parameter(
@@ -924,13 +718,22 @@ def update_all(
     whose content changed. Plugins without the sidecar are listed as unmanaged:
     run ``cisternal assets publish-shared`` once from that tool's repo to enroll it.
     """
+    from cisternal.plugin.shared import (  # noqa: PLC0415
+        SOURCE_SIDECAR,
+        PublishResult,
+        handle_shadowed,
+        refresh_claude,
+    )
+
+    marketplace = _resolve_marketplace(marketplace)
     plugins_dir = marketplace / "plugins"
     if not plugins_dir.is_dir():
         _log.error("cisternal.cli: no plugins directory at %s", plugins_dir)
         raise SystemExit(1)
 
-    results: list[_PublishResult] = []
+    results: list[PublishResult] = []
     unmanaged: list[str] = []
+    tool_managed: list[str] = []
     failed: list[str] = []
     for plugin_dir in sorted(p for p in plugins_dir.iterdir() if p.is_dir()):
         sidecar = plugin_dir / ".claude-plugin" / SOURCE_SIDECAR
@@ -939,6 +742,11 @@ def update_all(
             continue
         try:
             source = json.loads(sidecar.read_text(encoding="utf-8"))
+            if "update_command" in source:
+                # Published by a tool's `plugin` sub-app: that tool owns the
+                # recipe (version, snapshot vs checkout), so defer to it.
+                tool_managed.append(f"{plugin_dir.name}: run `{source['update_command']}`")
+                continue
             source_manifest = Path(source["manifest"])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             failed.append(f"{plugin_dir.name}: unreadable {SOURCE_SIDECAR} ({exc})")
@@ -970,82 +778,86 @@ def update_all(
             f"{plugin_name}: unmanaged (no {SOURCE_SIDECAR}) -- run "
             "`cisternal assets publish-shared` once from its repo to enroll it"
         )
+    for line in tool_managed:
+        print(f"managed by its tool -- {line}")
     for line in failed:
         print(f"FAILED {line}")
 
     if not dry_run:
-        _handle_shadowed(results, prune=prune_shadowed)
+        handle_shadowed(results, prune=prune_shadowed)
 
     rc = 0
     if refresh and not dry_run:
-        rc = _refresh_claude(marketplace, results, claude_bin=claude_bin)
+        rc = refresh_claude(marketplace, results, claude_bin=claude_bin)
     if failed or rc:
         raise SystemExit(1)
 
 
-_MARKETPLACE_README_TEMPLATE = """\
-<!-- cisternal:managed -->
-# Cisternal Local Plugin Marketplace
+# ---------------------------------------------------------------------------
+# cisternal assets snapshot
+# ---------------------------------------------------------------------------
 
-This is a shared Claude Code marketplace for locally built plugins from the
-cisternal tool family (praxia, myxcel, bathos, and related tools).
 
-## Registering the Marketplace (One Time)
+@assets_app.command(name="snapshot")
+def snapshot(
+    *,
+    manifest: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Path to manifest.toml (default: .praxia/manifest.toml).",
+        ),
+    ] = Path(".praxia/manifest.toml"),
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--out"],
+            help="Snapshot file to write, inside your package (e.g. src/<pkg>/agent_plugin.json).",
+        ),
+    ],
+    check: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--check"],
+            help="Write nothing; exit 1 if --out is missing or differs from the manifest (CI).",
+        ),
+    ] = False,
+) -> None:
+    """Freeze a manifest's resolved assets into one JSON file to ship as package data.
 
-Register this marketplace once in Claude Code, and every listed plugin
-becomes installable:
+    A manifest points at files in the source checkout, so it cannot ship in a
+    wheel. The snapshot inlines them; a tool that mounts
+    ``cisternal.plugin.plugin_app`` falls back to it when installed from a
+    wheel, so ``<tool> plugin install claude`` works without the repo.
+    Registry commands are not frozen -- they are merged live at install time.
+    """
+    from cisternal.assets.manifest import ManifestAssetSource  # noqa: PLC0415
+    from cisternal.assets.snapshot import dumps_snapshot  # noqa: PLC0415
 
-```
-/plugin marketplace add ~/.cisternal/claude-plugin-marketplace
-```
+    report = ManifestAssetSource(manifest).load()
+    if report.warnings:
+        _log.error("cisternal.cli: snapshot failed — warnings: %s", report.warnings)
+        raise SystemExit(1)
+    text = dumps_snapshot(report.bundle)
 
-After registering, install any plugin with:
+    if check:
+        try:
+            current = out.read_text(encoding="utf-8")
+        except OSError:
+            current = None
+        if current != text:
+            _log.error(
+                "cisternal.cli: snapshot %s is %s; rerun `cisternal assets snapshot "
+                "--manifest %s --out %s`",
+                out, "missing" if current is None else "stale", manifest, out,
+            )
+            raise SystemExit(1)
+        print(f"snapshot up to date: {out}")
+        return
 
-```
-/plugin install <tool>@cisternal-local
-```
-
-## Publishing a Tool
-
-From the tool's own repo:
-
-```
-cisternal assets publish-shared --manifest .praxia/manifest.toml
-```
-
-This scrubs the destination plugin directory, exports a fresh bundle at a
-content-derived version, and merges the marketplace entry under an flock'd
-atomic read-modify-write — safe to run concurrently with other tools
-publishing to the same marketplace. If the content changed and the plugin is
-installed, it then runs `claude plugin marketplace update` + `claude plugin
-update` for you (`--no-refresh` to skip); restart Claude Code to load it.
-
-## Updating Everything
-
-```
-cisternal assets update-all
-```
-
-Republishes every plugin here from the repo that last published it (recorded
-in `plugins/<tool>/.claude-plugin/cisternal-source.json`) and refreshes the
-changed, installed ones in Claude Code. `--dry-run` lists what it would do.
-
-## One Source Per Skill
-
-Plugins own their skills and agents. `publish-shared` and `update-all` report
-any `~/.claude/skills/<skill>/` or `~/.claude/agents/<plugin>-<agent>.md` copy
-that duplicates a published plugin; add `--prune-shadowed` to move them into
-`~/.cisternal/shadowed/<timestamp>/`.
-
-## Known Gaps
-
-- **No cross-machine sync.** This marketplace is local to one machine.
-- **Restart required.** Claude Code loads an updated plugin on restart.
-- **MCP server name collisions.** Before installing a plugin, check whether
-  its `.mcp.json` declares a server name already registered globally
-  (`claude mcp list`) — installing would otherwise create a confusing
-  plugin-namespaced duplicate.
-"""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    print(f"wrote {out}")
 
 
 # ---------------------------------------------------------------------------
