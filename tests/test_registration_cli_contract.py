@@ -7,8 +7,9 @@ Spec: .praxia/docs/specs/261001_wire-cli-contract.md (rev 8), section 5.5 and
 tests 9 (no-contract variant), 9b, 9c, 9d (no-contract half), 16c (no-contract
 half) and 18.
 
-The contract-path variants (tests 9 contract, 9d contract half, 16c contract
-half) belong to T3/T4 and are not covered here.
+T3 tests (the contract-path CLI callable and ``cli_command``) are at the end of
+the file. The ``wire()``-level variants (tests 9 contract, 9d contract half, the
+``wire()`` half of 16a) belong to T4.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ import sys
 import types
 from pathlib import Path
 from typing import Annotated, Any, ForwardRef, cast
+from typing import get_args as typing_get_args
+from typing import get_origin as typing_get_origin
 
 import pytest
 from cyclopts import App, Parameter
@@ -32,6 +35,7 @@ from cisternal.registration.cli_contract import (
     CliContract,
     CliOption,
     _resolve_exit,
+    cli_command,
     default_report,
     exit_code_attr,
     json_option,
@@ -881,3 +885,1317 @@ def test_module_imports_without_fastmcp():
         [sys.executable, "-c", code], capture_output=True, text=True, check=False
     )
     assert proc.returncode == 0, proc.stderr
+
+
+# ===========================================================================
+# T3: the contract-path CLI callable and the public ``cli_command``
+# ===========================================================================
+#
+# Spec: .praxia/docs/specs/261001_wire-cli-contract.md (rev 8), sections 5.2-5.4
+# and tests 1, 2, 4-6, 8, 10-14, 16a (cli_command half + variant), 16c (contract
+# half), 17, 19, 20, 20b, 22, 26-29 and 37.
+#
+# Every test goes through ``cli_command()`` and a hand-registered command; the
+# ``wire()`` integration belongs to T4.
+
+
+class MyErr(Exception):
+    """Stand-in for a consumer's mapped error."""
+
+
+class RecErr(Exception):
+    """An error with the duck-typed ``to_result()`` the recovery leg looks for."""
+
+    def to_result(self) -> dict:
+        return {"error": "recovered-shape", "msg": str(self)}
+
+
+_SEEN: list[Any] = []
+
+
+@pytest.fixture(autouse=True)
+def _clear_seen():
+    _SEEN.clear()
+    yield
+    _SEEN.clear()
+
+
+@pytest.fixture
+def events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    """Spy on the ``emit_event`` that ``timed_command`` calls.
+
+    Patched where ``timed_command`` looks it up (``cisternal.adapters.cli``), and
+    proven live by ``test_events_spy_sees_a_successful_command`` below, so a test
+    that asserts "zero events" cannot pass vacuously.
+    """
+    rec: list[tuple[str, dict[str, Any]]] = []
+
+    def spy(name: str, **fields: Any) -> None:
+        rec.append((name, fields))
+
+    monkeypatch.setattr("cisternal.adapters.cli.emit_event", spy)
+    return rec
+
+
+def _cmd_events(events: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict]]:
+    return [(n, f) for n, f in events if n.startswith("cli.cmd_")]
+
+
+def _app_for(
+    fn: Any,
+    contract: CliContract | None = None,
+    *,
+    app: App | None = None,
+    **kwargs: Any,
+) -> App:
+    """A fresh App with ``cli_command(fn, ...)`` registered under ``fn.__name__``."""
+    app = app if app is not None else App(name="cli")
+    app.command(name=fn.__name__)(cli_command(fn, contract=contract, **kwargs))
+    return app
+
+
+def _exit(app: App, argv: list[str]) -> int | None:
+    return _run(app, argv)
+
+
+def _err(capsys: pytest.CaptureFixture[str]) -> str:
+    return capsys.readouterr().err
+
+
+# --- tools -------------------------------------------------------------------
+
+
+def fails(msg: str = "boom") -> str:
+    """Always raises ValueError(msg)."""
+    raise ValueError(msg)
+
+
+def adds(a: int, b: int = 1) -> dict:
+    """Add two numbers.
+
+    Args:
+        a: The first addend.
+        b: The second addend.
+    """
+    _SEEN.append((a, b))
+    return {"sum": a + b}
+
+
+def titled(title: str | None = None, audience: str = "lab") -> None:
+    _SEEN.append((title, audience))
+
+
+def sub_tool(x: int) -> int:
+    if x < 0:
+        raise MyErr(f"negative {x}")
+    return x
+
+
+def composite(x: int) -> int:
+    """A hand-written composite that chains two tools."""
+    return sub_tool(x) + sub_tool(x - 5)
+
+
+async def aadd(a: int, b: int) -> dict:
+    return {"sum": a + b}
+
+
+async def acomposite(x: int) -> dict:
+    first = await aadd(x, 1)
+    if x > 1:
+        raise MyErr("second leg failed")
+    return {"first": first, "second": await aadd(x, 2)}
+
+
+def with_extra(a: int, **extra: str) -> dict:
+    return {"a": a, "extra": extra}
+
+
+def mixed(pos, /, mid=5, *rest, kw="k", **extra):  # noqa: ANN001, ANN002, ANN003
+    _SEEN.append((pos, mid, rest, kw, extra))
+
+
+def pair(a=1, b=2):  # noqa: ANN001
+    _SEEN.append((a, b))
+
+
+def pos_only(a=1, b=2, /):  # noqa: ANN001
+    _SEEN.append((a, b))
+
+
+def star(a=1, *rest):  # noqa: ANN001, ANN002
+    _SEEN.append((a, rest))
+
+
+def needs_a(a: int, b: int = 0) -> None:
+    _SEEN.append((a, b))
+
+
+def envelope() -> dict:
+    return {"error": "bad thing"}
+
+
+def hidden_default(
+    name: str, token: Annotated[str | None, Parameter(parse=False)] = None
+) -> None:
+    _SEEN.append((name, token))
+
+
+def hidden_required(
+    name: str, *, token: Annotated[str, Parameter(parse=False)]
+) -> None:
+    _SEEN.append((name, token))
+
+
+# --- identity, signature and the no-contract delegation ----------------------
+
+
+def test_contract_callable_identity_matches_the_tool():
+    cmd = cli_command(adds, contract=CliContract())
+    assert cmd.__name__ == "adds"
+    assert cmd.__doc__ == adds.__doc__
+    assert not hasattr(cmd, "__wrapped__")
+    # No __qualname__/__module__ copied from the tool (the legacy closure copies none).
+    assert cmd.__module__ == cli_contract_module.__name__
+    assert cmd.__module__ != adds.__module__
+
+
+def test_empty_contract_signature_equals_the_tool_signature():
+    cmd = cli_command(adds, contract=CliContract())
+    assert inspect.signature(cmd) == inspect.signature(adds)
+    assert inspect.signature(cmd).return_annotation == "dict"
+
+
+def test_annotations_are_resolved_objects_without_return():
+    cmd = cli_command(adds, contract=CliContract(options=[json_option()]))
+    assert cmd.__annotations__["a"] is int
+    assert cmd.__annotations__["b"] is int
+    assert "return" not in cmd.__annotations__
+    assert all(not isinstance(v, str) for v in cmd.__annotations__.values())
+
+
+def test_options_are_injected_keyword_only_before_var_keyword():
+    opt = CliOption("flag", bool, False)
+    cmd = cli_command(with_extra, contract=CliContract(options=[json_option(), opt]))
+    params = inspect.signature(cmd).parameters
+    assert list(params) == ["a", "json_out", "flag", "extra"]
+    assert params["json_out"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["flag"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["json_out"].default is False
+    assert params["extra"].kind is inspect.Parameter.VAR_KEYWORD
+    # The return annotation survives the signature rewrite.
+    assert inspect.signature(cmd).return_annotation == "dict"
+    # The tool's own signature is untouched.
+    assert list(inspect.signature(with_extra).parameters) == ["a", "extra"]
+
+
+def test_options_are_appended_after_keyword_only_tool_parameters():
+    cmd = cli_command(mixed, contract=CliContract(options=[json_option()]))
+    assert list(inspect.signature(cmd).parameters) == [
+        "pos",
+        "mid",
+        "rest",
+        "kw",
+        "json_out",
+        "extra",
+    ]
+
+
+def test_option_help_wraps_the_annotation_in_parameter_help():
+    opt = CliOption("flag", bool, False, help="Flag help")
+    cmd = cli_command(adds, contract=CliContract(options=[opt]))
+    hint = cmd.__annotations__["flag"]
+    assert typing_get_origin(hint) is Annotated
+    assert typing_get_args(hint)[0] is bool
+    helps = [m.help for m in typing_get_args(hint)[1:] if isinstance(m, Parameter)]
+    assert helps == ["Flag help"]
+    # The wrapped hint is what the signature carries, too.
+    assert inspect.signature(cmd).parameters["flag"].annotation == hint
+
+
+def test_option_without_help_keeps_its_annotation_unwrapped():
+    opt = CliOption("flag", bool, False)
+    cmd = cli_command(adds, contract=CliContract(options=[opt]))
+    assert cmd.__annotations__["flag"] is bool
+
+
+def test_no_contract_delegates_to_make_cli_cmd(monkeypatch: pytest.MonkeyPatch):
+    from cisternal.registration import wired
+
+    calls: list[tuple[Any, str, dict[str, Any]]] = []
+    sentinel = object()
+
+    def spy(original_fn: Any, cmd_name: str, **kwargs: Any) -> Any:
+        calls.append((original_fn, cmd_name, kwargs))
+        return sentinel
+
+    monkeypatch.setattr(wired, "_make_cli_cmd", spy)
+    recovery = (lambda e: False, lambda: None)
+    out = cli_command(adds, name="custom", recovery=recovery, telemetry=False)
+    assert out is sentinel
+    assert calls == [(adds, "custom", {"recovery": recovery, "telemetry": False})]
+
+
+def test_no_contract_is_todays_f1_closure(capsys):
+    app = _app_for(fails)
+    assert _exit(app, ["fails", "--msg", "x"]) == 1
+    assert _err(capsys) == "Error (ValueError): x\n"
+    cmd = cli_command(adds)
+    assert inspect.signature(cmd) == inspect.signature(adds)
+    assert not hasattr(cmd, "__wrapped__")
+
+
+def test_cli_command_does_not_apply_help_or_show():
+    """``help``/``show`` belong to registration, which cli_command does not do."""
+    app = _app_for(adds, CliContract(help="Custom help", show=False))
+    assert "Custom help" not in (app["adds"].help or "")
+
+
+# --- test 1, 2: mapping ------------------------------------------------------
+
+
+def test_1_int_mapping_exits_with_the_code_and_the_f1_line(capsys):
+    app = _app_for(fails, CliContract(exit_codes={ValueError: 3}))
+    assert _exit(app, ["fails", "--msg", "msg"]) == 3
+    captured = capsys.readouterr()
+    assert captured.err == "Error (ValueError): msg\n"
+    assert captured.out == ""
+
+
+def test_2_handler_renders_its_own_report_and_picks_the_code(capsys):
+    seen: list[Any] = []
+
+    def handler(exc: Any, ctx: CliContext) -> int:
+        seen.append((str(exc), ctx.tool_name, ctx.command))
+        print(f"HANDLED {exc}", file=sys.stderr)
+        return 7
+
+    app = _app_for(fails, CliContract(exit_codes={ValueError: handler}))
+    assert _exit(app, ["fails", "--msg", "msg"]) == 7
+    captured = capsys.readouterr()
+    assert captured.err == "HANDLED msg\n"  # and no F1 line
+    assert seen == [("msg", "fails", "fails")]
+
+
+def test_tool_name_and_command_are_configurable():
+    seen: list[CliContext] = []
+
+    def handler(exc: Any, ctx: CliContext) -> int:
+        seen.append(ctx)
+        return 2
+
+    contract = CliContract(exit_codes={ValueError: handler})
+    app = _app_for(fails, contract, name="my_tool", command="grp fails")
+    assert _exit(app, ["fails"]) == 2
+    assert (seen[0].tool_name, seen[0].command) == ("my_tool", "grp fails")
+
+
+# --- test 4: CLI-only options ------------------------------------------------
+
+
+def test_4_json_option_reaches_the_formatter_but_not_the_tool(capsys):
+    seen: list[dict[str, Any]] = []
+
+    def fmt(result: Any, ctx: CliContext) -> None:
+        seen.append(dict(ctx.options))
+        print(f"RESULT {result}")
+
+    app = _app_for(adds, CliContract(format_success=fmt, options=[json_option()]))
+    assert _exit(app, ["adds", "2", "--json"]) == 0
+    assert _exit(app, ["adds", "2"]) == 0
+    assert seen == [{"json_out": True}, {"json_out": False}]
+    # ``adds`` has a strict signature: a leaked ``json_out`` kwarg would have
+    # raised TypeError and exited 1.
+    assert _SEEN == [(2, 1), (2, 1)]
+    out = capsys.readouterr().out
+    assert out.count("RESULT {'sum': 3}") == 2
+
+
+def test_4_json_option_has_no_negative_flag():
+    app = _app_for(adds, CliContract(options=[json_option()]))
+    with pytest.raises(Exception, match="no-json"):
+        app(["adds", "2", "--no-json"], exit_on_error=False)
+
+
+def test_4_var_keyword_tool_keeps_options_out_of_extra():
+    seen: list[CliContext] = []
+
+    def fmt(result: Any, ctx: CliContext) -> None:
+        seen.append(ctx)
+
+    app = _app_for(with_extra, CliContract(format_success=fmt, options=[json_option()]))
+    assert _exit(app, ["with_extra", "1", "--json", "--foo", "x"]) == 0
+    ctx = seen[0]
+    assert ctx.options == {"json_out": True}
+    assert ctx.arguments["a"] == 1
+    assert ctx.arguments["extra"] == {"foo": "x"}
+    assert "json_out" not in ctx.arguments["extra"]
+
+
+def test_4_help_lists_the_option_help_texts(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    opt = CliOption(
+        "working_dir",
+        Path | None,
+        None,
+        help="Run as if started in this directory.",
+    )
+    app = _app_for(adds, CliContract(options=[json_option(), opt]))
+    _exit(app, ["adds", "--help"])
+    out = _stdout(capsys)
+    assert "Emit machine-readable JSON instead of formatted output." in out
+    assert "Run as if started in this directory." in out
+    assert "--json" in out
+    assert "--working-dir" in out
+
+
+def test_4_help_passes_the_docstring_through(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    app = _app_for(adds, CliContract(options=[json_option()]))
+    _exit(app, ["adds", "--help"])
+    out = _stdout(capsys)
+    assert "Add two numbers." in out
+    assert "The first addend." in out
+
+
+# --- test 5: formatter -------------------------------------------------------
+
+
+def test_5_formatter_returning_none_exits_0_with_only_its_output(capsys):
+    def fmt(result: Any, ctx: CliContext) -> None:
+        print(f"FORMATTED {result['sum']}")
+
+    app = _app_for(adds, CliContract(format_success=fmt))
+    assert _exit(app, ["adds", "4", "--b", "5"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "FORMATTED 9\n"
+    assert captured.err == ""
+
+
+def test_formatter_return_value_goes_back_to_cyclopts(capsys):
+    app = _app_for(adds, CliContract(format_success=lambda r, c: r["sum"] + 40))
+    # The default result_action exits with an int result as the exit code.
+    assert _exit(app, ["adds", "1", "--b", "1"]) == 42
+
+
+def test_no_formatter_returns_the_raw_result(capsys):
+    app = _app_for(adds, CliContract())
+    assert _exit(app, ["adds", "3"]) == 0
+    assert "sum" in _stdout(capsys)
+
+
+def test_positional_arguments_reach_the_tool_through_binding():
+    """A18: cyclopts passes positionally supplied arguments in ``args``."""
+    app = _app_for(adds, CliContract(options=[json_option()]))
+    assert _exit(app, ["adds", "7", "8"]) == 0
+    assert _SEEN == [(7, 8)]
+
+
+# --- test 6: prepare ---------------------------------------------------------
+
+
+def _prompting_prepare(prompt: Any) -> Any:
+    def prepare(ctx: CliContext) -> None:
+        if ctx.arguments.get("title") is None:
+            ctx.arguments["title"] = prompt()
+
+    return prepare
+
+
+def test_6a_prepare_leaves_a_supplied_argument_alone():
+    calls: list[int] = []
+    prompt = lambda: calls.append(1) or "prompted"  # noqa: E731
+    app = _app_for(titled, CliContract(prepare=_prompting_prepare(prompt)))
+    assert _exit(app, ["titled", "--title", "x"]) == 0
+    assert calls == []
+    assert _SEEN == [("x", "lab")]
+
+
+def test_6b_prepare_fills_the_gap_before_a_supplied_later_argument():
+    calls: list[int] = []
+    prompt = lambda: calls.append(1) or "prompted"  # noqa: E731
+    app = _app_for(titled, CliContract(prepare=_prompting_prepare(prompt)))
+    assert _exit(app, ["titled", "--audience", "z"]) == 0
+    assert calls == [1]
+    assert _SEEN == [("prompted", "z")]
+
+
+def test_6c_prepare_fills_a_missing_argument_with_no_arguments():
+    calls: list[int] = []
+    prompt = lambda: calls.append(1) or "prompted"  # noqa: E731
+    app = _app_for(titled, CliContract(prepare=_prompting_prepare(prompt)))
+    assert _exit(app, ["titled"]) == 0
+    assert calls == [1]
+    assert _SEEN == [("prompted", "lab")]
+
+
+def test_6_prepare_sees_defaults_applied():
+    captured: list[dict[str, Any]] = []
+    contract = CliContract(prepare=lambda ctx: captured.append(dict(ctx.arguments)))
+    app = _app_for(titled, contract)
+    assert _exit(app, ["titled"]) == 0
+    assert captured == [{"title": None, "audience": "lab"}]
+
+
+def test_6_positional_only_var_positional_and_var_keyword_round_trip():
+    captured: list[dict[str, Any]] = []
+    contract = CliContract(prepare=lambda ctx: captured.append(dict(ctx.arguments)))
+    cmd = cli_command(mixed, contract=contract)
+
+    cmd(1, 2, 3, 4, kw="z", foo="bar")
+    assert captured[-1] == {
+        "pos": 1,
+        "mid": 2,
+        "rest": (3, 4),
+        "kw": "z",
+        "extra": {"foo": "bar"},
+    }
+    assert _SEEN[-1] == (1, 2, (3, 4), "z", {"foo": "bar"})
+
+    cmd(9)
+    assert captured[-1] == {"pos": 9, "mid": 5, "rest": (), "kw": "k", "extra": {}}
+    assert _SEEN[-1] == (9, 5, (), "k", {})
+
+
+def test_6_prepare_deleting_a_defaulted_argument_falls_back_to_its_default():
+    def prepare(ctx: CliContext) -> None:
+        del ctx.arguments["a"]
+
+    cmd = cli_command(pair, contract=CliContract(prepare=prepare))
+    cmd(5, 6)
+    assert _SEEN == [(1, 6)]
+
+
+def test_6_prepare_may_replace_every_value():
+    def prepare(ctx: CliContext) -> None:
+        ctx.arguments["a"] = 100
+
+    cmd = cli_command(needs_a, contract=CliContract(prepare=prepare))
+    cmd(1, 2)
+    assert _SEEN == [(100, 2)]
+
+
+# --- _rebind (spec 5.2) ------------------------------------------------------
+
+
+def test_rebind_places_arguments_by_kind():
+    from cisternal.registration.cli_contract import _rebind
+
+    sig = inspect.signature(mixed)
+    b = _rebind(
+        sig,
+        {"pos": 1, "mid": 2, "rest": (3, 4), "kw": "z", "extra": {"foo": "bar"}},
+    )
+    assert b.args == (1, 2, 3, 4)
+    assert b.kwargs == {"kw": "z", "foo": "bar"}
+
+
+def test_rebind_drops_an_empty_var_positional_after_a_gap():
+    from cisternal.registration.cli_contract import _rebind
+
+    sig = inspect.signature(star)
+    b = _rebind(sig, {"rest": ()})
+    assert b.arguments == {"a": 1, "rest": ()}
+
+
+def test_rebind_unknown_key():
+    from cisternal.registration.cli_contract import _rebind
+
+    with pytest.raises(TypeError, match="prepare set unknown argument 'zzz'"):
+        _rebind(inspect.signature(adds), {"a": 1, "zzz": 2})
+
+
+def test_rebind_missing_required():
+    from cisternal.registration.cli_contract import _rebind
+
+    with pytest.raises(TypeError, match="prepare removed required argument 'a'"):
+        _rebind(inspect.signature(adds), {"b": 2})
+
+
+def test_rebind_positional_only_after_a_gap():
+    from cisternal.registration.cli_contract import _rebind
+
+    with pytest.raises(
+        TypeError, match="prepare removed argument 'a' ahead of 'b'"
+    ):
+        _rebind(inspect.signature(pos_only), {"b": 3})
+
+
+def test_rebind_var_positional_after_a_gap():
+    from cisternal.registration.cli_contract import _rebind
+
+    with pytest.raises(
+        TypeError, match="prepare removed argument 'a' ahead of 'rest'"
+    ):
+        _rebind(inspect.signature(star), {"rest": (5,)})
+
+
+def test_rebind_after_a_gap_a_positional_or_keyword_goes_by_name():
+    from cisternal.registration.cli_contract import _rebind
+
+    b = _rebind(inspect.signature(pair), {"b": 7})
+    assert b.arguments == {"a": 1, "b": 7}
+    assert b.kwargs == {} and b.args == (1, 7)
+
+
+# --- test 8: composite -------------------------------------------------------
+
+
+def test_8_composite_exception_maps_through_the_contract(capsys):
+    app = _app_for(composite, CliContract(exit_codes={MyErr: 4}))
+    assert _exit(app, ["composite", "2"]) == 4
+    assert _err(capsys) == "Error (MyErr): negative -3\n"
+    assert _exit(app, ["composite", "7"]) == 9  # int result is the exit code (A6)
+
+
+# --- test 10, 11: async and recovery -----------------------------------------
+
+
+def test_10_async_tool_formatter_receives_the_awaited_result(capsys):
+    got: list[Any] = []
+
+    def fmt(result: Any, ctx: CliContext) -> None:
+        got.append(result)
+
+    app = _app_for(aadd, CliContract(format_success=fmt))
+    assert _exit(app, ["aadd", "4", "5"]) == 0
+    assert got == [{"sum": 9}]
+
+
+def test_11_recovery_to_result_reaches_the_formatter_not_exit_codes(capsys):
+    def thrower(x: int = 0) -> dict:
+        raise RecErr("nope")
+
+    got: list[Any] = []
+    contract = CliContract(
+        format_success=lambda r, c: got.append(r),
+        exit_codes={RecErr: 9},
+    )
+    app = _app_for(
+        thrower, contract, recovery=(lambda exc: False, lambda: None)
+    )
+    assert _exit(app, ["thrower"]) == 0
+    assert got == [{"error": "recovered-shape", "msg": "nope"}]
+    assert _err(capsys) == ""
+
+
+def test_11_without_recovery_the_same_error_takes_the_exit_code_route(capsys):
+    def thrower(x: int = 0) -> dict:
+        raise RecErr("nope")
+
+    app = _app_for(thrower, CliContract(exit_codes={RecErr: 9}))
+    assert _exit(app, ["thrower"]) == 9
+    assert _err(capsys) == "Error (RecErr): nope\n"
+
+
+# --- tests 12-14: negative controls ------------------------------------------
+
+
+def test_12_unmapped_exception_is_the_f1_line_and_exit_1(capsys):
+    app = _app_for(fails, CliContract(exit_codes={KeyError: 9, MyErr: 4}))
+    assert _exit(app, ["fails", "--msg", "m"]) == 1
+    assert _err(capsys) == "Error (ValueError): m\n"
+
+
+def test_12_empty_contract_is_also_exit_1(capsys):
+    app = _app_for(fails, CliContract())
+    assert _exit(app, ["fails"]) == 1
+    assert _err(capsys) == "Error (ValueError): boom\n"
+
+
+def test_12b_a_bind_failure_is_the_f1_line_and_exit_1(capsys):
+    cmd = cli_command(adds, contract=CliContract())
+    with pytest.raises(SystemExit) as excinfo:
+        cmd(bogus=1)
+    assert excinfo.value.code == 1
+    err = _err(capsys)
+    assert err.startswith("Error (TypeError): ")
+    assert err.endswith("\n") and err.count("\n") == 1
+
+
+def test_12b_a_mapped_type_error_handler_sees_empty_arguments():
+    seen: list[CliContext] = []
+
+    def handler(exc: Any, ctx: CliContext) -> int:
+        seen.append(ctx)
+        return 6
+
+    cmd = cli_command(adds, contract=CliContract(exit_codes={TypeError: handler}))
+    with pytest.raises(SystemExit) as excinfo:
+        cmd(bogus=1)
+    assert excinfo.value.code == 6
+    assert seen[0].arguments == {}
+
+
+def test_12b_options_are_popped_before_the_bind_failure():
+    seen: list[CliContext] = []
+
+    def handler(exc: Any, ctx: CliContext) -> int:
+        seen.append(ctx)
+        return 6
+
+    contract = CliContract(
+        options=[json_option()], exit_codes={TypeError: handler}
+    )
+    cmd = cli_command(adds, contract=contract)
+    with pytest.raises(SystemExit):
+        cmd(bogus=1, json_out=True)
+    assert seen[0].arguments == {}
+    assert seen[0].options == {"json_out": True}
+
+
+def test_13_system_exit_from_the_tool_is_never_remapped(capsys):
+    def exits(code: int = 4) -> None:
+        raise SystemExit(code)
+
+    app = _app_for(exits, CliContract(exit_codes={Exception: 7}))
+    assert _exit(app, ["exits"]) == 4
+    assert _err(capsys) == ""
+
+
+def test_14_keyboard_interrupt_is_not_caught_by_exception_mapping():
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    cmd = cli_command(interrupted, contract=CliContract(exit_codes={Exception: 7}))
+    with pytest.raises(KeyboardInterrupt):
+        cmd()
+
+
+# --- test 17: failing handlers -----------------------------------------------
+
+
+def test_17_a_raising_handler_falls_back_to_the_f1_line(capsys, caplog):
+    def handler(exc: Any, ctx: CliContext) -> int:
+        raise RuntimeError("handler broke")
+
+    app = _app_for(fails, CliContract(exit_codes={ValueError: handler}))
+    with caplog.at_level(logging.WARNING, logger="cisternal.registration"):
+        assert _exit(app, ["fails", "--msg", "m"]) == 1
+    assert _err(capsys) == "Error (ValueError): m\n"
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.parametrize("bad", [True, -1], ids=["bool", "negative"])
+def test_17_a_bad_handler_return_is_exit_1_with_a_warning(bad, caplog):
+    app = _app_for(fails, CliContract(exit_codes={ValueError: lambda e, c: bad}))
+    with caplog.at_level(logging.WARNING, logger="cisternal.registration"):
+        assert _exit(app, ["fails"]) == 1
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+# --- telemetry ---------------------------------------------------------------
+
+
+def test_events_spy_sees_a_successful_command(events):
+    """Positive control for every "zero events" assertion below."""
+    app = _app_for(adds, CliContract())
+    assert _exit(app, ["adds", "1"]) == 0
+    assert [n for n, _ in _cmd_events(events)] == ["cli.cmd_start", "cli.cmd_end"]
+    assert _cmd_events(events)[1][1]["ok"] is True
+    assert _cmd_events(events)[0][1]["cmd"] == "adds"
+
+
+def test_telemetry_cmd_is_the_tool_name(events):
+    app = _app_for(adds, CliContract(), name="custom")
+    assert _exit(app, ["adds", "1"]) == 0
+    assert {f["cmd"] for _, f in _cmd_events(events)} == {"custom"}
+
+
+def test_19_a_mapped_failure_is_recorded_with_the_original_exception_type(events):
+    app = _app_for(fails, CliContract(exit_codes={ValueError: 3}))
+    assert _exit(app, ["fails"]) == 3
+    ends = [f for n, f in _cmd_events(events) if n == "cli.cmd_end"]
+    assert len(ends) == 1
+    assert ends[0]["exc_type"] == "ValueError"
+    assert ends[0]["ok"] is False
+
+
+def test_19_a_handler_chosen_exit_code_is_not_in_the_event(events):
+    """R1: the span closes before the handler runs."""
+    app = _app_for(fails, CliContract(exit_codes={ValueError: lambda e, c: 3}))
+    assert _exit(app, ["fails"]) == 3
+    end = [f for n, f in _cmd_events(events) if n == "cli.cmd_end"][0]
+    assert "exit_code" not in end
+
+
+def test_20_a_formatter_crash_is_recorded_with_the_formatters_exception(
+    events, capsys
+):
+    def fmt(result: Any, ctx: CliContext) -> None:
+        raise KeyError("fmt-broke")
+
+    app = _app_for(adds, CliContract(format_success=fmt))
+    assert _exit(app, ["adds", "1"]) == 1
+    ends = [f for n, f in _cmd_events(events) if n == "cli.cmd_end"]
+    assert len(ends) == 1
+    assert ends[0]["ok"] is False
+    assert ends[0]["exc_type"] == "KeyError"
+    assert _err(capsys).startswith("Error (KeyError): ")
+
+
+def test_20b_prepare_raising_emits_no_events(events, capsys):
+    def prepare(ctx: CliContext) -> None:
+        raise RuntimeError("prepare broke")
+
+    app = _app_for(adds, CliContract(prepare=prepare))
+    assert _exit(app, ["adds", "1"]) == 1
+    assert _err(capsys) == "Error (RuntimeError): prepare broke\n"
+    assert _cmd_events(events) == []
+    assert _SEEN == []
+
+
+def test_20b_prepare_exiting_emits_no_events(events):
+    def prepare(ctx: CliContext) -> None:
+        sys.exit(3)
+
+    app = _app_for(adds, CliContract(prepare=prepare))
+    assert _exit(app, ["adds", "1"]) == 3
+    assert _cmd_events(events) == []
+
+
+def test_20b_prepare_setting_an_unknown_argument(events, capsys):
+    def prepare(ctx: CliContext) -> None:
+        ctx.arguments["bogus"] = 1
+
+    app = _app_for(adds, CliContract(prepare=prepare))
+    assert _exit(app, ["adds", "1"]) == 1
+    assert _err(capsys) == "Error (TypeError): prepare set unknown argument 'bogus'\n"
+    assert _cmd_events(events) == []
+    assert _SEEN == []
+
+
+def test_20b_prepare_deleting_a_required_argument(events, capsys):
+    def prepare(ctx: CliContext) -> None:
+        del ctx.arguments["a"]
+
+    app = _app_for(adds, CliContract(prepare=prepare))
+    assert _exit(app, ["adds", "1"]) == 1
+    assert (
+        _err(capsys) == "Error (TypeError): prepare removed required argument 'a'\n"
+    )
+    assert _cmd_events(events) == []
+    assert _SEEN == []
+
+
+def test_20b_positional_only_after_a_gap(events, capsys):
+    def prepare(ctx: CliContext) -> None:
+        del ctx.arguments["a"]
+
+    app = _app_for(pos_only, CliContract(prepare=prepare))
+    assert _exit(app, ["pos_only", "3", "4"]) == 1
+    assert (
+        _err(capsys)
+        == "Error (TypeError): prepare removed argument 'a' ahead of 'b'\n"
+    )
+    assert _cmd_events(events) == []
+    assert _SEEN == []
+
+
+def test_20b_var_positional_after_a_gap(events, capsys):
+    def prepare(ctx: CliContext) -> None:
+        assert ctx.arguments["rest"] == ("6",)
+        del ctx.arguments["a"]
+
+    app = _app_for(star, CliContract(prepare=prepare))
+    assert _exit(app, ["star", "5", "6"]) == 1
+    assert (
+        _err(capsys)
+        == "Error (TypeError): prepare removed argument 'a' ahead of 'rest'\n"
+    )
+    assert _cmd_events(events) == []
+    assert _SEEN == []
+
+
+def test_20b_prepare_runs_before_the_span_opens(events):
+    def prepare(ctx: CliContext) -> None:
+        events.append(("MARKER", {}))
+
+    app = _app_for(adds, CliContract(prepare=prepare))
+    assert _exit(app, ["adds", "1"]) == 0
+    names = [n for n, _ in events]
+    assert names == ["MARKER", "cli.cmd_start", "cli.cmd_end"]
+
+
+def test_21_telemetry_false_with_a_contract_emits_no_events(events):
+    app = _app_for(adds, CliContract(format_success=lambda r, c: None), telemetry=False)
+    assert _exit(app, ["adds", "1"]) == 0
+    assert _cmd_events(events) == []
+    assert _SEEN == [(1, 1)]
+
+
+def test_21_telemetry_false_still_maps_failures(events, capsys):
+    app = _app_for(fails, CliContract(exit_codes={ValueError: 3}), telemetry=False)
+    assert _exit(app, ["fails", "--msg", "m"]) == 3
+    assert _err(capsys) == "Error (ValueError): m\n"
+    assert _cmd_events(events) == []
+
+
+# --- test 22: a tool the consumer already instrumented -----------------------
+
+from cisternal.adapters.cli import timed_command  # noqa: E402  (test-local import)
+
+
+@timed_command("handmade")
+def hand_timed(a: int = 1) -> dict:
+    return {"a": a}
+
+
+def test_22_a_cisternal_timed_tool_emits_exactly_one_start_end_pair(events):
+    assert hand_timed.__name__ == "hand_timed"  # functools.wraps kept the name
+    seen: list[Any] = []
+    contract = CliContract(format_success=lambda r, c: seen.append(r))
+    app = _app_for(hand_timed, contract)
+    assert _exit(app, ["hand_timed"]) == 0
+    assert seen == [{"a": 1}]
+    cmd_events = _cmd_events(events)
+    assert [n for n, _ in cmd_events] == ["cli.cmd_start", "cli.cmd_end"]
+    # The tool's own span, under its own name, not the wire-level name.
+    assert {f["cmd"] for _, f in cmd_events} == {"handmade"}
+
+
+def test_22_a_formatter_crash_in_the_cisternal_timed_branch_is_untimed(
+    events, capsys
+):
+    def fmt(result: Any, ctx: CliContext) -> None:
+        raise KeyError("fmt-broke")
+
+    app = _app_for(hand_timed, CliContract(format_success=fmt))
+    assert _exit(app, ["hand_timed"]) == 1
+    assert _err(capsys).startswith("Error (KeyError): ")
+    cmd_events = _cmd_events(events)
+    # One pair, from the tool's own span, which finished fine: no ok=False event.
+    assert [n for n, _ in cmd_events] == ["cli.cmd_start", "cli.cmd_end"]
+    assert cmd_events[1][1]["ok"] is True
+
+
+def test_22_a_formatter_sys_exit_in_the_cisternal_timed_branch_is_untimed(events):
+    def fmt(result: Any, ctx: CliContext) -> None:
+        sys.exit(5)
+
+    app = _app_for(hand_timed, CliContract(format_success=fmt))
+    assert _exit(app, ["hand_timed"]) == 5
+    cmd_events = _cmd_events(events)
+    assert [n for n, _ in cmd_events] == ["cli.cmd_start", "cli.cmd_end"]
+    assert cmd_events[1][1]["ok"] is True
+
+
+# --- test 26: exit_code_attr through the CLI ---------------------------------
+
+
+def _raiser(exc: BaseException) -> Any:
+    def thrower() -> None:
+        raise exc
+
+    return thrower
+
+
+def _code_error(value: Any) -> Exception:
+    err = MyxcelErrorLike("the message")
+    err.exit_code = value  # type: ignore[attr-defined]
+    return err
+
+
+def test_26_exit_code_attr_int_attribute(capsys):
+    app = _app_for(
+        _raiser(_code_error(4)),
+        CliContract(exit_codes={MyxcelErrorLike: exit_code_attr()}),
+        name="thrower",
+    )
+    assert _exit(app, ["thrower"]) == 4
+    assert _err(capsys) == "Error (MyxcelErrorLike): the message\n"
+
+
+@pytest.mark.parametrize(
+    "value", [0, 300, True, "SESSION_NOT_FOUND", None], ids=repr
+)
+def test_26_exit_code_attr_invalid_value_falls_back_to_the_default(value, capsys):
+    app = _app_for(
+        _raiser(_code_error(value)),
+        CliContract(exit_codes={MyxcelErrorLike: exit_code_attr()}),
+        name="thrower",
+    )
+    assert _exit(app, ["thrower"]) == 1
+    assert _err(capsys) == "Error (MyxcelErrorLike): the message\n"
+
+
+def test_26_exit_code_attr_missing_attribute_falls_back(capsys):
+    class NoAttr(Exception):
+        pass
+
+    app = _app_for(
+        _raiser(NoAttr("m")),
+        CliContract(exit_codes={NoAttr: exit_code_attr()}),
+        name="thrower",
+    )
+    assert _exit(app, ["thrower"]) == 1
+    assert _err(capsys) == "Error (NoAttr): m\n"
+
+
+def test_26_exit_code_attr_custom_report_replaces_the_f1_line(capsys):
+    from rich.console import Console
+
+    def report(exc: BaseException) -> None:
+        Console(stderr=True, no_color=True, color_system=None).print(
+            f"[red]Error:[/red] {exc}"
+        )
+
+    app = _app_for(
+        _raiser(_code_error(4)),
+        CliContract(exit_codes={MyxcelErrorLike: exit_code_attr(report=report)}),
+        name="thrower",
+    )
+    assert _exit(app, ["thrower"]) == 4
+    assert _err(capsys) == "Error: the message\n"
+
+
+def test_26_exit_code_attr_report_must_be_callable():
+    with pytest.raises(TypeError):
+        exit_code_attr(report=None)  # type: ignore[arg-type]
+
+
+def test_26_exit_code_attr_resolves_subclass_code_by_mro(capsys):
+    err = ConfigErrorLike("cfg")
+    err.exit_code = 2  # type: ignore[attr-defined]
+    app = _app_for(
+        _raiser(err),
+        CliContract(exit_codes={MyxcelErrorLike: exit_code_attr()}),
+        name="thrower",
+    )
+    assert _exit(app, ["thrower"]) == 2
+
+
+# --- test 27: a handler that returns None ------------------------------------
+
+
+def test_27_handler_returning_none_is_the_f1_line_and_exit_1(capsys):
+    app = _app_for(fails, CliContract(exit_codes={ValueError: lambda e, c: None}))
+    assert _exit(app, ["fails", "--msg", "m"]) == 1
+    assert _err(capsys) == "Error (ValueError): m\n"
+
+
+def test_27_handler_may_return_zero_for_handled_success(capsys):
+    app = _app_for(fails, CliContract(exit_codes={ValueError: lambda e, c: 0}))
+    assert _exit(app, ["fails"]) == 0
+    assert _err(capsys) == ""
+
+
+# --- tests 28, 29: result-shaped failures ------------------------------------
+
+
+def _envelope_formatter(result: Any, ctx: CliContext) -> None:
+    if result.get("error"):
+        sys.exit(5)
+    print("fine")
+
+
+def test_28_formatter_sys_exit_maps_an_envelope_under_the_default_app(events):
+    app = _app_for(envelope, CliContract(format_success=_envelope_formatter))
+    assert _exit(app, ["envelope"]) == 5
+    end = [f for n, f in _cmd_events(events) if n == "cli.cmd_end"]
+    assert len(end) == 1
+    assert end[0]["ok"] is False
+    assert end[0]["exit_code"] == 5
+
+
+def _dict_only_action(result: Any) -> None:
+    if isinstance(result, dict):
+        print("DICT", result)
+    return None
+
+
+def test_29_formatter_sys_exit_works_under_a_callable_result_action(events):
+    inner = App(name="cli", result_action=_dict_only_action)
+    app = _app_for(envelope, CliContract(format_success=_envelope_formatter), app=inner)
+    assert _exit(app, ["envelope"]) == 5
+    end = [f for n, f in _cmd_events(events) if n == "cli.cmd_end"]
+    assert len(end) == 1
+    assert end[0]["ok"] is False
+    assert end[0]["exit_code"] == 5
+
+
+def test_29_control_a_returned_int_is_swallowed_by_a_callable_result_action():
+    """A19: documents why formatters must ``sys.exit`` rather than return a code."""
+    inner = App(name="cli", result_action=_dict_only_action)
+    app = _app_for(envelope, CliContract(format_success=lambda r, c: 5), app=inner)
+    assert _exit(app, ["envelope"]) is None  # no SystemExit: the process would exit 0
+
+
+# --- test 37: async composite through cli_command ----------------------------
+
+
+def test_37_async_composite_failure_maps_to_the_contract_code(capsys):
+    app = _app_for(acomposite, CliContract(exit_codes={MyErr: 4}))
+    assert _exit(app, ["acomposite", "5"]) == 4
+    assert _err(capsys) == "Error (MyErr): second leg failed\n"
+
+
+def test_37_async_composite_success_reaches_the_formatter():
+    got: list[Any] = []
+    app = _app_for(
+        acomposite, CliContract(format_success=lambda r, c: got.append(r))
+    )
+    assert _exit(app, ["acomposite", "1"]) == 0
+    assert got == [{"first": {"sum": 2}, "second": {"sum": 3}}]
+
+
+# --- A26: hidden (parse=False) arguments through the builder -----------------
+
+
+def test_hidden_defaulted_argument_is_filled_by_prepare():
+    seen: list[Any] = []
+
+    def prepare(ctx: CliContext) -> None:
+        seen.append(ctx.arguments["token"])
+        ctx.arguments["token"] = "from-env"
+
+    app = _app_for(hidden_default, CliContract(prepare=prepare))
+    assert _exit(app, ["hidden_default", "x"]) == 0
+    assert seen == [None]
+    assert _SEEN == [("x", "from-env")]
+    with pytest.raises(Exception, match="token"):
+        app(["hidden_default", "x", "--token", "t"], exit_on_error=False)
+
+
+def test_hidden_required_argument_is_absent_until_prepare_sets_it():
+    seen: list[bool] = []
+
+    def prepare(ctx: CliContext) -> None:
+        seen.append("token" in ctx.arguments)
+        ctx.arguments["token"] = "from-env"
+
+    app = _app_for(hidden_required, CliContract(prepare=prepare))
+    assert _exit(app, ["hidden_required", "x"]) == 0
+    assert seen == [False]
+    assert _SEEN == [("x", "from-env")]
+    with pytest.raises(Exception, match="token"):
+        app(["hidden_required", "x", "--token", "t"], exit_on_error=False)
+
+
+def test_hidden_required_argument_unset_by_prepare_never_reaches_the_tool(
+    events, capsys
+):
+    app = _app_for(hidden_required, CliContract())
+    assert _exit(app, ["hidden_required", "x"]) == 1
+    assert (
+        _err(capsys)
+        == "Error (TypeError): prepare removed required argument 'token'\n"
+    )
+    assert _cmd_events(events) == []
+    assert _SEEN == []
+
+
+# --- test 16a: collisions (cli_command half + variant) -----------------------
+
+from tests.fixtures import collision_tools, collision_tools_plain  # noqa: E402
+
+_NO_X = Annotated[bool, Parameter(name="--no-x", negative="")]
+_OFF = Annotated[bool, Parameter(name="--off", negative="")]
+_EMPTY_ITEMS = Annotated[bool, Parameter(name="--empty-items", negative="")]
+_NO_FOO = Annotated[bool, Parameter(name="--no-foo", negative="")]
+_NO_FLAG = Annotated[bool, Parameter(name="--no-flag", negative="")]
+
+# (case id, tool name, options). Each must raise CisternalWireError naming the tool.
+_COLLISIONS: list[tuple[str, str, list[CliOption]]] = [
+    ("identifier", "tool_ident", [json_option()]),
+    ("flag-json", "tool_json", [json_option()]),
+    ("derived-negative", "tool_x", [CliOption("x2", _NO_X, False)]),
+    ("explicit-json", "tool_explicit_json", [json_option()]),
+    ("user-negative", "tool_user_negative", [CliOption("o", _OFF, False)]),
+    ("empty-prefix", "tool_items", [CliOption("e", _EMPTY_ITEMS, False)]),
+    ("option-negative", "tool_no_x2", [CliOption("x2", bool, False)]),
+    ("hyphenless-name", "tool_foo_named", [CliOption("g", _NO_FOO, False)]),
+    ("unannotated-default", "tool_unannotated_flag", [CliOption("g", _NO_FLAG, False)]),
+    ("any-default", "tool_any_x", [CliOption("g", _NO_X, False)]),
+]
+
+_COLLISION_MODULES = [
+    pytest.param(collision_tools_plain, id="real-objects"),
+    pytest.param(collision_tools, id="future-annotations"),
+]
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+@pytest.mark.parametrize(
+    ("tool_name", "options"),
+    [pytest.param(t, o, id=i) for i, t, o in _COLLISIONS],
+)
+def test_16a_collision_raises_naming_the_tool(module, tool_name, options):
+    fn = getattr(module, tool_name)
+    with pytest.raises(CisternalWireError) as excinfo:
+        cli_command(fn, contract=CliContract(options=options))
+    assert tool_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+def test_16a_the_same_tools_build_without_options(module):
+    for _, tool_name, _ in _COLLISIONS:
+        cli_command(getattr(module, tool_name), contract=CliContract())
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+def test_16a_collision_message_names_the_flag(module):
+    with pytest.raises(CisternalWireError, match="--json"):
+        cli_command(module.tool_json, contract=CliContract(options=[json_option()]))
+
+
+def test_16a_two_options_claiming_one_flag_collide():
+    contract = CliContract(
+        options=[
+            json_option(),
+            json_option(name="other", flag="--json"),
+        ]
+    )
+    with pytest.raises(CisternalWireError, match="--json"):
+        cli_command(adds, contract=contract)
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+def test_16a_star_args_named_json_does_not_collide(module):
+    cmd = cli_command(module.tool_star_json, contract=CliContract(options=[json_option()]))
+    assert "json_out" in inspect.signature(cmd).parameters
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+def test_16a_short_flags_are_not_compared(module):
+    short = CliOption("jj", Annotated[bool, Parameter(name="-j", negative="")], False)
+    cli_command(module.tool_short_j, contract=CliContract(options=[short]))
+
+
+@pytest.mark.parametrize("module", _COLLISION_MODULES)
+def test_16a_a_parse_false_parameter_claims_no_flag(module):
+    chdir = CliOption(
+        "chdir_to",
+        Annotated[Path | None, Parameter(name="--working-dir")],
+        None,
+    )
+    seen: list[Any] = []
+
+    def prepare(ctx: CliContext) -> None:
+        ctx.arguments["working_dir"] = str(ctx.options["chdir_to"] or ".")
+
+    contract = CliContract(
+        options=[chdir],
+        prepare=prepare,
+        format_success=lambda r, c: seen.append(r),
+    )
+    app = _app_for(module.tool_parse_false, contract)
+    assert _exit(app, ["tool_parse_false", "--working-dir", "/x"]) == 0
+    assert seen == ["/x"]
+
+
+def test_16a_an_identifier_collision_applies_even_to_a_parse_false_parameter():
+    clash = CliOption("working_dir", str, "")
+    with pytest.raises(CisternalWireError, match="working_dir"):
+        cli_command(
+            collision_tools_plain.tool_parse_false,
+            contract=CliContract(options=[clash]),
+        )
+
+
+def test_16a_identifier_check_covers_var_positional_and_var_keyword():
+    for opt_name, fn in [("rest", mixed), ("extra", mixed), ("pos", mixed)]:
+        with pytest.raises(CisternalWireError, match=opt_name):
+            cli_command(fn, contract=CliContract(options=[CliOption(opt_name, int, 0)]))
+
+
+def test_16a_app_default_parameter_can_remove_negatives():
+    """R8: cli_command() models no App default_parameter, wire() passes one.
+
+    The same pairs raise through ``cli_command()`` (cyclopts' own defaults) and
+    build through ``_build_cli_callable`` when the App default drops negatives.
+    """
+    from cisternal.registration.cli_contract import _build_cli_callable
+
+    pairs = [
+        (collision_tools_plain.tool_x, CliOption("x2", _NO_X, False)),
+        (collision_tools_plain.tool_no_x2, CliOption("x2", bool, False)),
+    ]
+    for fn, opt in pairs:
+        contract = CliContract(options=[opt])
+        with pytest.raises(CisternalWireError):
+            cli_command(fn, contract=contract)
+        with pytest.raises(CisternalWireError):
+            _build_cli_callable(
+                fn,
+                tool_name=fn.__name__,
+                command=fn.__name__,
+                contract=contract,
+                recovery=None,
+                telemetry=True,
+                app_default_parameter=None,
+            )
+        _build_cli_callable(
+            fn,
+            tool_name=fn.__name__,
+            command=fn.__name__,
+            contract=contract,
+            recovery=None,
+            telemetry=True,
+            app_default_parameter=Parameter(negative=()),
+        )
+
+
+# --- test 16c: strict hint resolution (contract half) ------------------------
+
+
+def test_16c_unresolvable_parameter_raises_naming_tool_and_parameter():
+    fn = future_annot_tools.tool_with_unresolvable_param
+    with pytest.raises(CisternalWireError) as excinfo:
+        cli_command(fn, contract=CliContract())
+    message = str(excinfo.value)
+    assert "tool_with_unresolvable_param" in message
+    assert "'x'" in message
+    assert "NotImportedAnywhere" in message
+
+
+def test_16c_malformed_string_annotation_is_wrapped_not_leaked():
+    fn = future_annot_tools.tool_with_malformed_param
+    with pytest.raises(CisternalWireError) as excinfo:
+        cli_command(fn, contract=CliContract())
+    message = str(excinfo.value)
+    assert "tool_with_malformed_param" in message
+    assert "'x'" in message
+
+
+def test_16c_the_error_names_the_configured_tool_name():
+    fn = future_annot_tools.tool_with_unresolvable_param
+    with pytest.raises(CisternalWireError, match="renamed"):
+        cli_command(fn, name="renamed", contract=CliContract())
+
+
+def test_16c_unresolvable_return_type_does_not_raise_on_the_contract_path(capsys):
+    fn = future_annot_tools.tool_with_type_checking_return
+    cmd = cli_command(fn, contract=CliContract())
+    assert "return" not in cmd.__annotations__
+    app = App(name="cli")
+    app.command(name="t")(cmd)
+    assert _run(app, ["t"]) == 0
+
+
+def test_16c_future_annotations_tool_parses_on_the_contract_path(capsys):
+    fn = future_annot_tools.tool_with_cyclopts_param
+    cmd = cli_command(fn, contract=CliContract(options=[json_option()]))
+    assert cmd.__annotations__["p"] == Annotated[
+        Path, Parameter(name=["--path", "-p"], help="A path.")
+    ]
+    app = App(name="cli")
+    app.command(name="t")(cmd)
+    assert _run(app, ["t", "-p", "/tmp/x"]) == 0
+    assert _stdout(capsys) == "/tmp/x\n"
+
+
+def test_wrapped_future_tool_resolves_on_the_contract_path(capsys):
+    fn = wrapped_future_tools.wrapped_tool
+    cmd = cli_command(fn, contract=CliContract())
+    assert cmd.__annotations__["p"] is Path
+    app = App(name="cli")
+    app.command(name="t")(cmd)
+    assert _run(app, ["t", "/tmp/x"]) == 0
+    assert _stdout(capsys) == "/tmp/x\n"
+
+
+def test_bathos_style_mutated_annotations_work_on_the_contract_path():
+    fn = bathos_style_tools.tool_with_mutated_annotations
+    app = _app_for(fn, CliContract())
+    assert _exit(app, ["tool_with_mutated_annotations", "-n", "3"]) == 6
