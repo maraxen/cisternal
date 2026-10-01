@@ -8,17 +8,15 @@ Golden values are recorded at 8730da8 and re-verified after each change.
 
 from __future__ import annotations
 
-import json
 import re
 import tempfile
-import time
 from pathlib import Path
 
 import pytest
 from cyclopts import App
 
 from cisternal import init, tool
-from cisternal.registration.registry import clear_registry
+from cisternal.registration.registry import clear_registry, register
 from cisternal.registration.wired import wire
 
 REGISTRY = "golden-test"
@@ -42,34 +40,37 @@ def _isolation():
         pipeline_module._global_pipeline = None
 
 
-def _events(d: Path) -> list[dict]:
-    time.sleep(0.3)
-    out: list[dict] = []
-    for f in sorted(d.rglob("*")):
-        if f.is_file():
-            for line in f.read_text().splitlines():
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    return out
+@pytest.fixture
+def events(monkeypatch):
+    """Spy on the ``emit_event`` that ``timed_command`` calls.
+
+    Patched where ``timed_command`` looks it up (``cisternal.adapters.cli``). Every
+    test that uses it asserts the exact event list, so a spy that is not wired up
+    fails on an empty list instead of passing vacuously.
+    """
+    rec: list[tuple[str, dict]] = []
+
+    def spy(name: str, **fields):
+        rec.append((name, fields))
+
+    monkeypatch.setattr("cisternal.adapters.cli.emit_event", spy)
+    return rec
 
 
-def _strip_timing(e: dict) -> dict:
-    """Remove timing fields from an event for stable comparison."""
-    e = dict(e)
-    fields = e.get("fields", {})
-    if isinstance(fields, dict):
-        fields = {k: v for k, v in fields.items() if k not in ("duration", "timestamp")}
-        e["fields"] = fields
-    return e
+def _timeless(rec: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
+    """The recorded events with the timing field (``duration_ms``) removed."""
+    return [
+        (name, {k: v for k, v in fields.items() if k != "duration_ms"})
+        for name, fields in rec
+    ]
 
 
-def _name_of(e: dict) -> str | None:
-    return e.get("event") or e.get("name") or e.get("event_name")
+def _plain(text: str) -> str:
+    """*text* with rich's ANSI colour escapes removed."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
-def test_no_contract_wired_command_succeeds(log_dir, capsys):
+def test_no_contract_wired_command_succeeds(log_dir, capsys, events):
     """Test 25: Golden capture of success path.
 
     A wired command with no contract: tool returns str -> printed and exits 0.
@@ -97,14 +98,20 @@ def test_no_contract_wired_command_succeeds(log_dir, capsys):
     # Golden values at 8730da8:
     # A string result is printed and exits 0
     assert exit_code == 0, f"Expected exit 0 on string result, got {exit_code}"
-    assert "hello world" in captured.out
+    assert captured.out == "hello world\n"
     assert captured.err == "", "stderr should be empty on success"
 
     # Golden: CLI command is in registry
-    assert "greet" in wired.cli_commands
+    assert wired.cli_commands == ["greet"]
+
+    # Golden: the cli.cmd_* payloads, timing stripped
+    assert _timeless(events) == [
+        ("cli.cmd_start", {"cmd": "greet"}),
+        ("cli.cmd_end", {"cmd": "greet", "ok": True}),
+    ]
 
 
-def test_no_contract_wired_command_failure(log_dir, capsys):
+def test_no_contract_wired_command_failure(log_dir, capsys, events):
     """Test 25: Golden capture of failure path.
 
     An unmapped exception should exit 1 with the F1 line.
@@ -136,6 +143,20 @@ def test_no_contract_wired_command_failure(log_dir, capsys):
     )
     assert captured.out == "", "stdout must be empty on error"
 
+    # Golden: failure payload (level 40 == logging.ERROR), timing stripped
+    assert _timeless(events) == [
+        ("cli.cmd_start", {"cmd": "divide"}),
+        (
+            "cli.cmd_end",
+            {
+                "level": 40,
+                "cmd": "divide",
+                "ok": False,
+                "exc_type": "ZeroDivisionError",
+            },
+        ),
+    ]
+
 
 def test_golden_cli_commands_flat():
     """Test 25: WiredRegistry.cli_commands for a flat tool."""
@@ -147,8 +168,8 @@ def test_golden_cli_commands_flat():
     app = App(name="test")
     wired = wire(None, app, registry=REGISTRY)
 
-    # Golden: cli_commands should list the command
-    assert "flat_cmd" in wired.cli_commands
+    # Golden: cli_commands lists exactly the command
+    assert wired.cli_commands == ["flat_cmd"]
 
 
 def test_golden_cli_commands_grouped():
@@ -161,11 +182,11 @@ def test_golden_cli_commands_grouped():
     app = App(name="test")
     wired = wire(None, app, registry=REGISTRY)
 
-    # Golden: grouped command recorded as "group name"
-    assert "jobs list_jobs" in wired.cli_commands
+    # Golden: grouped command recorded as "group name", and nothing else
+    assert wired.cli_commands == ["jobs list_jobs"]
 
 
-def test_golden_async_tool(capsys):
+def test_golden_async_tool(capsys, events):
     """Test 25: Async tool success path."""
 
     @tool(registry=REGISTRY)
@@ -186,7 +207,12 @@ def test_golden_async_tool(capsys):
 
     # Golden: async tool should succeed and print result
     assert exit_code == 0, f"Expected exit 0, got {exit_code}"
-    assert "hello async" in captured.out
+    assert captured.out == "hello async\n"
+    assert captured.err == ""
+    assert _timeless(events) == [
+        ("cli.cmd_start", {"cmd": "async_greet"}),
+        ("cli.cmd_end", {"cmd": "async_greet", "ok": True}),
+    ]
 
 
 # What wiring a tool into a group name that is already taken raised at 8730da8.
@@ -264,30 +290,113 @@ def test_golden_no_contract_int_return_becomes_exit(capsys):
     assert exit_code == 42, f"Expected exit 42, got {exit_code}"
 
 
-def test_golden_wrapped_tool_with_future_annotations():
-    """Test 25: Baseline for wrapped tools using functools.wraps + future annotations.
+class _Translated(Exception):
+    """A tool failure that carries the duck-typed ``to_result()`` recovery checks for."""
 
-    This captures the baseline behavior at 8730da8 before the A9 annotation
-    resolution fix. The wrapped_future_tools fixture tests that wrapped_tool
-    (which uses functools.wraps to preserve the original signature) can be
-    wired without error.
+    def to_result(self) -> dict:
+        return {"status": "error", "recovered": False}
 
-    Spec A9 fix (T0b) will improve annotation resolution for wrapped tools,
-    but this baseline ensures it is preserved.
+
+def test_golden_recovery_final_failure_with_to_result(capsys, events):
+    """Test 25: a ``recovery`` tool whose final failure has ``to_result()``.
+
+    Recorded at 8730da8 through ``wire(recovery=...)``: ``recover`` runs once, the
+    tool is called twice (the retry), the final failure's ``to_result()`` dict is
+    the command's result (printed, exit 0), and the command is recorded ok.
+    """
+    calls: list[int] = []
+    recovered: list[bool] = []
+
+    @tool(registry=REGISTRY)
+    def flaky(x: int) -> int:
+        calls.append(x)
+        raise _Translated("boom")
+
+    app = App(name="test")
+    wire(
+        None,
+        app,
+        registry=REGISTRY,
+        recovery=(lambda exc: True, lambda: recovered.append(True)),
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        app(["flaky", "3"], exit_on_error=False)
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 0
+    assert _plain(captured.out) == "{'status': 'error', 'recovered': False}\n"
+    assert captured.err == ""
+    assert calls == [3, 3]
+    assert recovered == [True]
+    assert _timeless(events) == [
+        ("cli.cmd_start", {"cmd": "flaky"}),
+        ("cli.cmd_end", {"cmd": "flaky", "ok": True}),
+    ]
+
+
+def test_golden_recovery_recovered_after_one_retry(capsys):
+    """Test 25: a ``recovery`` tool that succeeds on the retry.
+
+    Recorded at 8730da8: the int result of the retried call becomes the exit code.
+    """
+    calls: list[int] = []
+
+    @tool(registry=REGISTRY)
+    def flaky_once(x: int) -> int:
+        calls.append(x)
+        if len(calls) == 1:
+            raise _Translated("boom")
+        return x * 2
+
+    app = App(name="test")
+    wire(None, app, registry=REGISTRY, recovery=(lambda exc: True, lambda: None))
+
+    with pytest.raises(SystemExit) as excinfo:
+        app(["flaky_once", "4"], exit_on_error=False)
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 8
+    assert captured.out == ""
+    assert captured.err == ""
+    assert calls == [4, 4]
+
+
+# What registering the wrapped, future-annotations fixture raised at 8730da8. T0a
+# recorded it (run against that commit). The A9 fix changed the behaviour on
+# purpose, so this literal is now a RECORD of the change: nothing below asserts
+# that NameError is still raised.
+_LEGACY_8730DA8_WRAPPED_FUTURE_EXCEPTION = "NameError"
+
+
+def test_golden_wrapped_tool_with_future_annotations(capsys):
+    """Test 25: the real ``functools.wraps`` + ``from __future__ import annotations`` fixture.
+
+    ``wrapped_future_tools.wrapped_tool`` is a ``timed_command`` wrapper around
+    ``_wrapped_tool_impl(p: Path)`` in a module with future annotations, so its
+    ``p`` annotation is the string ``'Path'`` and only the tool module's globals
+    can resolve it. At 8730da8 wiring it raised ``NameError``
+    (``_LEGACY_8730DA8_WRAPPED_FUTURE_EXCEPTION``); since the A9 fix it registers
+    under the wrapped function's ``__name__`` and runs with a real ``Path``.
     """
     from tests.fixtures.wrapped_future_tools import wrapped_tool
 
-    @tool(registry=REGISTRY, name="wrapped_tool_reg")
-    def my_wrapped_tool(p):
-        """A tool using the wrapped fixture."""
-        return wrapped_tool(p)
+    assert wrapped_tool.__name__ == "_wrapped_tool_impl"  # functools.wraps copied it
+    register(wrapped_tool, registry=REGISTRY)
 
     app = App(name="test")
-    # At baseline (8730da8), this should succeed without raising NameError
     wired = wire(None, app, registry=REGISTRY)
 
-    # Golden: wrapped tool is registered
-    assert "wrapped_tool_reg" in wired.cli_commands
+    assert _LEGACY_8730DA8_WRAPPED_FUTURE_EXCEPTION == "NameError"
+    assert wired.cli_commands == ["_wrapped_tool_impl"]
+
+    with pytest.raises(SystemExit) as excinfo:
+        app(["_wrapped_tool_impl", "/tmp/golden-x"], exit_on_error=False)
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 0
+    assert _plain(captured.out) == "/tmp/golden-x\n"
+    assert captured.err == ""
 
 
 def test_golden_9b_typecheck_any_registers_and_parses(capsys):
