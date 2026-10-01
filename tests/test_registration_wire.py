@@ -674,6 +674,30 @@ class TestCliGrouping:
         assert campaign_subapp["ls"].default_command is not None  # type: ignore[attr-defined]
         assert campaign_subapp["add"].default_command is not None  # type: ignore[attr-defined]
 
+    def test_single_segment_tuple_group_equals_string_group(self):
+        """T2 widened cli_group to ``str | tuple``; a 1-tuple is the same group."""
+
+        @tool(name="campaign_list", cli_group=("campaign",), cli_name="ls")
+        def campaign_list_tool() -> dict:
+            return {}
+
+        app = App(name="bth")
+        result = wire(None, app)
+
+        assert result.cli_commands == ["campaign ls"]
+        assert app["campaign"]["ls"].default_command is not None  # type: ignore[attr-defined]
+
+    def test_multi_segment_tuple_group_rejected_until_t4g(self):
+        """Interim stopgap: nested groups arrive in T4g; reject, never mis-mount."""
+
+        @tool(name="x", cli_group=("flow", "visuals"))
+        def x_tool() -> dict:
+            return {}
+
+        app = App(name="bth")
+        with pytest.raises(CisternalWireError, match="nested"):
+            wire(None, app)
+
     def test_ungrouped_tool_still_registers_flat(self):
         """cli_group=None (the default, and every pre-existing consumer's
         behavior) must still register a flat top-level command."""

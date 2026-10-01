@@ -17,10 +17,13 @@ from typing import Any
 
 import pytest
 
+from cisternal.registration.cli_contract import CliContract
 from cisternal.registration.registry import (
+    ToolEntry,
     _registry,
     _snapshot,
     clear_registry,
+    register,
 )
 from cisternal.registration.decorator import tool
 
@@ -322,6 +325,73 @@ class TestToolEntry:
         assert entry.name == "named_fn"
         assert entry.fn is named_fn
         assert entry.registry == "bathos"
+
+
+# ---------------------------------------------------------------------------
+# cli_contract= plumbing (wire-cli-contract T2)
+# ---------------------------------------------------------------------------
+
+class TestCliContractPlumbing:
+    def test_tool_stores_cli_contract_on_entry(self):
+        """@tool(cli_contract=c) stores c on the ToolEntry; fn is returned unchanged."""
+        c = CliContract(exit_codes={ValueError: 2})
+
+        def plain(x: int) -> int:
+            return x
+
+        decorated = tool(registry="bathos", cli_contract=c)(plain)
+
+        assert decorated is plain
+        entry = _registry("bathos")["plain"]
+        assert entry.cli_contract is c
+
+    def test_tool_decorator_syntax_stores_cli_contract(self):
+        c = CliContract()
+
+        @tool(cli_contract=c)
+        def marked(x: int) -> int:
+            return x
+
+        assert _registry("default")["marked"].cli_contract is c
+        assert marked(3) == 3
+
+    def test_cli_contract_defaults_to_none(self):
+        @tool
+        def bare() -> None:
+            pass
+
+        @tool(registry="bathos")
+        def parameterised() -> None:
+            pass
+
+        assert _registry("default")["bare"].cli_contract is None
+        assert _registry("bathos")["parameterised"].cli_contract is None
+
+    def test_register_stores_cli_contract(self):
+        c = CliContract()
+
+        def fn() -> None:
+            pass
+
+        register(fn, registry="bathos", cli_contract=c)
+        assert _registry("bathos")["fn"].cli_contract is c
+
+    def test_toolentry_positional_five_args_still_valid(self):
+        """A10: a new trailing defaulted field keeps 5-positional construction valid."""
+        def fn() -> None:
+            pass
+
+        entry = ToolEntry("n", fn, "default", "grp", "cn")
+        assert entry.cli_group == "grp"
+        assert entry.cli_name == "cn"
+        assert entry.cli_contract is None
+
+    def test_cli_group_accepts_tuple(self):
+        @tool(cli_group=("flow", "visuals"), cli_name="ls")
+        def lst() -> None:
+            pass
+
+        assert _registry("default")["lst"].cli_group == ("flow", "visuals")
 
 
 # ---------------------------------------------------------------------------

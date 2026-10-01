@@ -334,9 +334,23 @@ def wire(
                 _fn, _name, recovery=recovery, telemetry=cli_telemetry
             )
             if entry.cli_group is not None:
-                target_app = _get_or_create_subapp(app, entry.cli_group)
+                _group = entry.cli_group
+                if not isinstance(_group, str):
+                    # T2 widened ToolEntry.cli_group to ``str | tuple[str, ...]``.
+                    # Nested group paths are implemented in T4g; until then a
+                    # multi-segment tuple is rejected rather than mis-mounted.
+                    if len(_group) != 1:
+                        raise CisternalWireError(
+                            message=(
+                                f"cisternal.wire(): tool {_name!r} has nested "
+                                f"cli_group {_group!r}; nested groups are not "
+                                "supported yet"
+                            )
+                        )
+                    _group = _group[0]
+                target_app = _get_or_create_subapp(app, _group)
                 target_app.command(name=_cli_name)(cli_cmd)
-                cli_command_names.append(f"{entry.cli_group} {_cli_name}")
+                cli_command_names.append(f"{_group} {_cli_name}")
             else:
                 app.command(name=_cli_name)(cli_cmd)
                 cli_command_names.append(_cli_name)

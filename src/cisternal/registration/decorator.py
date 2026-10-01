@@ -33,10 +33,13 @@ holds) and does not affect ``asyncio.iscoroutinefunction``.
 
 from __future__ import annotations
 
-from typing import Any, Callable, cast, overload
+from typing import TYPE_CHECKING, Any, Callable, cast, overload
 
 from cisternal._typed_callable import NamedCallable, TaggedCallable
 from cisternal.registration.registry import register
+
+if TYPE_CHECKING:
+    from cisternal.registration.cli_contract import CliContract
 
 
 # ---------------------------------------------------------------------------
@@ -53,8 +56,9 @@ def tool(
     *,
     registry: str = "default",
     name: str | None = None,
-    cli_group: str | None = None,
+    cli_group: str | tuple[str, ...] | None = None,
     cli_name: str | None = None,
+    cli_contract: CliContract | None = None,
 ) -> Callable[[NamedCallable], NamedCallable]: ...  # @tool(...)
 
 
@@ -63,8 +67,9 @@ def tool(
     *,
     registry: str = "default",
     name: str | None = None,
-    cli_group: str | None = None,
+    cli_group: str | tuple[str, ...] | None = None,
     cli_name: str | None = None,
+    cli_contract: CliContract | None = None,
 ) -> Callable[..., Any]:
     """Pure metadata marker: register *fn* in the named registry.
 
@@ -81,7 +86,8 @@ def tool(
                    ``fn.__name__``. Useful when the Python function name
                    (e.g. an ``mcp_x_tool`` wrapper) differs from the name a
                    consumer wants exposed to callers (e.g. ``x``).
-        cli_group: Optional cyclopts sub-app name the CLI form of this tool
+        cli_group: Optional cyclopts sub-app name (or a tuple of nested
+                   group segments) the CLI form of this tool
                    should nest under (e.g. ``"campaign"`` for ``bth campaign
                    add``). ``None`` (default) registers a flat top-level CLI
                    command, matching every consumer's behavior before this
@@ -92,12 +98,24 @@ def tool(
                    omitted — lets the MCP tool name and CLI command name
                    diverge (e.g. MCP ``campaign_list`` presented as CLI
                    ``campaign ls``).
+        cli_contract: Optional per-tool :class:`CliContract` (T-level; refines
+                   the ``wire(cli_contract=...)`` default). Stored on the
+                   ToolEntry as given (``entry.cli_contract is c``); the
+                   decorated function is still returned unchanged. Inert
+                   when the tool is wired with ``app=None``.
 
     Returns:
         The original *fn* (not a wrapper).
     """
     def _register_and_return(f: NamedCallable) -> NamedCallable:
-        register(f, registry=registry, name=name, cli_group=cli_group, cli_name=cli_name)
+        register(
+            f,
+            registry=registry,
+            name=name,
+            cli_group=cli_group,
+            cli_name=cli_name,
+            cli_contract=cli_contract,
+        )
         # Benign marker attr — does NOT change callable identity.
         cast(TaggedCallable, f).__cisternal_tool__ = True
         return f
