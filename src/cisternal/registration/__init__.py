@@ -3,6 +3,9 @@
 Public API:
 
     CisternalWireError   — exception raised by wire() on missing required tools
+    CliContract, CliOption, CliContext, json_option, default_report,
+    exit_code_attr, cli_command, cli_group
+                        — the wire() CLI contract (cli_contract.py; fastmcp-free)
     WiredRegistry       — introspection object returned by wire()
     tool                — decorator: pure metadata marker, returns fn unchanged
     clear_registry      — test teardown helper; clears a named registry
@@ -16,6 +19,16 @@ Import safety:
 
 from __future__ import annotations
 
+from cisternal.registration.cli_contract import (
+    CliContext,
+    CliContract,
+    CliOption,
+    cli_command,
+    cli_group,
+    default_report,
+    exit_code_attr,
+    json_option,
+)
 from cisternal.registration.compose import compose_mcp_callable
 from cisternal.registration.decorator import tool
 from cisternal.registration.errors import CisternalWireError
@@ -23,8 +36,16 @@ from cisternal.registration.registry import clear_registry, list_registries, sna
 
 __all__ = [
     "CisternalWireError",
+    "CliContext",
+    "CliContract",
+    "CliOption",
     "WiredRegistry",
+    "cli_command",
+    "cli_group",
     "compose_mcp_callable",
+    "default_report",
+    "exit_code_attr",
+    "json_option",
     "list_registries",
     "snapshot",
     "tool",
