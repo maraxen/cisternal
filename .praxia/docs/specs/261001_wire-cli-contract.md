@@ -2,7 +2,7 @@
 title: "wire() rich CLI contract"
 description: "Declarative CLI contract with exception mapping, rich formatters, and group interop for cisternal #30"
 task_id: 261001_wire-cli-contract
-status: accepted
+status: draft
 ---
 
 # Spec: `wire()` rich CLI contract (cisternal #30)

@@ -72,15 +72,17 @@ def test_no_contract_wired_command_succeeds(log_dir, capsys):
     """Test 25: Golden capture of success path.
 
     A wired command with no contract: tool returns str -> printed and exits 0.
+    Spec §7 G9: signature and metadata identity.
     """
     init(log_dir=log_dir)
 
     @tool(registry=REGISTRY)
     def greet(name: str) -> str:
+        """Greet a person."""
         return f"hello {name}"
 
     app = App(name="cli")
-    wire(None, app, registry=REGISTRY)
+    wired = wire(None, app, registry=REGISTRY)
 
     try:
         app(["greet", "world"], exit_on_error=False)
@@ -95,12 +97,17 @@ def test_no_contract_wired_command_succeeds(log_dir, capsys):
     # A string result is printed and exits 0
     assert exit_code == 0, f"Expected exit 0 on string result, got {exit_code}"
     assert "hello world" in captured.out
+    assert captured.err == "", "stderr should be empty on success"
+
+    # Golden: CLI command is in registry
+    assert "greet" in wired.cli_commands
 
 
 def test_no_contract_wired_command_failure(log_dir, capsys):
     """Test 25: Golden capture of failure path.
 
     An unmapped exception should exit 1 with the F1 line.
+    Spec §7 G9: byte-identical F1 output.
     """
     init(log_dir=log_dir)
 
@@ -120,10 +127,10 @@ def test_no_contract_wired_command_failure(log_dir, capsys):
 
     captured = capsys.readouterr()
 
-    # Golden values at 8730da8
+    # Golden values at 8730da8: F1 line exact format
     assert exit_code == 1, "Expected exit 1 on ZeroDivisionError"
-    # stderr should contain "Error (ZeroDivisionError):"
-    assert "ZeroDivisionError" in captured.err
+    assert captured.err == "Error (ZeroDivisionError): integer division or modulo by zero\n"
+    assert captured.out == "", "stdout must be empty on error"
 
 
 def test_golden_cli_commands_flat():
@@ -184,6 +191,9 @@ def test_golden_pre_mounted_group_rejection():
 
     This test documents the baseline exception type that the implementation
     changes will replace with CisternalWireError.
+
+    Spec §7: untouched-on-failure guarantee — rejection happens before any
+    registration.
     """
     app = App(name="test")
 
@@ -191,6 +201,9 @@ def test_golden_pre_mounted_group_rejection():
     @app.command(name="jobs")
     def pre_existing() -> str:
         return "pre"
+
+    # Record the command count before the collision attempt
+    commands_before = len(app._commands)
 
     # Now try to define a tool with cli_group="jobs"
     @tool(registry=REGISTRY, cli_group="jobs", name="list_jobs")
@@ -202,6 +215,10 @@ def test_golden_pre_mounted_group_rejection():
 
     with pytest.raises(CommandCollisionError):
         wire(None, app, registry=REGISTRY)
+
+    # Golden: untouched-on-failure: no new commands were added
+    assert len(app._commands) == commands_before, \
+        "wire() should not register any commands if collision is detected"
 
 
 def test_golden_no_contract_int_return_becomes_exit(capsys):
@@ -224,3 +241,29 @@ def test_golden_no_contract_int_return_becomes_exit(capsys):
 
     # Golden: int return becomes the exit code
     assert exit_code == 42, f"Expected exit 42, got {exit_code}"
+
+
+def test_golden_wrapped_tool_with_future_annotations():
+    """Test 25: Baseline for wrapped tools using functools.wraps + future annotations.
+
+    This captures the baseline behavior at 8730da8 before the A9 annotation
+    resolution fix. The wrapped_future_tools fixture tests that wrapped_tool
+    (which uses functools.wraps to preserve the original signature) can be
+    wired without error.
+
+    Spec A9 fix (T0b) will improve annotation resolution for wrapped tools,
+    but this baseline ensures it is preserved.
+    """
+    from tests.fixtures.wrapped_future_tools import wrapped_tool
+
+    @tool(registry=REGISTRY, name="wrapped_tool_reg")
+    def my_wrapped_tool(p):
+        """A tool using the wrapped fixture."""
+        return wrapped_tool(p)
+
+    app = App(name="test")
+    # At baseline (8730da8), this should succeed without raising NameError
+    wired = wire(None, app, registry=REGISTRY)
+
+    # Golden: wrapped tool is registered
+    assert "wrapped_tool_reg" in wired.cli_commands
