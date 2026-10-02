@@ -265,6 +265,7 @@ def _recover_sync(call: Callable[[], Any], recovery: RecoveryHooks) -> Any:
 def apply_recovery_sync(
     fn: NamedCallable,
     recovery: RecoveryHooks | None,
+    /,
     *args: Any,
     **kwargs: Any,
 ) -> Any:

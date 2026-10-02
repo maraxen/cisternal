@@ -55,6 +55,14 @@ registry = cisternal.wire(server, app, adapter=my_adapter)
 
 `cisternal.tool` is a pure-metadata decorator — it returns the original function unchanged. `cisternal.wire()` snapshots the registry at call time and registers each tool on a FastMCP server (and optionally a Cyclopts CLI app), returning a `WiredRegistry` for introspection.
 
+The CLI side takes an optional `CliContract` (exit codes per exception, a success
+formatter, CLI-only options such as `--json`, a `prepare` hook for prompts, per-command
+help and visibility), plus nested command groups and `cli_command()` for composite
+commands. None of it touches the MCP surface, and without a contract the behaviour is
+unchanged. See the onboarding guide, [`docs/guides/wire-onboarding.md`](docs/guides/wire-onboarding.md),
+for when to use `wire()` instead of a hand-written CLI, the rules for tool bodies, and
+worked, tested recipes.
+
 ## Agent-asset export
 
 A tool's agent plugin (skills, agents, hooks, MCP servers, declared in its

@@ -20,6 +20,10 @@ Public API (spec §3.2 — M1 telemetry + M2 registration surface):
           retry-once-after-recovery policy uniformly to every entry's MCP
           callable and CLI closure; `None` (default) is unaffected.
     WiredRegistry: Introspection object returned by wire().
+    CliContract, CliOption, CliContext, json_option, default_report,
+    exit_code_attr, cli_command, cli_group: the rich CLI contract for wire()
+          (cisternal #30). Defined in the fastmcp-free
+          cisternal.registration.cli_contract and imported eagerly.
     CisternalWireError: Raised by wire() when expected tools are missing.
     clear_registry(name): Test teardown helper; clears a named registry (A7).
 
@@ -55,6 +59,16 @@ from cisternal.telemetry import (
     status,
     ExporterBase,
     _build_record,
+)
+from cisternal.registration.cli_contract import (
+    CliContext,
+    CliContract,
+    CliOption,
+    cli_command,
+    cli_group,
+    default_report,
+    exit_code_attr,
+    json_option,
 )
 from cisternal.registration.decorator import tool
 from cisternal.registration.errors import CisternalWireError
@@ -192,6 +206,15 @@ __all__ = [
     "WiredRegistry",
     "CisternalWireError",
     "clear_registry",
+    # M2 — wire() CLI contract (fastmcp-free; imported eagerly, spec 4 / R10)
+    "CliContract",
+    "CliOption",
+    "CliContext",
+    "json_option",
+    "default_report",
+    "exit_code_attr",
+    "cli_command",
+    "cli_group",
     # M3 (assets export)
     "AssetSpec",
     "AssetBundle",

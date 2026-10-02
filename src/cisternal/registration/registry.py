@@ -17,9 +17,12 @@ Snapshot semantics (C6):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from cisternal._typed_callable import NamedCallable
+
+if TYPE_CHECKING:
+    from cisternal.registration.cli_contract import CliContract
 
 # ---------------------------------------------------------------------------
 # ToolEntry
@@ -34,18 +37,23 @@ class ToolEntry:
         name:      The tool name as stored in the registry (defaults to fn.__name__).
         fn:        The original callable (unchanged by the decorator).
         registry:  The partition name the tool was registered in.
-        cli_group: Optional cyclopts sub-app name the CLI form nests under.
-                   ``None`` means a flat top-level CLI command (default,
-                   matches pre-existing behavior).
+        cli_group: Optional cyclopts sub-app name (a string) or nested
+                   group path (a tuple of segments) the CLI form nests
+                   under. ``None`` means a flat top-level CLI command
+                   (default, matches pre-existing behavior).
         cli_name:  Optional CLI-visible command name within cli_group (or
                    top-level). Defaults to ``name`` when ``None``.
+        cli_contract: Optional per-tool CLI contract (T-level, refines the
+                   ``wire(cli_contract=...)`` default). ``None`` means the
+                   no-contract CLI path. Stored as given (identity kept).
     """
 
     name: str
     fn: Callable[..., Any]
     registry: str
-    cli_group: str | None = None
+    cli_group: str | tuple[str, ...] | None = None
     cli_name: str | None = None
+    cli_contract: CliContract | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +124,9 @@ def register(
     *,
     registry: str = "default",
     name: str | None = None,
-    cli_group: str | None = None,
+    cli_group: str | tuple[str, ...] | None = None,
     cli_name: str | None = None,
+    cli_contract: CliContract | None = None,
 ) -> None:
     """Insert *fn* into the named registry partition.
 
@@ -128,10 +137,23 @@ def register(
         fn:        The callable to register.
         registry:  Partition name.  Defaults to ``"default"``.
         name:      Override for the stored tool name.  Defaults to ``fn.__name__``.
-        cli_group: Optional cyclopts sub-app name the CLI form nests under.
+        cli_group: Optional cyclopts sub-app name (or tuple path of nested
+                   group segments) the CLI form nests under.
         cli_name:  Optional CLI-visible command name within cli_group (or
                    top-level).  Defaults to ``name`` when ``None``.
+        cli_contract: Optional per-tool :class:`CliContract`, stored as given.
+
+    Raises:
+        TypeError: *cli_contract* is neither ``None`` nor a :class:`CliContract`.
     """
+    if cli_contract is not None:
+        from cisternal.registration.cli_contract import CliContract  # lazy: R10
+
+        if not isinstance(cli_contract, CliContract):
+            raise TypeError(
+                f"cisternal.register(): cli_contract must be a CliContract or "
+                f"None, got {cli_contract!r}"
+            )
     tool_name = name if name is not None else fn.__name__
     entry = ToolEntry(
         name=tool_name,
@@ -139,6 +161,7 @@ def register(
         registry=registry,
         cli_group=cli_group,
         cli_name=cli_name,
+        cli_contract=cli_contract,
     )
     _registry(registry)[tool_name] = entry
 

@@ -13,6 +13,10 @@ Acceptance criteria exercised:
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
 
 import fastmcp
 import pytest
@@ -212,3 +216,117 @@ class TestClearRegistryViaTopLevel:
         clear_registry(name="bathos")
         assert len(_registry("bathos")) == 0
         assert "default_tool" in _registry("default")
+
+
+# ---------------------------------------------------------------------------
+# T5 (cisternal #30): eager CLI-contract exports and import-cycle checks
+# ---------------------------------------------------------------------------
+
+_CLI_CONTRACT_NAMES = (
+    "CliContract",
+    "CliOption",
+    "CliContext",
+    "json_option",
+    "default_report",
+    "exit_code_attr",
+    "cli_command",
+    "cli_group",
+)
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _run_fresh(code: str) -> subprocess.CompletedProcess[str]:
+    """Run ``code`` in a fresh interpreter (clean sys.modules)."""
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+class TestCliContractExports:
+    """Spec 4 'Exports': the eight CLI-contract names are public on both packages."""
+
+    @pytest.mark.parametrize("name", _CLI_CONTRACT_NAMES)
+    def test_in_all_and_dir_of_top_level(self, name):
+        assert name in cisternal.__all__
+        assert name in dir(cisternal)
+        assert hasattr(cisternal, name)
+
+    @pytest.mark.parametrize("name", _CLI_CONTRACT_NAMES)
+    def test_in_all_and_dir_of_registration(self, name):
+        import cisternal.registration as reg
+
+        assert name in reg.__all__
+        assert name in dir(reg)
+        assert hasattr(reg, name)
+
+    @pytest.mark.parametrize("name", _CLI_CONTRACT_NAMES)
+    def test_same_object_as_cli_contract_module(self, name):
+        import cisternal.registration as reg
+        from cisternal.registration import cli_contract
+
+        canonical = getattr(cli_contract, name)
+        assert getattr(cisternal, name) is canonical
+        assert getattr(reg, name) is canonical
+
+    def test_wire_bits_still_exported(self):
+        """The eager additions leave the lazy wire/WiredRegistry exports intact."""
+        import cisternal.registration as reg
+
+        assert "wire" in reg.__all__ and "WiredRegistry" in reg.__all__
+        assert "wire" in dir(cisternal) and "WiredRegistry" in dir(cisternal)
+
+
+class TestCliContractImportSafety:
+    """R10: the exports are fastmcp-free and cycle-free, in both import orders."""
+
+    def test_fastmcp_free_import(self):
+        proc = _run_fresh(
+            'import sys; sys.modules["fastmcp"]=None; import cisternal; '
+            "cisternal.CliContract; cisternal.cli_group"
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    def test_fastmcp_free_registration_import(self):
+        names = ", ".join(_CLI_CONTRACT_NAMES)
+        proc = _run_fresh(
+            'import sys; sys.modules["fastmcp"]=None; '
+            f"from cisternal.registration import {names}"
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    def test_import_adapters_cli_then_cisternal(self):
+        proc = _run_fresh("import cisternal.adapters.cli; import cisternal; cisternal.cli_group")
+        assert proc.returncode == 0, proc.stderr
+
+    def test_import_cisternal_then_adapters_cli(self):
+        proc = _run_fresh("import cisternal; import cisternal.adapters.cli; cisternal.cli_group")
+        assert proc.returncode == 0, proc.stderr
+
+    def test_package_import_does_not_pull_adapters_cli(self):
+        """cli_contract imports adapters.cli lazily (R10), so the eager package
+        import must not load it at module scope."""
+        proc = _run_fresh(
+            "import sys; import cisternal; "
+            "assert 'cisternal.adapters.cli' not in sys.modules, 'adapters.cli loaded eagerly'"
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    def test_group_cache_lives_in_cli_contract(self):
+        """wired re-exports the very dict that cli_contract owns."""
+        from cisternal.registration import cli_contract, wired
+
+        assert wired._CLI_SUBAPPS is cli_contract._CLI_SUBAPPS
+        assert wired._get_or_create_subapp is cli_contract._get_or_create_subapp
+
+
+class TestCycloptsBound:
+    """R3: cyclopts is pinned below the unverified 5.x line."""
+
+    def test_pyproject_pins_cyclopts_upper_bound(self):
+        data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+        deps = data["project"]["dependencies"]
+        assert "cyclopts>=4.18.0,<5" in deps, deps
