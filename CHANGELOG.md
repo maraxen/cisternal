@@ -6,6 +6,8 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+## 0.1.1a15 (2026-10-02)
+
 ### Added
 
 - **`wire()` rich CLI contract (#30).** A declarative `CliContract` gives the CLI side of
