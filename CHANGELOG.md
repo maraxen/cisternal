@@ -1,10 +1,21 @@
 # Changelog
 
-All notable changes to cisternal are recorded here. The project is alpha: APIs may change
-without notice before `1.0`. Entries are written per change and grouped under the release
+All notable changes to cisternal are recorded here. The project is beta: the public API
+(`wire`, `tool`, the telemetry functions, the assets manifest and CLI) is expected to hold,
+but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
+
+## 0.1.2 (2026-10-16)
+
+First non-prerelease. Promotes 0.1.1a15 unchanged in code.
+
+### Changed
+
+- **Development status is now Beta** (`Development Status :: 4 - Beta`), and this release is
+  published as a regular release rather than a pre-release, so consumers can depend on
+  `cisternal>=0.1.2` without opting their resolver into prereleases.
 
 ## 0.1.1a15 (2026-10-02)
 
