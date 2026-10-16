@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cisternal"
-version = "0.1.1a15"
+version = "0.1.2"
 description = "Shared telemetry substrate and agent-asset export toolkit for the Praxia tool family"
 
 readme = "README.md"
@@ -13,7 +13,7 @@ authors = [
     { name = "Marielle Russo" },
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
