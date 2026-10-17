@@ -7,6 +7,43 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+## 0.1.3 (2026-10-17)
+
+Skill export now follows the SKILL.md frontmatter schema Claude Code actually reads.
+
+### Changed
+
+- **`triggers` is no longer exported.** Claude Code ignores a `triggers` key (unknown
+  frontmatter keys are dropped silently), so the field never influenced skill selection. A
+  skill's legacy trigger phrases are folded into `when_to_use` as a trailing
+  `Triggers: a, b, c.` sentence, which Claude Code appends to `description` in the skill
+  listing. `triggers` stays accepted as a deprecated manifest and frontmatter input.
+- **Fold cost.** Folding makes those phrases count against Claude Code's skill-listing
+  budget (1% of the context window by default, `skillListingBudgetFraction`) and the
+  1,536-character per-skill cap, where the ignored `triggers` key cost nothing. Across
+  seventy-two skills in ten projects the fold adds about 10,200 characters.
+- **Rust-parity emitters are unchanged** and still write only `name` and `description`.
+
+### Added
+
+- **`SkillAsset` models the documented frontmatter keys**: `when_to_use`, `paths`,
+  `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `allowed-tools`,
+  `disallowed-tools`, `model`, `effort`, `context`, `agent`, `shell`, `license`,
+  `compatibility`. Keys at their absent value are omitted, so a skill that sets none exports as
+  before. Read from the manifest entry (which wins) and from the SKILL.md frontmatter, parsed
+  with a real YAML parser. Not yet modelled: `hooks`, `background`, `metadata`.
+- **Loader warnings** for invalid YAML in a SKILL.md frontmatter (Claude Code loads such a
+  skill with empty metadata), for source keys the export does not carry, for
+  `description` + `when_to_use` over 1,536 characters, and for forbidden characters in a name.
+- **`cisternal assets skillmod --manifest <path>... [--apply]`** migrates a plugin's sources
+  from `triggers` to `when_to_use`. Dry run by default; edits are textual, and a skill is only
+  written after a re-parse shows every other key unchanged and the exported listing text
+  identical.
+
+### Fixed
+
+- A `---` inside a frontmatter value no longer ends the block early when a SKILL.md is split.
+
 ## 0.1.2 (2026-10-16)
 
 First non-prerelease. Promotes 0.1.1a15 unchanged in code.
