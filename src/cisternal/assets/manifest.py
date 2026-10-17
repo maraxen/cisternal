@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -16,6 +17,13 @@ from cisternal.assets.bundle import (
     SkillAsset,
 )
 from cisternal.assets.manifest_extensions import validate_extension_sections
+from cisternal.assets.skill_schema import (
+    check_skill,
+    dropped_keys,
+    norm_key,
+    parse_frontmatter,
+    skill_fields,
+)
 
 
 class ManifestAssetSource:
@@ -143,25 +151,40 @@ def _load_skills(
         # block on export isn't doubled up with the source file's own.
         fm, body = _split_frontmatter(raw)
 
-        manifest_description = str(entry.get("description") or "")
-        description = manifest_description or _parse_scalar_field(fm, "description")
+        label = f"skill {name!r}"
+        fm_keys = parse_frontmatter(fm, warnings, label)
+        entry_keys = {norm_key(str(k)): v for k, v in entry.items()}
 
-        manifest_triggers = entry.get("triggers")
+        manifest_description = str(entry.get("description") or "")
+        description = (
+            manifest_description
+            or str(fm_keys.get("description") or "")
+            or _parse_scalar_field(fm, "description")
+        )
+
+        # Legacy ``triggers``: the manifest entry's phrases, then any extra ones
+        # in the SKILL.md's own key (deduplicated, order kept).
         triggers: tuple[str, ...] = ()
-        if isinstance(manifest_triggers, list) and manifest_triggers:
-            triggers = tuple(str(t) for t in manifest_triggers)
+        for raw_triggers in (entry.get("triggers"), fm_keys.get("triggers")):
+            if isinstance(raw_triggers, list):
+                triggers += tuple(str(t) for t in raw_triggers if str(t) not in triggers)
+
+        fields = skill_fields((entry_keys, fm_keys), warnings, label)
+        for key in dropped_keys(fm_keys):
+            warnings.append(f"{label}: frontmatter key {key!r} is not carried by export")
 
         resources = _load_skill_resources(skill_path.parent, name, warnings)
 
-        skills.append(
-            SkillAsset(
-                name=name,
-                description=description,
-                body=body,
-                triggers=triggers,
-                resources=resources,
-            )
+        skill = SkillAsset(
+            name=name,
+            description=description,
+            body=body,
+            triggers=triggers,
+            resources=resources,
+            **fields,
         )
+        warnings.extend(check_skill(skill))
+        skills.append(skill)
     return tuple(skills)
 
 
@@ -291,6 +314,9 @@ def _load_marketplace(plugin: dict[str, object], plugin_name: str) -> Marketplac
     )
 
 
+_FRONTMATTER_RE = re.compile(r"---[ \t]*\r?\n(?:(.*?)\r?\n)?---[ \t]*(?:\r?\n|$)", re.DOTALL)
+
+
 def _split_frontmatter(text: str) -> tuple[str, str]:
     """Split a markdown asset source into (frontmatter, body).
 
@@ -303,14 +329,12 @@ def _split_frontmatter(text: str) -> tuple[str, str]:
     never closed, frontmatter is ``""`` and body is the original text
     unchanged.
     """
-    if not text.startswith("---"):
+    # Delimiters are whole lines: a ``---`` inside a value (a description with
+    # an em-dash run, say) must not end the block early.
+    match = _FRONTMATTER_RE.match(text)
+    if match is None:
         return "", text
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return "", text
-    fm = parts[1]
-    body = parts[2].lstrip("\n")
-    return fm, body
+    return match.group(1) or "", text[match.end() :].lstrip("\n")
 
 
 def _parse_agent_markdown(text: str) -> tuple[tuple[str, ...], str]:

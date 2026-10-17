@@ -918,6 +918,51 @@ def inspect_assets(
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+@assets_app.command(name="skillmod")
+def skillmod_assets(
+    *,
+    manifest: Annotated[
+        list[Path],
+        cyclopts.Parameter(
+            name=["--manifest"],
+            help="Plugin manifest.toml to migrate; repeat for several projects.",
+            negative="",
+        ),
+    ],
+    apply: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--apply"],
+            help="Write the changes (default: dry run, print the plan only).",
+        ),
+    ] = False,
+) -> None:
+    """Fold each skill's legacy `triggers` into `when_to_use` (valid SKILL.md schema).
+
+    Exit 0 when nothing failed verification, 1 otherwise. Review the result
+    with `git diff` in each project before committing.
+    """
+    from cisternal.assets.skillmod import migrate_manifest  # noqa: PLC0415
+
+    failed = False
+    report: dict[str, list[dict[str, object]]] = {}
+    for path in manifest:
+        changes = migrate_manifest(path, apply=apply)
+        failed |= any(c.status == "failed" for c in changes)
+        report[str(path)] = [
+            {
+                "skill": c.skill,
+                "status": c.status,
+                "triggers": list(c.triggers),
+                "listing_chars": c.listing_chars,
+                "notes": c.notes,
+            }
+            for c in changes
+        ]
+    print(json.dumps({"applied": apply, "manifests": report}, indent=2))
+    if failed:
+        raise SystemExit(1)
+
 
 @assets_app.command(name="validate")
 def validate_assets(

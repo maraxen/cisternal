@@ -82,7 +82,8 @@ def test_format_skill_markdown_parseable_with_special_chars() -> None:
 
     assert frontmatter["name"] == "16:9"
     assert frontmatter["description"] == "Aspect ratio 16:9 # helper"
-    assert frontmatter["triggers"] == ["run 100%", "fix:bug"]
+    assert "triggers" not in frontmatter
+    assert frontmatter["when_to_use"] == "Triggers: run 100%, fix:bug."
 
 
 def test_format_command_markdown_parseable_with_special_chars() -> None:

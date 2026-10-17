@@ -68,14 +68,46 @@ def format_agent_markdown(agent: AgentAsset) -> str:
     return "\n".join(lines) + body
 
 
+def _yaml_list(key: str, items: tuple[str, ...]) -> list[str]:
+    if not items:
+        return []
+    return [f"{key}:", *(f"  - {_yaml_scalar(item)}" for item in items)]
+
+
 def format_skill_markdown(skill: SkillAsset) -> str:
+    """Render a SKILL.md frontmatter block from the documented Claude Code keys.
+
+    Key order follows the docs table. Keys at their absent value are omitted.
+    ``triggers`` is never written: Claude Code ignores it, so its phrases are
+    folded into ``when_to_use``.
+    """
     lines = ["---", f"name: {_yaml_scalar(skill.name)}"]
     if skill.description:
         lines.append(f"description: {_yaml_scalar(skill.description)}")
-    if skill.triggers:
-        lines.append("triggers:")
-        for trigger in skill.triggers:
-            lines.append(f"  - {_yaml_scalar(trigger)}")
+    when_to_use = skill.effective_when_to_use
+    if when_to_use:
+        lines.append(f"when_to_use: {_yaml_scalar(when_to_use)}")
+    lines.extend(_yaml_list("paths", skill.paths))
+    if skill.argument_hint:
+        lines.append(f"argument-hint: {_yaml_scalar(skill.argument_hint)}")
+    lines.extend(_yaml_list("arguments", skill.arguments))
+    if skill.disable_model_invocation:
+        lines.append("disable-model-invocation: true")
+    if not skill.user_invocable:
+        lines.append("user-invocable: false")
+    lines.extend(_yaml_list("allowed-tools", skill.allowed_tools))
+    lines.extend(_yaml_list("disallowed-tools", skill.disallowed_tools))
+    for key, value in (
+        ("model", skill.model),
+        ("effort", skill.effort),
+        ("context", skill.context),
+        ("agent", skill.agent),
+        ("shell", skill.shell),
+        ("license", skill.license),
+        ("compatibility", skill.compatibility),
+    ):
+        if value:
+            lines.append(f"{key}: {_yaml_scalar(value)}")
     lines.append("---")
     body = skill.body or ""
     if body and not body.startswith("\n"):
