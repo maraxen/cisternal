@@ -162,9 +162,11 @@ def test_export_produces_exactly_one_frontmatter_block(tmp_path: Path) -> None:
 
     assert "name: demo-skill" in header
     assert "description: manifest-provided description" in header
-    assert "triggers:" in header
-    assert "  - do the thing" in header
-    assert "  - trigger phrase" in header
+    # Claude Code ignores a ``triggers`` key, so the phrases ride in when_to_use.
+    assert "triggers:" not in header
+    assert any(
+        h.startswith("when_to_use:") and "do the thing, trigger phrase" in h for h in header
+    )
 
     # The body below the (single) frontmatter block is the SKILL.md's own
     # body, unchanged, with no leaked frontmatter fields anywhere in it.

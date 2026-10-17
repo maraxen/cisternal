@@ -99,12 +99,13 @@ class McpAsset:
 class SkillAsset:
     """A single skill asset entry.
 
-    ``triggers`` (bugfix, cisternal/manifest-skill-export) carries the
-    manifest's ``[[plugin.skills]] triggers = [...]`` list through to export,
-    so Claude Code's skill-selection heuristics see the same trigger phrases
-    the manifest declares. Empty by default — most SKILL.md sources don't set
-    it, and omitting it from the exported frontmatter entirely (rather than
-    emitting ``triggers: []``) matches existing agent/skill export behavior.
+    ``triggers`` is the legacy manifest ``[[plugin.skills]] triggers = [...]``
+    list. Claude Code does not read a ``triggers`` key (verified against the
+    2.1.302 frontmatter schema; unknown keys are ignored silently), so export
+    no longer writes one: the phrases are folded into ``when_to_use`` (see
+    ``effective_when_to_use``). New sources should set ``when_to_use``
+    directly; ``triggers`` stays as a deprecated input so old manifests
+    still load.
 
     ``resources`` carries sibling ``references/``, ``scripts/``, and
     ``assets/`` files found next to the manifest-declared SKILL.md, as
@@ -122,6 +123,44 @@ class SkillAsset:
     body: str = ""
     triggers: tuple[str, ...] = ()
     resources: tuple[tuple[str, str], ...] = ()
+    # Claude Code SKILL.md frontmatter keys (docs: code.claude.com/docs/en/skills).
+    # Defaults are the key's absent value, so a skill that sets none of them
+    # exports byte-identically to before. Not modelled yet: ``hooks``,
+    # ``background``, ``metadata`` (see the debt note in the research doc).
+    when_to_use: str = ""
+    paths: tuple[str, ...] = ()
+    argument_hint: str = ""
+    arguments: tuple[str, ...] = ()
+    disable_model_invocation: bool = False
+    user_invocable: bool = True
+    allowed_tools: tuple[str, ...] = ()
+    disallowed_tools: tuple[str, ...] = ()
+    model: str = ""
+    effort: str = ""
+    context: str = ""
+    agent: str = ""
+    shell: str = ""
+    license: str = ""
+    compatibility: str = ""
+
+    @property
+    def effective_when_to_use(self) -> str:
+        """``when_to_use`` with legacy ``triggers`` folded in.
+
+        Claude Code ignores a ``triggers`` key (unknown keys are dropped
+        silently); only ``description`` + ``when_to_use`` drive model-invoked
+        loading. Phrases a manifest still declares as ``triggers`` are
+        therefore emitted as a trailing ``Triggers: a, b, c.`` sentence.
+        """
+        parts = [self.when_to_use.strip()] if self.when_to_use.strip() else []
+        if self.triggers:
+            parts.append("Triggers: " + ", ".join(self.triggers) + ".")
+        return " ".join(parts)
+
+    @property
+    def listing_chars(self) -> int:
+        """Length of the text Claude Code caps per skill-listing entry."""
+        return len(self.description) + len(self.effective_when_to_use)
 
 
 @dataclass(frozen=True, slots=True)

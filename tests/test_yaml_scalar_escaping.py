@@ -100,7 +100,8 @@ def test_skill_triggers_with_space_hash_and_colon_space_survive_yaml_parse() -> 
     rendered = format_skill_markdown(skill)
     parsed = _parse_frontmatter(rendered)
 
-    assert parsed["triggers"] == triggers
+    assert "triggers" not in parsed
+    assert parsed["when_to_use"] == "Triggers: " + ", ".join(triggers) + "."
 
 
 # ---------------------------------------------------------------------------
