@@ -2240,7 +2240,10 @@ def _clear_subapp_cache():
     """Isolate the module-level sub-app cache between tests."""
     saved = dict(wired_module._CLI_SUBAPPS)
     saved_help = dict(cli_contract_module._CLI_CREATED_HELP)
+    saved_refs = dict(cli_contract_module._CLI_PARENT_REFS)
     yield
+    cli_contract_module._CLI_PARENT_REFS.clear()
+    cli_contract_module._CLI_PARENT_REFS.update(saved_refs)
     wired_module._CLI_SUBAPPS.clear()
     wired_module._CLI_SUBAPPS.update(saved)
     cli_contract_module._CLI_CREATED_HELP.clear()
@@ -3662,3 +3665,35 @@ def test_a28_a_middle_level_default_parameter_removes_negatives(fn, opt):
     flow = _premounted(app, "flow", commands=(), default_parameter=Parameter(negative=()))
     wire(None, app, registry=REGISTRY, cli_contract=contract)
     assert fn.__name__ in flow["visuals"]
+
+
+def test_stale_subapp_cache_entry_from_reused_id_is_not_a_hit(monkeypatch):
+    """A cache entry left by a dead App must not hit a new App with the same id().
+
+    Regression: ``_CLI_SUBAPPS`` is keyed by ``(id(app), segment)``; after the
+    first App is garbage collected CPython may hand its id to a new App, and
+    the stale entry then short-circuited the ``segment in parent`` check that
+    raises "already a command, not a group". Reproduced by construction: the
+    second App is made to report the first App's id via the module's ``id``.
+    """
+    import gc
+
+    first = App(name="first")
+    first_id = id(first)
+    cli_contract_module._walk_group_path(first, ("jobs",), None, mount=True)
+    assert (first_id, "jobs") in cli_contract_module._CLI_SUBAPPS
+    del first
+    gc.collect()
+
+    second = App(name="second")
+    second.command(name="jobs")(_noop)
+
+    real_id = id
+    monkeypatch.setattr(
+        cli_contract_module,
+        "id",
+        lambda o: first_id if o is second else real_id(o),
+        raising=False,
+    )
+    with pytest.raises(CisternalWireError, match="already a command"):
+        cli_contract_module._walk_group_path(second, ("jobs",), None, mount=True)
