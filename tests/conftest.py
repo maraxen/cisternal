@@ -58,6 +58,25 @@ def spy_adapter() -> SpyAdapter:
 
 
 @pytest.fixture(autouse=True)
+def _clear_cli_subapp_caches() -> Any:
+    """Clear the module-level CLI sub-app caches before and after each test.
+
+    ``_CLI_SUBAPPS`` is keyed by ``id(app)``; entries left by one test's App can
+    otherwise be seen by a later test whose App reuses the id.
+    """
+    from cisternal.registration import cli_contract
+
+    def _clear() -> None:
+        cli_contract._CLI_SUBAPPS.clear()
+        cli_contract._CLI_CREATED_HELP.clear()
+        cli_contract._CLI_PARENT_REFS.clear()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_all_registries() -> Any:
     """Clear ALL registry partitions before and after each test.
 

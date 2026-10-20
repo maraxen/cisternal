@@ -28,6 +28,7 @@ import re
 import sys
 import types
 import typing
+import weakref
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, TypeAlias
@@ -930,6 +931,29 @@ _CLI_SUBAPPS: dict[tuple[int, str], Any] = {}
 # without help reads ``help == ""``, not None (A29).
 _CLI_CREATED_HELP: dict[tuple[int, str], str | None] = {}
 
+# For each cache key: a weak reference to the parent App the key's id() was
+# taken from. id() values are reused after garbage collection, so a hit in
+# _CLI_SUBAPPS is trusted only while this reference still resolves to the very
+# parent being walked; otherwise the entry belongs to a dead App and is stale.
+_CLI_PARENT_REFS: dict[tuple[int, str], weakref.ref[Any]] = {}
+
+
+def _is_stale(key: tuple[int, str], parent: Any) -> bool:
+    """True when the cache entry for *key* was left by a different (dead) App."""
+    ref = _CLI_PARENT_REFS.get(key)
+    return ref is None or ref() is not parent
+
+
+def _evict(key: tuple[int, str]) -> None:
+    _CLI_SUBAPPS.pop(key, None)
+    _CLI_CREATED_HELP.pop(key, None)
+    _CLI_PARENT_REFS.pop(key, None)
+
+
+def _record(key: tuple[int, str], parent: Any, sub: Any) -> None:
+    _CLI_SUBAPPS[key] = sub
+    _CLI_PARENT_REFS[key] = weakref.ref(parent)
+
 
 def _normalise_group_path(path: GroupPath) -> tuple[str, ...]:
     """Normalise a ``cli_group`` path to a tuple of segments (spec 5.6).
@@ -1014,6 +1038,11 @@ def _walk_group_path(
         key = (id(parent), segment)
         help_text = helps.get(prefix) if helps else None
         sub = _CLI_SUBAPPS.get(key)
+        if sub is not None and _is_stale(key, parent):
+            # id(parent) was reused: the entry is from a dead App (R7).
+            if mount:
+                _evict(key)
+            sub = None
         if sub is not None:
             if key in _CLI_CREATED_HELP and help_text is not None:
                 recorded = _CLI_CREATED_HELP[key]
@@ -1036,7 +1065,7 @@ def _walk_group_path(
                 )
             sub = entry
             if mount:
-                _CLI_SUBAPPS[key] = sub  # adopted: never recorded in _CLI_CREATED_HELP
+                _record(key, parent, sub)  # adopted: never in _CLI_CREATED_HELP
         else:
             if not mount:
                 return levels
@@ -1046,7 +1075,7 @@ def _walk_group_path(
                 else cyclopts.App(name=segment, help=help_text)
             )
             parent.command(sub)
-            _CLI_SUBAPPS[key] = sub
+            _record(key, parent, sub)
             _CLI_CREATED_HELP[key] = help_text
         levels.append(sub)
         parent = sub
