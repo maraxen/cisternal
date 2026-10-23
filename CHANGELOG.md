@@ -7,6 +7,31 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+## 0.1.4 (2026-10-23)
+
+`<tool> plugin install|update` can now install into Antigravity.
+
+### Added
+
+- **`plugin install antigravity` / `plugin update antigravity`** (#63). The Antigravity
+  bundle is emitted into a temporary directory named after the plugin and handed to
+  `agy plugin install <dir>`, which copies it to `~/.gemini/config/plugins/<name>/`,
+  replacing any earlier copy. `--agy-bin` picks the binary. Antigravity plugins carry no
+  version, so every run reinstalls; `update` refuses when `agy plugin list --json` does
+  not show the plugin. `--scope` (other than `user`), `--marketplace` and
+  `--prune-shadowed` are Claude-only and are refused for antigravity.
+
+### Fixed
+
+- **Sub-app cache no longer stale-hits when `id(app)` is reused** (#62). A
+  garbage-collected `App`'s id could be reused and short-circuit the "already a command,
+  not a group" check; each cache key now tracks a weakref to its parent.
+
+### Changed
+
+- **`customizing-tools` skill listing text trimmed** (#61) to concrete triggers; the
+  skill body is unchanged.
+
 ## 0.1.3 (2026-10-17)
 
 Skill export now follows the SKILL.md frontmatter schema Claude Code actually reads.
