@@ -7,6 +7,15 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+### Fixed
+
+- **Cursor MCP servers now load.** The Cursor export wrote MCP servers to `.mcp.json`
+  (Claude's file name, which Cursor ignores) and inline in `plugin.json`, with `command` as
+  an argv array. It now writes a root `mcp.json` in Cursor's stdio shape
+  (`{"type": "stdio", "command": "<str>", "args": [...], "env": {...}}`, empty
+  `args`/`env` omitted) and points `plugin.json` at it with `"mcpServers": "./mcp.json"`,
+  matching Cursor's published plugins. Installs patched by hand can be re-exported as-is.
+
 ## 0.1.4 (2026-10-23)
 
 `<tool> plugin install|update` can now install into Antigravity.
