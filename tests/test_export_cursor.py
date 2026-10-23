@@ -5,7 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cisternal.assets.bundle import AgentAsset, AssetBundle, BundleMetadata, SkillAsset
+from cisternal.assets.bundle import (
+    AgentAsset,
+    AssetBundle,
+    BundleMetadata,
+    McpAsset,
+    SkillAsset,
+)
 from cisternal.assets.manifest import ManifestAssetSource
 from cisternal.export.cursor import CursorEmitter
 
@@ -104,3 +110,36 @@ def test_cursor_emit_is_pure_no_filesystem(tmp_path: Path) -> None:
     CursorEmitter().emit(bundle)
 
     assert marker.read_text(encoding="utf-8") == "untouched"
+
+
+def test_cursor_mcp_uses_root_mcp_json_with_string_command() -> None:
+    """MCP goes in root mcp.json as Cursor stdio config, referenced from plugin.json."""
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="mcp-plugin", version="0.1.0"),
+        mcp_servers=(
+            McpAsset(name="srv", command=("uvx", "--from", "tool==0.1.0", "tool-mcp"),
+                     env=(("TOKEN", "x"),)),
+            McpAsset(name="bare", command=("on-path",)),
+        ),
+    )
+    files = CursorEmitter().emit(bundle)
+
+    assert ".mcp.json" not in files
+    assert json.loads(files[".cursor-plugin/plugin.json"])["mcpServers"] == "./mcp.json"
+    assert json.loads(files["mcp.json"]) == {
+        "mcpServers": {
+            "srv": {
+                "type": "stdio",
+                "command": "uvx",
+                "args": ["--from", "tool==0.1.0", "tool-mcp"],
+                "env": {"TOKEN": "x"},
+            },
+            "bare": {"type": "stdio", "command": "on-path"},
+        }
+    }
+
+
+def test_cursor_without_mcp_servers_writes_no_mcp_config() -> None:
+    files = CursorEmitter().emit(AssetBundle(metadata=BundleMetadata(name="p", version="0")))
+    assert "mcp.json" not in files
+    assert "mcpServers" not in json.loads(files[".cursor-plugin/plugin.json"])
