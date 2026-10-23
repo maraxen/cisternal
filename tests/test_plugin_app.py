@@ -651,3 +651,75 @@ def test_cisternal_mounts_its_own_plugin_app(capsys: pytest.CaptureFixture[str])
     out = capsys.readouterr().out
     assert "plugin:      cisternal" in out
     assert "bundle:      checkout:" in out
+
+
+# ---------------------------------------------------------------------------
+# install / update against a fake agy (Antigravity)
+# ---------------------------------------------------------------------------
+
+
+def _fake_agy(tmp_path: Path, *, installed: tuple[str, ...] = ()) -> tuple[Path, Path, Path]:
+    """Records calls; `plugin install <dir>` snapshots the staged dir's files."""
+    log = tmp_path / "agy_calls.jsonl"
+    staged = tmp_path / "agy_staged.json"
+    listing = [{"name": n, "enabled": True} for n in installed]
+    script = tmp_path / "fake_agy"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"open({str(log)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1:3] == ['plugin', 'list']:\n"
+        f"    print(json.dumps({listing!r}))\n"
+        "elif sys.argv[1:3] == ['plugin', 'install']:\n"
+        "    root = sys.argv[3]\n"
+        "    files = sorted(os.path.relpath(os.path.join(d, f), root)\n"
+        "                   for d, _, fs in os.walk(root) for f in fs)\n"
+        f"    open({str(staged)!r}, 'w').write(json.dumps({{'dir': root, 'files': files}}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script, log, staged
+
+
+def test_antigravity_install_stages_the_emitted_bundle(tmp_path: Path, wheel_app) -> None:
+    agy, log, staged = _fake_agy(tmp_path)
+    _run(wheel_app, ["install", "antigravity", "--agy-bin", str(agy)])
+
+    calls = _calls(log)
+    assert len(calls) == 1 and calls[0][:2] == ["plugin", "install"]
+    snap = json.loads(staged.read_text(encoding="utf-8"))
+    assert Path(snap["dir"]).name == PLUGIN  # agy names the install after the dir
+    assert "plugin.json" in snap["files"]
+    assert "skills/demo-skill/SKILL.md" in snap["files"]
+    assert not Path(snap["dir"]).exists()  # staging is cleaned up after agy copies it
+
+
+def test_antigravity_update_requires_an_install(tmp_path: Path, wheel_app) -> None:
+    agy, log, _ = _fake_agy(tmp_path)
+    _run(wheel_app, ["update", "antigravity", "--agy-bin", str(agy)], exit_code=1)
+    assert _mutating(log) == []
+
+    (tmp_path / "agy_calls.jsonl").unlink()
+    agy, log, _ = _fake_agy(tmp_path, installed=(PLUGIN,))
+    _run(wheel_app, ["update", "antigravity", "--agy-bin", str(agy)])
+    assert [c[:2] for c in _mutating(log)] == [["plugin", "install"]]
+
+
+def test_antigravity_dry_run_changes_nothing(tmp_path: Path, wheel_app) -> None:
+    agy, log, _ = _fake_agy(tmp_path)
+    _run(wheel_app, ["install", "antigravity", "--dry-run", "--agy-bin", str(agy)])
+    assert _calls(log) == []
+
+
+@pytest.mark.parametrize(
+    "flags", [["--scope", "project"], ["--marketplace", "mkt"], ["--prune-shadowed"]]
+)
+def test_antigravity_refuses_claude_only_flags(tmp_path: Path, wheel_app, flags: list[str]) -> None:
+    agy, log, _ = _fake_agy(tmp_path)
+    _run(wheel_app, ["install", "antigravity", "--agy-bin", str(agy), *flags], exit_code=1)
+    assert _calls(log) == []
+
+
+def test_antigravity_install_failure_exits_nonzero(tmp_path: Path, wheel_app) -> None:
+    missing = str(tmp_path / "no-such-agy")
+    _run(wheel_app, ["install", "antigravity", "--agy-bin", missing], exit_code=1)
