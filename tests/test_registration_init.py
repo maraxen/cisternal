@@ -324,9 +324,9 @@ class TestCliContractImportSafety:
 
 
 class TestCycloptsBound:
-    """R3: cyclopts is pinned below the unverified 5.x line."""
+    """R3: cyclopts is pinned below the unverified 6.x line (5.x is verified by the CLI suite)."""
 
     def test_pyproject_pins_cyclopts_upper_bound(self):
         data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
         deps = data["project"]["dependencies"]
-        assert "cyclopts>=4.18.0,<5" in deps, deps
+        assert "cyclopts>=4.18.0,<6" in deps, deps
