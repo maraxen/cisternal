@@ -7,6 +7,14 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+## 0.1.5 (2026-10-25)
+
+### Changed
+
+- **cyclopts 5.x is allowed** (`cyclopts>=4.18.0,<6`, was `<5`). cyclopts 5 no longer turns
+  underscores into hyphens in command names, so CLI commands are now called by their registered
+  name (`failing_cli_tool`, not `failing-cli-tool`). The full suite passes on cyclopts 5.3.0.
+
 ### Fixed
 
 - **Cursor MCP servers now load.** The Cursor export wrote MCP servers to `.mcp.json`
