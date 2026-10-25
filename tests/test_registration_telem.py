@@ -343,7 +343,7 @@ class TestCLICallableExceptionToExitCode:
         stderr_capture = io.StringIO()
         with patch("sys.stderr", stderr_capture):
             with pytest.raises(SystemExit) as exc_info:
-                app(["failing-cli-tool", "--x", "1"], exit_on_error=False)
+                app(["failing_cli_tool", "--x", "1"], exit_on_error=False)
 
         exit_code = exc_info.value.code
         assert exit_code != 0, (
@@ -364,7 +364,7 @@ class TestCLICallableExceptionToExitCode:
         stderr_capture = io.StringIO()
         with patch("sys.stderr", stderr_capture):
             try:
-                app(["message-tool", "--name", "test"], exit_on_error=False)
+                app(["message_tool", "--name", "test"], exit_on_error=False)
             except SystemExit:
                 pass
 
@@ -408,7 +408,7 @@ class TestCLICallableExceptionToExitCode:
         exit_code = None
         with patch("sys.stderr", stderr_capture):
             try:
-                app(["telem-free-fail", "--x", "99"], exit_on_error=False)
+                app(["telem_free_fail", "--x", "99"], exit_on_error=False)
             except SystemExit as e:
                 exit_code = e.code
 
@@ -430,7 +430,7 @@ class TestCLICallableExceptionToExitCode:
 
         # Cyclopts raises SystemExit(0) on successful completion — that is normal.
         try:
-            app(["success-tool"], exit_on_error=False)
+            app(["success_tool"], exit_on_error=False)
         except SystemExit as se:
             assert se.code == 0, f"Expected SystemExit(0) on success, got {se.code}"
 
