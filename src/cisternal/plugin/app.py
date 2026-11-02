@@ -10,6 +10,7 @@ install the tool's agent plugin through the tool itself::
 
     $ bth plugin install claude      # publish + register + install in Claude Code
     $ bth plugin update claude       # republish + update the installed plugin
+    $ bth plugin install antigravity # emit + `agy plugin install <dir>`
     $ bth plugin export cursor --out ./dist/cursor   # direct surface export
     $ bth plugin info                # where the bundle and marketplace resolve from
 
@@ -49,7 +50,7 @@ _log = logging.getLogger("cisternal.plugin")
 
 # Surfaces `plugin install`/`update` can drive end to end. Every emitter
 # surface can still be exported with `plugin export`.
-INSTALLABLE_SURFACES = ("claude",)
+INSTALLABLE_SURFACES = ("claude", "antigravity")
 
 
 @dataclass(frozen=True)
@@ -256,7 +257,7 @@ def load_bundle(
 # ---------------------------------------------------------------------------
 
 
-def _claude(argv: list[str]) -> subprocess.CompletedProcess[str]:
+def _cli(argv: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(argv, capture_output=True, text=True)
     except OSError as exc:
@@ -271,7 +272,7 @@ def _check(result: subprocess.CompletedProcess[str], what: str) -> None:
 
 def _registered_marketplaces(claude_bin: str) -> dict[str, dict[str, Any]]:
     """``{name: entry}`` from ``claude plugin marketplace list --json``."""
-    result = _claude([claude_bin, "plugin", "marketplace", "list", "--json"])
+    result = _cli([claude_bin, "plugin", "marketplace", "list", "--json"])
     _check(result, "claude plugin marketplace list --json")
     try:
         return {m["name"]: m for m in json.loads(result.stdout)}
@@ -355,14 +356,14 @@ def claude_install(
     handle_shadowed([result], prune=prune_shadowed)
     if not registered:
         _check(
-            _claude([claude_bin, "plugin", "marketplace", "add", str(marketplace)]),
+            _cli([claude_bin, "plugin", "marketplace", "add", str(marketplace)]),
             f"claude plugin marketplace add {marketplace}",
         )
         print(f"claude: registered marketplace {mkt_name} -> {marketplace}")
 
     if not installs:
         _check(
-            _claude([claude_bin, "plugin", "install", plugin_id, "--scope", scope]),
+            _cli([claude_bin, "plugin", "install", plugin_id, "--scope", scope]),
             f"claude plugin install {plugin_id} --scope {scope}",
         )
         print(f"installed {plugin_id} (scope={scope}); restart Claude Code to load it")
@@ -373,7 +374,7 @@ def claude_install(
         print(f"{plugin_id} is already up to date ({result.version})")
         return
     _check(
-        _claude([claude_bin, "plugin", "marketplace", "update", mkt_name]),
+        _cli([claude_bin, "plugin", "marketplace", "update", mkt_name]),
         f"claude plugin marketplace update {mkt_name}",
     )
     # Update each stale install at the scope it was installed at. A
@@ -384,7 +385,7 @@ def claude_install(
         argv = [claude_bin, "plugin", "update", plugin_id]
         if e.scope:
             argv += ["--scope", e.scope]
-        upd = _claude(argv)
+        upd = _cli(argv)
         if upd.returncode != 0:
             failures.append(f"scope={e.scope}: {(upd.stderr or upd.stdout).strip()}")
         else:
@@ -395,12 +396,54 @@ def claude_install(
 
 
 # ---------------------------------------------------------------------------
+# Antigravity installer
+# ---------------------------------------------------------------------------
+
+
+def _antigravity_installed(agy_bin: str) -> set[str]:
+    """Plugin names from ``agy plugin list --json``."""
+    result = _cli([agy_bin, "plugin", "list", "--json"])
+    _check(result, "agy plugin list --json")
+    try:
+        return {p["name"] for p in json.loads(result.stdout or "[]")}
+    except (ValueError, KeyError, TypeError) as exc:
+        raise PluginError(f"could not parse `agy plugin list --json`: {exc}") from exc
+
+
+def antigravity_install(bundle: AssetBundle, *, agy_bin: str, require_installed: bool) -> None:
+    """Install or update in Antigravity via ``agy plugin install <dir>``.
+
+    ``agy`` copies the directory into ``~/.gemini/config/plugins/<name>/``,
+    replacing any previous copy wholesale (files dropped from the bundle go
+    too), so install and update are the same operation. Antigravity plugins
+    carry no version, so there is no up-to-date short-circuit: every run
+    reinstalls. ``update`` (``require_installed=True``) refuses, before
+    writing anything, when the plugin is not already installed.
+    """
+    import tempfile  # noqa: PLC0415
+
+    from cisternal.export.antigravity import AntigravityEmitter  # noqa: PLC0415
+    from cisternal.export.write import write_bundle  # noqa: PLC0415
+
+    name = bundle.metadata.name
+    if require_installed and name not in _antigravity_installed(agy_bin):
+        raise PluginError(f"{name} is not installed in Antigravity; run `plugin install antigravity` first")
+    with tempfile.TemporaryDirectory(prefix="cisternal-agy-") as tmp:
+        staged = Path(tmp) / name
+        write_bundle(AntigravityEmitter().emit(bundle), staged)
+        _check(_cli([agy_bin, "plugin", "install", str(staged)]), f"agy plugin install {staged}")
+    print(f"installed {name}@{bundle.metadata.version} in Antigravity; restart Antigravity to load it")
+
+
+# ---------------------------------------------------------------------------
 # The sub-app
 # ---------------------------------------------------------------------------
 
 _SurfaceArg = Annotated[
     str,
-    cyclopts.Parameter(help="Agent surface (install/update: claude; export: any emitter surface)."),
+    cyclopts.Parameter(
+        help="Agent surface (install/update: claude, antigravity; export: any emitter surface)."
+    ),
 ]
 _ManifestOpt = Annotated[
     Path | None,
@@ -418,6 +461,9 @@ _MarketplaceOpt = Annotated[
 ]
 _ClaudeBinOpt = Annotated[
     str, cyclopts.Parameter(name=["--claude-bin"], help="claude CLI binary (default: 'claude').")
+]
+_AgyBinOpt = Annotated[
+    str, cyclopts.Parameter(name=["--agy-bin"], help="Antigravity CLI binary (default: 'agy').")
 ]
 _DryRunOpt = Annotated[
     bool, cyclopts.Parameter(name=["--dry-run"], help="Show what would happen; change nothing.")
@@ -471,12 +517,31 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         dry_run: bool,
         require_installed: bool,
         prune_shadowed: bool,
+        agy_bin: str,
     ) -> None:
         from cisternal.plugin.config import resolve_marketplace_root  # noqa: PLC0415
 
         try:
             _require_installable(surface)
+            if surface == "antigravity":
+                claude_only = [
+                    flag for flag, given in (
+                        ("--marketplace", marketplace is not None),
+                        ("--scope", scope != "user"),
+                        ("--prune-shadowed", prune_shadowed),
+                    ) if given
+                ]
+                if claude_only:
+                    raise PluginError(f"{', '.join(claude_only)}: Claude Code only, not antigravity")
             bundle, source = load_bundle(spec, manifest=manifest)
+            if surface == "antigravity":
+                if dry_run:
+                    verb = "update" if require_installed else "install (or update)"
+                    print(f"bundle: {source.describe()}")
+                    print(f"would {verb} {spec.name} in Antigravity via `{agy_bin} plugin install`")
+                    return
+                antigravity_install(bundle, agy_bin=agy_bin, require_installed=require_installed)
+                return
             if dry_run:
                 from cisternal.plugin.config import (  # noqa: PLC0415
                     CONFIG_KEY,
@@ -532,12 +597,13 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         claude_bin: _ClaudeBinOpt = "claude",
         dry_run: _DryRunOpt = False,
         prune_shadowed: _PruneShadowedOpt = False,
+        agy_bin: _AgyBinOpt = "agy",
     ) -> None:
         """Publish this plugin and install it at --scope (updates an install already there)."""
         _install_or_update(
             surface, manifest=manifest, marketplace=marketplace, scope=scope,
             claude_bin=claude_bin, dry_run=dry_run, require_installed=False,
-            prune_shadowed=prune_shadowed,
+            prune_shadowed=prune_shadowed, agy_bin=agy_bin,
         )
 
     @app.command(name="update")
@@ -550,12 +616,13 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
         claude_bin: _ClaudeBinOpt = "claude",
         dry_run: _DryRunOpt = False,
         prune_shadowed: _PruneShadowedOpt = False,
+        agy_bin: _AgyBinOpt = "agy",
     ) -> None:
         """Republish this plugin and update every installed copy (fails if not installed)."""
         _install_or_update(
             surface, manifest=manifest, marketplace=marketplace, scope="user",
             claude_bin=claude_bin, dry_run=dry_run, require_installed=True,
-            prune_shadowed=prune_shadowed,
+            prune_shadowed=prune_shadowed, agy_bin=agy_bin,
         )
 
     @app.command(name="export")

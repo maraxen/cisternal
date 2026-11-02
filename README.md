@@ -242,8 +242,15 @@ out; commands then fail instead of generating anything.
 ### Surfaces
 
 Export targets: **Claude Code**, **Cursor**, **GitHub Copilot**, **Antigravity**, **OpenCode**, **Pi**, **JCode**.
-Install (`plugin install|update`) is implemented for **Claude Code**. For the
-other surfaces, `plugin install <surface>` points at `plugin export`.
+Install (`plugin install|update`) is implemented for **Claude Code** and
+**Antigravity**. `plugin install antigravity` emits the Antigravity bundle into a
+temporary directory and hands it to `agy plugin install <dir>`, which copies it
+to `~/.gemini/config/plugins/<name>/`, replacing any earlier copy (`--agy-bin`
+picks the binary; `--scope`, `--marketplace` and `--prune-shadowed` are
+Claude-only and are refused). Antigravity plugins carry no version, so every
+run reinstalls; `plugin update antigravity` refuses when the plugin is not
+installed. For the other surfaces, `plugin install <surface>` points at
+`plugin export`.
 **Codex** is not supported yet: there is no emitter, and Codex's documented
 CLI can add a marketplace (`codex plugin marketplace add`) but installs only
 through its `/plugins` UI. The installer table (`INSTALLABLE_SURFACES` in

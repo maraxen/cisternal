@@ -15,6 +15,14 @@ Skills are therefore emitted at *both* paths: ``skills/<name>/SKILL.md`` for
 IDE plugin installation (unchanged, per the official Cursor plugin template's
 directory-convention discovery) and ``.cursor/skills/<name>/SKILL.md`` so a
 bundle exported to a project root is immediately CLI-loadable.
+
+MCP (261023): servers go in a root ``mcp.json`` (Cursor's default discovery
+path; ``.mcp.json`` is Claude's and Cursor ignores it), referenced from
+``plugin.json`` as ``"mcpServers": "./mcp.json"`` the way the official
+cursor-public ``finance`` plugin does. Each stdio entry is
+``{"type": "stdio", "command": <str>, "args": [...], "env": {...}}`` per
+Cursor's McpServerConfig: ``command`` is a string, never an argv array.
+``args``/``env`` are omitted when empty.
 """
 
 from __future__ import annotations
@@ -22,7 +30,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from cisternal.assets.bundle import AssetBundle, HookSpecAsset
+from cisternal.assets.bundle import AssetBundle, HookSpecAsset, McpAsset
 from cisternal.export._markdown import format_agent_markdown, format_skill_markdown
 from cisternal.export.cursor_rust import emit_cursor_rust_parity
 from cisternal.export.base import Emitter
@@ -30,7 +38,7 @@ from cisternal.export.hooks import hooks_for_surface
 
 _PLUGIN_JSON_PATH = ".cursor-plugin/plugin.json"
 _HOOKS_JSON_PATH = ".cursor/hooks.json"
-_MCP_JSON_PATH = ".mcp.json"
+_MCP_JSON_PATH = "mcp.json"
 
 
 class CursorEmitter(Emitter):
@@ -65,13 +73,7 @@ class CursorEmitter(Emitter):
             plugin_obj["hooks"] = hooks_doc
 
         if bundle.mcp_servers:
-            plugin_obj["mcpServers"] = {
-                srv.name: {
-                    "command": list(srv.command),
-                    "env": dict(srv.env),
-                }
-                for srv in bundle.mcp_servers
-            }
+            plugin_obj["mcpServers"] = f"./{_MCP_JSON_PATH}"
 
         files[_PLUGIN_JSON_PATH] = json.dumps(plugin_obj, sort_keys=True, indent=2)
 
@@ -84,15 +86,7 @@ class CursorEmitter(Emitter):
             files[f".cursor/skills/{skill.name}/SKILL.md"] = skill_md
 
         if bundle.mcp_servers:
-            mcp_obj = {
-                "mcpServers": {
-                    srv.name: {
-                        "command": list(srv.command),
-                        "env": dict(srv.env),
-                    }
-                    for srv in bundle.mcp_servers
-                }
-            }
+            mcp_obj = {"mcpServers": {srv.name: _cursor_stdio(srv) for srv in bundle.mcp_servers}}
             files[_MCP_JSON_PATH] = json.dumps(mcp_obj, sort_keys=True, indent=2)
 
         if hook_specs:
@@ -100,6 +94,16 @@ class CursorEmitter(Emitter):
             files[_HOOKS_JSON_PATH] = json.dumps(hooks_doc, sort_keys=True, indent=2)
 
         return files
+
+
+def _cursor_stdio(srv: McpAsset) -> dict[str, object]:
+    command = list(srv.command)
+    entry: dict[str, object] = {"type": "stdio", "command": command[0] if command else ""}
+    if len(command) > 1:
+        entry["args"] = command[1:]
+    if srv.env:
+        entry["env"] = dict(srv.env)
+    return entry
 
 
 def _cursor_event_name(canonical: str) -> str:

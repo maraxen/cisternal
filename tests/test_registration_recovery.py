@@ -468,7 +468,7 @@ class TestWireRecoveryUniformAcrossTransports:
 
         # Eligible tool: CLI call transparently recovers -- clean exit(0).
         try:
-            app(["eligible-cli-tool", "--x", "1"], exit_on_error=False)
+            app(["eligible_cli_tool", "--x", "1"], exit_on_error=False)
         except SystemExit as se:
             assert se.code == 0, (
                 f"Expected a clean exit for a transparently-recovered CLI "
@@ -482,7 +482,7 @@ class TestWireRecoveryUniformAcrossTransports:
         stderr_capture = io.StringIO()
         with patch("sys.stderr", stderr_capture):
             with pytest.raises(SystemExit) as exc_info:
-                app(["excluded-cli-tool", "--x", "1"], exit_on_error=False)
+                app(["excluded_cli_tool", "--x", "1"], exit_on_error=False)
         assert exc_info.value.code != 0
         assert "excluded cli tool always fails raw" in stderr_capture.getvalue()
         assert recover_calls == [True], "recover() must not fire for the excluded tool"

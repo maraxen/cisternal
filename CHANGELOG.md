@@ -20,6 +20,47 @@ that ships them; unreleased work sits under "Unreleased".
 - `TreeManifest.from_dict` now rejects non-string `declared_dirs`, `extra_excludes` and `skipped`
   entries (they were accepted and could crash the withheld-sha warning).
 - The withheld-sha warning names skipped entries instead of reporting "0 mismatched, 0 missing, 0 extra".
+## 0.1.5 (2026-10-25)
+
+### Changed
+
+- **cyclopts 5.x is allowed** (`cyclopts>=4.18.0,<6`, was `<5`). cyclopts 5 no longer turns
+  underscores into hyphens in command names, so CLI commands are now called by their registered
+  name (`failing_cli_tool`, not `failing-cli-tool`). The full suite passes on cyclopts 5.3.0.
+
+### Fixed
+
+- **Cursor MCP servers now load.** The Cursor export wrote MCP servers to `.mcp.json`
+  (Claude's file name, which Cursor ignores) and inline in `plugin.json`, with `command` as
+  an argv array. It now writes a root `mcp.json` in Cursor's stdio shape
+  (`{"type": "stdio", "command": "<str>", "args": [...], "env": {...}}`, empty
+  `args`/`env` omitted) and points `plugin.json` at it with `"mcpServers": "./mcp.json"`,
+  matching Cursor's published plugins. Installs patched by hand can be re-exported as-is.
+
+## 0.1.4 (2026-10-23)
+
+`<tool> plugin install|update` can now install into Antigravity.
+
+### Added
+
+- **`plugin install antigravity` / `plugin update antigravity`** (#63). The Antigravity
+  bundle is emitted into a temporary directory named after the plugin and handed to
+  `agy plugin install <dir>`, which copies it to `~/.gemini/config/plugins/<name>/`,
+  replacing any earlier copy. `--agy-bin` picks the binary. Antigravity plugins carry no
+  version, so every run reinstalls; `update` refuses when `agy plugin list --json` does
+  not show the plugin. `--scope` (other than `user`), `--marketplace` and
+  `--prune-shadowed` are Claude-only and are refused for antigravity.
+
+### Fixed
+
+- **Sub-app cache no longer stale-hits when `id(app)` is reused** (#62). A
+  garbage-collected `App`'s id could be reused and short-circuit the "already a command,
+  not a group" check; each cache key now tracks a weakref to its parent.
+
+### Changed
+
+- **`customizing-tools` skill listing text trimmed** (#61) to concrete triggers; the
+  skill body is unchanged.
 
 ## 0.1.3 (2026-10-17)
 
