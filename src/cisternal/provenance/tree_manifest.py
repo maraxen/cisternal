@@ -107,7 +107,8 @@ def tree_id(files: Mapping[str, tuple[str, str]]) -> str:
 
     A git tree object is: b"tree %d\0" + concat of entries, where each entry is:
     b"<mode> <name>\0" + bytes.fromhex(blob_hex), and mode is one of
-    "100644" (regular), "100755" (exec), "120000" (symlink), or "40000" (dir).
+    "100644" (regular), "100755" (exec), "120000" (symlink), "160000" (submodule
+    gitlink; the "blob" is the pinned commit sha), or "40000" (dir).
 
     This function builds a multi-level tree structure, hashing each level
     bottom-up.
@@ -220,6 +221,10 @@ class TreeManifest:
             matches_commit = d.get("matches_commit", False)
             extra_excludes = tuple(d.get("extra_excludes", []))
             skipped = tuple(d.get("skipped", []))
+
+            # Strict validation: these are consumed as strings downstream (warnings, exclude files).
+            if not all(isinstance(x, str) for x in (*declared_dirs, *extra_excludes, *skipped)):
+                return None
 
             # Strict validation: matches_commit must be bool
             if not isinstance(matches_commit, bool):
@@ -964,14 +969,15 @@ def verify_tree(
                                 f.write(pattern + "\n")
                             # Write gitlink exclusions
                             for skipped_entry in manifest.skipped:
-                                if skipped_entry.startswith("gitlink:"):
-                                    gitlink_path = skipped_entry[8:].strip("/")  # drop prefix and slashes
+                                # gitlink: and the gitlink-<reason>: kinds; each already fails closed via skipped.
+                                if skipped_entry.startswith("gitlink") and ":" in skipped_entry:
+                                    gitlink_path = skipped_entry.split(":", 1)[1].strip("/")  # drop prefix and slashes
                                     # Exclude the directory and everything under it
                                     f.write(f"/{gitlink_path}/\n")
-                            # Pinned submodules: their emptiness is checked per entry above, not as extras.
-                            for gl_path, (gl_mode, _gl_sha) in manifest.files.items():
-                                if gl_mode == GITLINK_MODE:
-                                    f.write(f"/{gl_path.strip('/')}/\n")
+                            # Pinned (160000) paths are deliberately NOT excluded here: the pattern would be an
+                            # unescaped gitignore line, so a path with glob characters or a newline could hide
+                            # unrelated extras, and these entries do not fail closed through `skipped`. Their
+                            # emptiness is checked per entry above; content under one is reported, not hidden.
 
                         # Run git ls-files with custom excludes for declared dirs (recursive)
                         env = clean_git_env()

@@ -15,8 +15,11 @@ from pathlib import Path
 from cisternal.provenance.capture import clean_git_env
 from cisternal.provenance.tree_manifest import (
     GITLINK_MODE,
+    HASH_ALGO,
+    MANIFEST_VERSION,
     TreeManifest,
     build_tree_manifest,
+    tree_id,
     verify_tree,
 )
 
@@ -177,12 +180,44 @@ def test_reader_rejects_a_symlink_or_file_at_a_pinned_path(tmp_path):
     as_file = _remote_copy(manifest, sup, tmp_path / "as_file", make_gitlink_dir=False)
     (as_file / SUB).parent.mkdir(parents=True, exist_ok=True)
     (as_file / SUB).write_text("a file where a submodule was pinned\n")
-    assert verify_tree(as_file, manifest).verified is False
+    v_file = verify_tree(as_file, manifest)
+    assert v_file.verified is False and SUB in v_file.mismatched
 
     as_link = _remote_copy(manifest, sup, tmp_path / "as_link", make_gitlink_dir=False)
     (as_link / SUB).parent.mkdir(parents=True, exist_ok=True)
     (as_link / SUB).symlink_to(sup)  # a link can point at arbitrary code
-    assert verify_tree(as_link, manifest).verified is False
+    v_link = verify_tree(as_link, manifest)
+    assert v_link.verified is False and SUB in v_link.mismatched
+
+
+def test_glob_characters_in_a_pinned_path_cannot_hide_unrelated_extras(tmp_path):
+    """Review of #68: an unescaped `/vendor/ab[12]/` exclude matched `vendor/ab1`, hiding a real extra."""
+    pin = "a" * 40
+    files = {"main.py": ("100644", "b" * 40), "vendor/ab[12]": ("160000", pin)}
+    manifest = TreeManifest(
+        manifest_version=MANIFEST_VERSION, hash_algo=HASH_ALGO, commit=None, tree_id=tree_id(files),
+        declared_dirs=("vendor",), matches_commit=False, extra_excludes=(), files=files,
+    )
+    remote = tmp_path / "remote"
+    (remote / "vendor" / "ab[12]").mkdir(parents=True)
+    (remote / "vendor" / "ab1").mkdir()
+    (remote / "vendor" / "ab1" / "evil.py").write_text("print('unlisted')\n")
+    (remote / "main.py").write_text("x")  # content differs from the manifest; the extras result is what matters
+
+    v = verify_tree(remote, manifest)
+
+    assert v.verified is False
+    assert "vendor/ab1/evil.py" in v.extra_untracked_under_declared_dirs
+
+
+def test_from_dict_rejects_non_string_skipped_entries(tmp_path):
+    """Review of #68: `skipped: [1]` parsed fine and then crashed `_gate`'s warning join."""
+    sup, head, _pin = _make_superproject(tmp_path)
+    manifest = build_tree_manifest(sup, commit=head)
+    assert manifest is not None
+    for key in ("skipped", "declared_dirs", "extra_excludes"):
+        bad = {**manifest.to_dict(), key: [1]}
+        assert TreeManifest.from_dict(bad) is None, key
 
 
 # --- non-submodule directories keep the old behaviour ---------------------------------------

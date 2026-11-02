@@ -7,6 +7,20 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+### Changed
+
+- **Pinned submodules no longer force `hash=unknown`.** The tree manifest records a submodule
+  gitlink as a `160000` entry carrying its pinned commit, verified at build time (initialised,
+  HEAD equals the pin) and, on the no-`.git` reader, by the path being absent or an empty
+  directory. A submodule that is uninitialised, at a different HEAD, or unreadable is `skipped`
+  (`gitlink-uninitialized:`, `gitlink-mismatch:`, `gitlink-unreadable:`) and still withholds the
+  sha, as does any plain directory or untracked nested repo. The verdict covers the pin, not
+  submodule code on the host. Readers without this change reject a `160000` entry as an
+  unparseable manifest and withhold the sha.
+- `TreeManifest.from_dict` now rejects non-string `declared_dirs`, `extra_excludes` and `skipped`
+  entries (they were accepted and could crash the withheld-sha warning).
+- The withheld-sha warning names skipped entries instead of reporting "0 mismatched, 0 missing, 0 extra".
+
 ## 0.1.3 (2026-10-17)
 
 Skill export now follows the SKILL.md frontmatter schema Claude Code actually reads.

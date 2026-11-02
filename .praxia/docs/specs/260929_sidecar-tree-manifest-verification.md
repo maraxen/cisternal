@@ -393,7 +393,19 @@ first two items below before accepting any of them.
   extras listing only because the gitlink reason already explains the failure. Rev. B's
   "gitlinks pass" was rejected: build classifies *any* directory entry as a gitlink, so exempting
   them would let a code directory escape all checks. Verifying submodules properly (mode 160000
-  plus the recorded commit) is deferred. Until then, trees with submodules report `"unknown"`.
+  plus the recorded commit) was deferred.
+  **Rev. D (261102, PR #68): pinned submodules verify.** Only a path that is mode 160000 in the
+  manifest's `commit` tree is treated as a submodule; any other directory (plain dir, untracked
+  nested repo) and `commit=None` keep the rev. C `gitlink:<path>` skip, so rev. B's objection
+  does not return. A submodule is recorded in `files` as `("160000", <pinned sha>)` only if, at
+  build time, it has its own `.git`, its toplevel is itself, and its HEAD equals the pin;
+  otherwise it is `skipped` as `gitlink-uninitialized:` / `gitlink-mismatch:` /
+  `gitlink-unreadable:`. The reader has no `.git`, so it checks only that the path is absent or an
+  empty directory (anything else is `mismatched`). **Scope of the verdict:** it vouches for the
+  pin, not for submodule code on the host. A push transfers a submodule as an empty directory, so
+  code that actually runs from elsewhere (for example a pip-installed copy) is not covered.
+  Readers that predate rev. D reject mode 160000 in `from_dict` and withhold the sha. A submodule's
+  working-tree state is not inspected, since its files are not transferred.
 - **Non-UTF-8 names from `ls-files`** are recorded as `non-utf8:<repr>` in `skipped`, never
   dropped (rev. C).
 - **The budget covers the extras phase** (rev. C): every subprocess timeout and each step of the
