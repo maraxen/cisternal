@@ -7,6 +7,12 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+## 0.1.6 (2026-11-02)
+
+A project whose submodules are checked out at their pinned commits can now be verified by the
+tree manifest instead of always reading `hash=unknown`. Consumers that read manifests (bathos,
+alynxr) need this release to accept such a manifest; myxcel needs it to write one.
+
 ### Changed
 
 - **Pinned submodules no longer force `hash=unknown`.** The tree manifest records a submodule
@@ -20,6 +26,7 @@ that ships them; unreleased work sits under "Unreleased".
 - `TreeManifest.from_dict` now rejects non-string `declared_dirs`, `extra_excludes` and `skipped`
   entries (they were accepted and could crash the withheld-sha warning).
 - The withheld-sha warning names skipped entries instead of reporting "0 mismatched, 0 missing, 0 extra".
+
 ## 0.1.5 (2026-10-25)
 
 ### Changed
