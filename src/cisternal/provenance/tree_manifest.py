@@ -21,8 +21,23 @@ propagating them.
 
 Tree manifest format: MANIFEST_VERSION=1, HASH_ALGO="git-blob-sha1-nofilter".
 Files are enumerated from a git ls-files or explicit paths, dropping symlinks
-to nonexistent targets, dropping directories/gitlinks, and excluding .git and
-PROVENANCE_FILENAME by construction.
+to nonexistent targets, and excluding .git and PROVENANCE_FILENAME by
+construction.
+
+Submodule gitlinks. A path that is a gitlink (mode 160000) in ``commit``'s tree is
+recorded in ``files`` as ``("160000", <pinned commit sha>)`` -- exactly git's own tree
+entry, so ``tree_id`` and ``matches_commit`` keep their meaning. The submodule's files are
+never hashed into the manifest. The writer checks, at build time and locally, that the
+submodule is initialised and its checked-out HEAD equals the pin; if it is not (or cannot
+be read) the path goes to ``skipped`` as ``gitlink-uninitialized:<path>``,
+``gitlink-mismatch:<path>`` or ``gitlink-unreadable:<path>`` and the manifest fails
+closed. The reader has no ``.git`` to ask for the submodule's HEAD, so it checks the one
+thing it can: the path is absent or an empty directory (nothing unhashed can run from
+it). A directory that is not a gitlink in ``commit`` (a plain directory, an untracked
+nested repo) or any directory when ``commit`` is None keeps the old ``gitlink:<path>``
+skip. A manifest carrying a 160000 entry is rejected as unparseable by readers that
+predate this support (their ``from_dict`` mode whitelist), so they withhold the SHA
+rather than verify without the new check.
 """
 
 from __future__ import annotations
@@ -47,6 +62,7 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_VERSION = 1
 HASH_ALGO = "git-blob-sha1-nofilter"
+GITLINK_MODE = "160000"  # git's tree-entry mode for a submodule; the "blob" is the pinned commit sha
 DEFAULT_MAX_BYTES = 4 * 1024**3
 DEFAULT_MAX_SECONDS = 60.0
 BUILTIN_EXTRA_EXCLUDES = ("__pycache__/",)
@@ -151,9 +167,11 @@ class TreeManifest:
     matches_commit: True iff every manifest file is tracked in commit
                     and its raw blob equals commit's blob (matches_commit per D1).
     extra_excludes: Ignore patterns from .git/info/exclude, core.excludesFile, etc.
-    files: Mapping of posix_relpath -> (mode, blob_hex).
-    skipped: Paths that were encountered but excluded (non-UTF-8, symlink
-             targets, gitlinks, etc.).
+    files: Mapping of posix_relpath -> (mode, blob_hex). A submodule gitlink is
+           ("160000", <pinned commit sha>); see the module docstring.
+    skipped: Paths that were encountered but could not be covered, as
+             "<reason>:<path>" (non-utf8, unreadable, gitlink:, gitlink-uninitialized:,
+             gitlink-mismatch:, gitlink-unreadable:). Any entry makes verify_tree fail closed.
     """
 
     manifest_version: int
@@ -226,7 +244,7 @@ class TreeManifest:
                 if not isinstance(entry, list) or len(entry) != 2:
                     return None
                 mode, blob_hex = entry
-                if not isinstance(mode, str) or mode not in ("100644", "100755", "120000"):
+                if not isinstance(mode, str) or mode not in ("100644", "100755", "120000", GITLINK_MODE):
                     return None
                 if not isinstance(blob_hex, str) or not _is_valid_hex(blob_hex, 40):
                     return None
@@ -299,6 +317,82 @@ class TreeVerification:
     exempt_lock_manifests: tuple[str, ...] = ()
 
 
+def _ls_commit_tree(root: Path, commit: str) -> dict[str, tuple[str, str]] | None:
+    """`git ls-tree -r -z <commit>` as {path: (mode, oid)}, or None if it could not be read.
+
+    Includes gitlinks (mode 160000, oid = the pinned submodule commit). Entries whose path is not
+    UTF-8 are omitted, as `matches_commit` always did. Never raises.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "-r", "-z", commit],
+            capture_output=True,
+            env=clean_git_env(),
+            timeout=60.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.debug("build_tree_manifest: git ls-tree failed: %s", e)
+        return None
+    if result.returncode != 0:
+        return None
+    entries: dict[str, tuple[str, str]] = {}
+    for item in result.stdout.split(b"\0"):
+        if not item:
+            continue
+        # Format: "<mode> <type> <object>\t<file>"
+        parts = item.split(b"\t", 1)
+        if len(parts) != 2:
+            continue
+        tree_info = parts[0].split()
+        if len(tree_info) < 3:
+            continue
+        try:
+            entries[parts[1].decode("utf-8")] = (
+                tree_info[0].decode("ascii"),
+                tree_info[2].decode("utf-8", errors="replace"),
+            )
+        except UnicodeDecodeError:
+            continue
+    return entries
+
+
+def _inspect_submodule(root: Path, rel: str, pin: str) -> str | None:
+    """Check a submodule locally; return None if it is initialised with HEAD == ``pin``, else a skip reason.
+
+    Reasons: ``gitlink-uninitialized`` (no ``.git`` of its own), ``gitlink-unreadable`` (git could
+    not report its HEAD or toplevel), ``gitlink-mismatch`` (HEAD is not the pinned commit).
+    The submodule's own ``.git`` and toplevel are required before reading HEAD: an uninitialised
+    submodule is an empty directory inside the superproject, and ``git -C <it> rev-parse HEAD``
+    would silently answer with the SUPERPROJECT's HEAD. Its working tree is not inspected: its
+    files are not part of the manifest and a push does not transfer them. Never raises.
+    """
+    sub = root / rel
+    if not os.path.lexists(sub / ".git"):
+        return "gitlink-uninitialized"
+    try:
+        env = clean_git_env()
+        top = subprocess.run(
+            ["git", "-C", str(sub), "rev-parse", "--show-toplevel"],
+            capture_output=True, env=env, timeout=10.0,
+        )
+        if top.returncode != 0:
+            return "gitlink-unreadable"
+        if os.path.realpath(top.stdout.decode("utf-8", errors="replace").strip()) != os.path.realpath(sub):
+            return "gitlink-uninitialized"  # .git exists but git resolves to some other repo
+        head = subprocess.run(
+            ["git", "-C", str(sub), "rev-parse", "HEAD"],
+            capture_output=True, env=env, timeout=10.0,
+        )
+        if head.returncode != 0:
+            return "gitlink-unreadable"
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.debug("build_tree_manifest: cannot inspect submodule %s: %s", sub, e)
+        return "gitlink-unreadable"
+    if head.stdout.decode("utf-8", errors="replace").strip() != pin:
+        return "gitlink-mismatch"
+    return None
+
+
 def build_tree_manifest(
     root: Path,
     *,
@@ -360,6 +454,14 @@ def build_tree_manifest(
         files: dict[str, tuple[str, str]] = {}
         skipped: list[str] = list(non_utf8)
 
+        # One ls-tree of `commit` answers both "which directories are submodule gitlinks (and at
+        # what pin)" and, below, matches_commit. None (no commit, or unreadable) means no path is
+        # known to be a gitlink, so every directory keeps the old fail-closed `gitlink:` skip.
+        commit_tree = _ls_commit_tree(root, commit) if commit else None
+        gitlink_pins: dict[str, str] = (
+            {p: oid for p, (m, oid) in commit_tree.items() if m == GITLINK_MODE} if commit_tree else {}
+        )
+
         for path_str in sorted(paths):
             if path_str == PROVENANCE_FILENAME or not path_str:
                 continue
@@ -377,7 +479,17 @@ def build_tree_manifest(
             try:
                 # Check if path is a directory (gitlink or nested repo)
                 if os.path.isdir(path) and not os.path.islink(path):
-                    skipped.append(f"gitlink:{posix_path}")
+                    pin = gitlink_pins.get(posix_path.rstrip("/"))
+                    if pin is None:
+                        # Not a gitlink in `commit` (plain dir, untracked nested repo, or commit unknown).
+                        skipped.append(f"gitlink:{posix_path}")
+                        continue
+                    # A submodule: record its pin only if the checked-out HEAD IS the pin.
+                    reason = _inspect_submodule(root, posix_path.rstrip("/"), pin)
+                    if reason is None:
+                        files[posix_path.rstrip("/")] = (GITLINK_MODE, pin)
+                    else:
+                        skipped.append(f"{reason}:{posix_path}")
                     continue
 
                 # Check if it's a symlink
@@ -491,43 +603,12 @@ def build_tree_manifest(
 
         # Compute matches_commit
         matches_commit = False
-        if commit:
-            try:
-                result = subprocess.run(
-                    ["git", "-C", str(root), "ls-tree", "-r", "-z", commit],
-                    capture_output=True,
-                    env=clean_git_env(),
-                    timeout=60.0,
-                )
-                if result.returncode == 0:
-                    # Parse ls-tree output
-                    commit_files: dict[str, str] = {}  # path -> blob_hex
-                    items = result.stdout.split(b"\0")
-                    for item in items:
-                        if not item:
-                            continue
-                        # Format: "<mode> <type> <object>\t<file>"
-                        parts = item.split(b"\t", 1)
-                        if len(parts) != 2:
-                            continue
-                        path_bytes = parts[1]
-                        tree_info = parts[0].split()
-                        if len(tree_info) >= 3:
-                            obj_hex = tree_info[2].decode("utf-8", errors="replace") if isinstance(tree_info[2], bytes) else tree_info[2]
-                            try:
-                                path_str = path_bytes.decode("utf-8")
-                                commit_files[path_str] = obj_hex
-                            except UnicodeDecodeError:
-                                pass
-
-                    # Check if manifest matches commit
-                    matches_commit = True
-                    for path, (mode, blob_hex) in files.items():
-                        if path not in commit_files or commit_files[path] != blob_hex:
-                            matches_commit = False
-                            break
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
-                logger.debug("build_tree_manifest: failed to compute matches_commit: %s", e)
+        if commit_tree is not None:
+            # True iff every manifest entry (gitlinks included, at their pin) equals commit's entry.
+            matches_commit = all(
+                path in commit_tree and commit_tree[path][1] == blob_hex
+                for path, (_mode, blob_hex) in files.items()
+            )
 
         # Compute tree_id
         computed_tree_id = tree_id(files)
@@ -550,6 +631,19 @@ def build_tree_manifest(
     except Exception as e:
         logger.warning("build_tree_manifest: unexpected error for %s: %s", root, e)
         return None
+
+
+def _gitlink_path_is_empty(path: Path) -> bool:
+    """True iff ``path`` is absent or an empty real directory (not a symlink, not a file). Never raises."""
+    try:
+        if not os.path.lexists(path):
+            return True
+        if os.path.islink(path) or not os.path.isdir(path):
+            return False
+        with os.scandir(path) as it:
+            return next(it, None) is None
+    except OSError:
+        return False
 
 
 def verify_tree(
@@ -655,6 +749,18 @@ def verify_tree(
 
             path = root / path_str
             manifest_mode, manifest_blob = manifest.files[path_str]
+
+            if manifest_mode == GITLINK_MODE:
+                # A submodule pin. There is no .git here to ask for its HEAD (the writer checked
+                # that), so verify what can be: nothing unhashed lives at this path. Absent or an
+                # empty directory passes; a symlink, a file, or ANY directory content is code the
+                # manifest cannot vouch for.
+                if _gitlink_path_is_empty(path):
+                    n_match += 1
+                    recomputed_tree_dict[path_str] = (manifest_mode, manifest_blob)
+                else:
+                    mismatched.append(path_str)
+                continue
 
             # Check if path exists
             if not os.path.lexists(path):
@@ -862,6 +968,10 @@ def verify_tree(
                                     gitlink_path = skipped_entry[8:].strip("/")  # drop prefix and slashes
                                     # Exclude the directory and everything under it
                                     f.write(f"/{gitlink_path}/\n")
+                            # Pinned submodules: their emptiness is checked per entry above, not as extras.
+                            for gl_path, (gl_mode, _gl_sha) in manifest.files.items():
+                                if gl_mode == GITLINK_MODE:
+                                    f.write(f"/{gl_path.strip('/')}/\n")
 
                         # Run git ls-files with custom excludes for declared dirs (recursive)
                         env = clean_git_env()

@@ -492,6 +492,9 @@ def _gate(prov: dict, prov_source: str, cwd: Path) -> GitState:
         missing = len(v.missing)
         extras = len(v.extra_untracked_under_declared_dirs)
         reason = f"{mismatches} mismatched, {missing} missing, {extras} extra"
+        if manifest.skipped:
+            # verify_tree fails closed on any skipped entry; say so rather than "0 / 0 / 0".
+            reason += f", {len(manifest.skipped)} skipped ({', '.join(manifest.skipped[:3])})"
         if v.error:
             reason += f"; {v.error}"
         _warn_withheld(str(root_dir), reason)
