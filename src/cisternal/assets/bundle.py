@@ -159,8 +159,16 @@ class SkillAsset:
 
     @property
     def listing_chars(self) -> int:
-        """Length of the text Claude Code caps per skill-listing entry."""
-        return len(self.description) + len(self.effective_when_to_use)
+        """Length of the text Claude Code caps per skill-listing entry.
+
+        Claude Code renders the entry as ``description - when_to_use``, so when
+        both parts are non-empty the `` - `` separator (3 chars) counts too.
+        """
+        d = len(self.description)
+        w = len(self.effective_when_to_use)
+        if self.description and self.effective_when_to_use:
+            return d + w + 3
+        return d + w
 
 
 @dataclass(frozen=True, slots=True)
