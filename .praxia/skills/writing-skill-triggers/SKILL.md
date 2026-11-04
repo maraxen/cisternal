@@ -52,8 +52,9 @@ Generic words such as `error`, `cleanup` and `workflow` match everything, so the
 
 - In a cisternal plugin, edit the source SKILL.md or manifest. A rendered copy is overwritten at the
   next export.
-- Run `cisternal assets skillmod` to fold a legacy `triggers` manifest key into `when_to_use`. It is
-  emitted as a `Triggers: a, b, c.` sentence, so it counts toward the same length.
+- Run `cisternal assets skillmod --manifest .praxia/manifest.toml` to preview folding a legacy
+  `triggers` manifest key into `when_to_use`, then add `--apply` to write it. Legacy triggers already
+  count toward the listing length either way: they are emitted as a `Triggers: a, b, c.` sentence.
 
 ## Checking it fires
 
