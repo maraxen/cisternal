@@ -282,3 +282,47 @@ path = ".praxia/agents/helper.md"
         )
     assert "skipping golden-digest comparison" in caplog.text
 
+
+def _advisory_plugin(tmp_path: Path, description_chars: int) -> Path:
+    root = tmp_path / "plugin"
+    (root / "skills" / "demo").mkdir(parents=True)
+    (root / "skills" / "demo" / "SKILL.md").write_text(
+        "---\nname: demo\n---\nBody\n", encoding="utf-8"
+    )
+    praxia = root / ".praxia"
+    praxia.mkdir()
+    manifest = praxia / "manifest.toml"
+    manifest.write_text(
+        '[plugin]\nname = "p"\nversion = "1.0.0"\ndescription = ""\n'
+        'requires_praxia = "0.0.0"\n\n'
+        "[[plugin.skills]]\n"
+        'name = "demo"\n'
+        'path = "skills/demo/SKILL.md"\n'
+        f'description = "{"d" * description_chars}"\n',
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_validate_over_listing_target_logs_advisory_and_exits_zero(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 251-char skill gets a non-fatal advisory; validate still exits 0."""
+    manifest = _advisory_plugin(tmp_path, description_chars=251)
+    with caplog.at_level(logging.WARNING, logger="cisternal.cli"):
+        _invoke_app(["assets", "validate", "--manifest", str(manifest)], exit_code=0)
+    assert "over the 250-char target" in caplog.text
+    assert "writing-skill-triggers" in caplog.text
+
+
+def test_validate_under_listing_target_has_no_advisory(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 100-char skill exits 0 with no listing advisory."""
+    manifest = _advisory_plugin(tmp_path, description_chars=100)
+    with caplog.at_level(logging.WARNING, logger="cisternal.cli"):
+        _invoke_app(["assets", "validate", "--manifest", str(manifest)], exit_code=0)
+    assert "250-char target" not in caplog.text
+

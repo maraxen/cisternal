@@ -22,6 +22,9 @@ from cisternal.assets.bundle import SkillAsset
 #: (docs; configurable in Claude Code via ``skillListingMaxDescChars``).
 LISTING_CAP_CHARS = 1536
 
+#: Soft target for description + when_to_use. Skills share one listing budget, and over budget the lowest-priority skills lose their whole description (Claude Code 2.1.318, read 2026-11-04).
+LISTING_TARGET_CHARS = 250
+
 #: SkillAsset attribute -> value kind, for every modelled frontmatter key.
 FIELD_KINDS: dict[str, str] = {
     "when_to_use": "str",
@@ -137,3 +140,20 @@ def check_skill(skill: SkillAsset) -> list[str]:
             f"over the {LISTING_CAP_CHARS}-char listing cap (the excess is truncated)"
         )
     return out
+
+
+def listing_advisory(skill: SkillAsset) -> str | None:
+    """Non-fatal advisory when a skill is over the soft listing target.
+
+    Deliberately not part of ``check_skill``: its warnings are fatal in
+    validate, publish, snapshot and plugin install. Over the hard cap
+    ``check_skill`` already warns, so this returns None there.
+    """
+    chars = skill.listing_chars
+    if chars <= LISTING_TARGET_CHARS or chars > LISTING_CAP_CHARS:
+        return None
+    return (
+        f"skill {skill.name!r}: description + when_to_use is {chars} chars, "
+        f"over the {LISTING_TARGET_CHARS}-char target; skills share one listing budget "
+        "(see cisternal:writing-skill-triggers)"
+    )

@@ -1036,6 +1036,15 @@ def validate_assets(
         _log.error("cisternal.cli: validate failed — warnings: %s", report.warnings)
         raise SystemExit(1)
 
+    # Soft listing-target advisories never change the exit code; they live
+    # outside report.warnings, which publish/snapshot/plugin install also fail on.
+    from cisternal.assets.skill_schema import listing_advisory  # noqa: PLC0415
+
+    for skill in report.bundle.skills:
+        advisory = listing_advisory(skill)
+        if advisory is not None:
+            _log.warning("cisternal.cli: advisory — %s", advisory)
+
     if rust_parity:
         from cisternal.assets.bridge import (  # noqa: PLC0415
             conformance_expected_path,
