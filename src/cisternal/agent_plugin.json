@@ -117,6 +117,28 @@
         "triggers": [],
         "user_invocable": true,
         "when_to_use": ""
+      },
+      {
+        "agent": "",
+        "allowed_tools": [],
+        "argument_hint": "",
+        "arguments": [],
+        "body": "# Writing skill triggers\n\nA trigger is the `description` plus `when_to_use`: the only text a model sees when deciding whether\nto load a skill. Its job is to match a moment, not to explain the skill.\n\n## The budget is shared\n\nRead from the Claude Code 2.1.318 binary, 2026-11-04:\n\n- Each listing entry is `description - when_to_use`, cut at 1,536 characters (`skillListingMaxDescChars`).\n- All skills share a pool of `context window × 4 × skillListingBudgetFraction` characters (default\n  0.01). At the default on a 200k window that is 8,000 characters, about 72 per skill across 111 skills.\n- Over the pool, the lowest-priority skills lose their whole description and show as a bare name.\n\nSo a long trigger can cost a different skill its trigger. `cisternal assets validate` prints an\nadvisory above 250 characters without failing. Aim shorter.\n\n## The shape\n\nWrite these parts, in this order:\n\n1. **The full scope.** `Use when <every kind of task the skill serves>`. Keep the broadest true\n   statement: \"writing or modifying JAX code\", not \"JAX code that hits a tracer error\". If the skill\n   is a gate, say `before` the action it guards.\n2. **Distinctive strings.** The 2–5 terms only this skill would claim: commands, file names, error\n   text, the user's own phrasing.\n3. **The sibling boundary, only if another skill could take the same task.** `Not for X (use Y).`\n\nEverything else belongs in the body: what the skill covers, its steps, its history.\n\n```yaml\n# Before, 761 characters (shortened here): what it covers, then every synonym\ndescription: Use when cluster storage is full or filling — Disk quota exceeded, No space left on device, a file-count or inode cap... Covers reading byte AND inode limits per tier, flash vs HDD placement... - Triggers: disk quota exceeded, EDQUOT, ENOSPC, no space left, inode, file count, file cap, quota, df -i, du...\n\n# After, 149 characters\ndescription: Use when Engaging storage is full or filling (\"Disk quota exceeded\", \"No space left on device\", inode cap), before deleting or moving anything there.\n```\n\n## What shortening can break\n\nCutting words is usually safe; narrowing scope is not. A rewrite that listed only symptoms sent\n\"write a JAX function\" to no skill. Remove words freely, but keep every kind of task the skill serves.\n\nGeneric words such as `error`, `cleanup` and `workflow` match everything, so they earn nothing.\n\n## Editing\n\n- In a cisternal plugin, edit the source SKILL.md or manifest. A rendered copy is overwritten at the\n  next export.\n- Run `cisternal assets skillmod --manifest .praxia/manifest.toml` to preview folding a legacy\n  `triggers` manifest key into `when_to_use`, then add `--apply` to write it. Legacy triggers already\n  count toward the listing length either way: they are emitted as a `Triggers: a, b, c.` sentence.\n\n## Checking it fires\n\nWrite about five prompts that should fire the skill and five near misses that should not, including\na prompt for its closest sibling. Give fresh agents the skill listing and each prompt, and ask which\nskill they would load. A shorter trigger passes only if it picks the same skills as the longer one.\nFor a repeatable check, put the prompts in an eval suite and run `claude plugin eval` on the plugin.\n",
+        "compatibility": "",
+        "context": "",
+        "description": "Use when writing or shortening a skill's description or when_to_use, when a skill fails to fire or fires on the wrong task, or when `cisternal assets validate` warns about listing length.",
+        "disable_model_invocation": false,
+        "disallowed_tools": [],
+        "effort": "",
+        "license": "",
+        "model": "",
+        "name": "writing-skill-triggers",
+        "paths": [],
+        "resources": [],
+        "shell": "",
+        "triggers": [],
+        "user_invocable": true,
+        "when_to_use": ""
       }
     ]
   },

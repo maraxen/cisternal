@@ -14,7 +14,7 @@ import yaml
 
 from cisternal.assets.bundle import AssetBundle, BundleMetadata, SkillAsset
 from cisternal.assets.manifest import ManifestAssetSource, _split_frontmatter
-from cisternal.assets.skill_schema import LISTING_CAP_CHARS, check_skill
+from cisternal.assets.skill_schema import LISTING_CAP_CHARS, check_skill, listing_advisory
 from cisternal.assets.snapshot import bundle_from_dict
 from cisternal.export._markdown import format_skill_markdown
 
@@ -158,3 +158,90 @@ def test_forbidden_name_characters_warn() -> None:
     assert check_skill(SkillAsset(name="a<b", description="d"))
     assert check_skill(SkillAsset(name="a​b", description="d"))
     assert check_skill(SkillAsset(name="fine-name", description="d")) == []
+
+
+def test_listing_advisory_at_250_chars_is_none() -> None:
+    assert listing_advisory(SkillAsset(name="s", description="d" * 250)) is None
+
+
+def test_listing_advisory_at_251_chars_names_the_target_and_the_skill() -> None:
+    message = listing_advisory(SkillAsset(name="s", description="d" * 251))
+    assert message is not None
+    assert "over the 250-char target" in message
+    assert "writing-skill-triggers" in message
+    assert "listing cap" not in message
+
+
+def test_listing_advisory_counts_long_legacy_triggers_with_short_description() -> None:
+    skill = SkillAsset(name="s", description="d" * 10, triggers=("t" * 300,))
+    message = listing_advisory(skill)
+    assert message is not None
+    assert "over the 250-char target" in message
+
+
+def test_listing_advisory_at_cap_is_still_emitted() -> None:
+    message = listing_advisory(SkillAsset(name="s", description="d" * 1536))
+    assert message is not None
+    assert "over the 250-char target" in message
+
+
+def test_listing_advisory_over_cap_is_none_because_the_cap_already_warns() -> None:
+    assert listing_advisory(SkillAsset(name="s", description="d" * 1537)) is None
+
+
+def test_target_stays_out_of_check_skill_so_it_is_never_fatal() -> None:
+    # check_skill feeds report.warnings, which validate, publish, snapshot and
+    # plugin install treat as fatal. The soft target must not reach it.
+    assert check_skill(SkillAsset(name="s", description="d" * 251)) == []
+    cap = check_skill(SkillAsset(name="s", description="d" * 1537))
+    assert len(cap) == 1
+    assert "listing cap" in cap[0]
+
+
+# Claude Code renders the listing entry as "description - when_to_use", so the
+# " - " separator (3 chars) counts whenever both parts are non-empty.
+
+
+def test_listing_chars_counts_the_separator_when_both_parts_are_present() -> None:
+    skill = SkillAsset(name="s", description="d" * 200, when_to_use="w" * 47)
+    assert skill.listing_chars == 250
+
+
+def test_listing_chars_has_no_separator_without_when_to_use() -> None:
+    assert SkillAsset(name="s", description="d" * 251).listing_chars == 251
+
+
+def test_listing_advisory_boundary_with_separator_at_250_is_none() -> None:
+    skill = SkillAsset(name="s", description="d" * 200, when_to_use="w" * 47)
+    assert skill.listing_chars == 250
+    assert listing_advisory(skill) is None
+
+
+def test_listing_advisory_boundary_with_separator_at_251_is_returned() -> None:
+    skill = SkillAsset(name="s", description="d" * 200, when_to_use="w" * 48)
+    assert skill.listing_chars == 251
+    message = listing_advisory(skill)
+    assert message is not None
+    assert "over the 250-char target" in message
+
+
+def test_description_only_at_251_is_returned_with_no_separator() -> None:
+    skill = SkillAsset(name="s", description="d" * 251)
+    assert skill.listing_chars == 251
+    message = listing_advisory(skill)
+    assert message is not None
+    assert "over the 250-char target" in message
+
+
+def test_cap_boundary_with_separator_at_1536_has_no_cap_warning() -> None:
+    skill = SkillAsset(name="s", description="d" * 1500, when_to_use="w" * 33)
+    assert skill.listing_chars == LISTING_CAP_CHARS
+    assert check_skill(skill) == []
+
+
+def test_cap_boundary_with_separator_at_1537_warns() -> None:
+    skill = SkillAsset(name="s", description="d" * 1500, when_to_use="w" * 34)
+    assert skill.listing_chars == LISTING_CAP_CHARS + 1
+    warnings = check_skill(skill)
+    assert len(warnings) == 1
+    assert "listing cap" in warnings[0]
