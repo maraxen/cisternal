@@ -43,10 +43,8 @@ description: Use when Engaging storage is full or filling ("Disk quota exceeded"
 
 ## What shortening can break
 
-In a small routing test on 2026-11-04 (18 prompts, 13 skills, one run per arm), descriptions cut by
-about 65% routed as well as the originals. The one miss came from narrowing scope: a rewrite that
-listed only symptoms sent "write a JAX function" to no skill. Remove words freely, but keep every
-kind of task the skill serves.
+Cutting words is usually safe; narrowing scope is not. A rewrite that listed only symptoms sent
+"write a JAX function" to no skill. Remove words freely, but keep every kind of task the skill serves.
 
 Generic words such as `error`, `cleanup` and `workflow` match everything, so they earn nothing.
 
