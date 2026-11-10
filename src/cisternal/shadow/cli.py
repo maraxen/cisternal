@@ -13,6 +13,8 @@ from typing import Annotated, Any
 
 import cyclopts
 
+from cisternal.shadow.mode_state import GateCheckError, check_mode_state
+from cisternal.shadow.resolution import ResolutionError
 from cisternal.shadow.scoring import ScoringRefusalError, score_feature
 
 shadow_app = cyclopts.App(
@@ -123,3 +125,68 @@ def shadow_score(
     print(f"  Recall:              {rec_str}")
     print(f"  False Positive Rate: {fpr_str}")
     print(f"  Precision > BaseRate: {exceeds_str}")
+
+
+@shadow_app.command(name="check")
+def shadow_check(
+    feature_or_path: str,
+    *,
+    records_dir: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--records-dir"],
+            help="Directory containing events.*.jsonl files.",
+        ),
+    ] = None,
+    mode_state_dir: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--mode-state-dir"],
+            help="Directory containing mode-state TOML files.",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--json"],
+            help="Emit machine-readable JSON report.",
+        ),
+    ] = False,
+) -> None:
+    """Evaluate promotion readiness of a shadow feature (read-only)."""
+    try:
+        result = check_mode_state(
+            feature_or_path=feature_or_path,
+            records_dir=records_dir,
+            mode_state_dir=mode_state_dir,
+        )
+    except (GateCheckError, ResolutionError) as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(exc.exit_code) from exc
+
+    if json_output:
+        print(json.dumps(result.to_dict(), indent=2))
+        raise SystemExit(result.exit_code)
+
+    # Human-readable report
+    status_str = "PERMITTED" if result.promotion_permitted else "BLOCKED"
+    print(f"Feature: {result.feature} (Stage: {result.current_stage} -> Target: {result.target_stage})")
+    print(f"  Promotion Status: {status_str} (Exit Code: {result.exit_code})")
+    if result.blocking_reasons:
+        print("  Blocking Reasons:")
+        for reason in result.blocking_reasons:
+            print(f"    - {reason}")
+    else:
+        print("  Blocking Reasons: none")
+
+    m = result.metrics
+    print("  Metrics:")
+    print(f"    Verdicts Total: {m.get('verdicts_total')} | Labels Total: {m.get('labels_total')}")
+    print(f"    Confusion Matrix: TP={m.get('tp')}, FP={m.get('fp')}, TN={m.get('tn')}, FN={m.get('fn')}")
+    print(f"    Base Rate: {m.get('base_rate')}")
+    print(f"    Precision: {m.get('precision')} [CI: {m.get('precision_ci_lower')} .. {m.get('precision_ci_upper')}]")
+    print(f"    Recall:    {m.get('recall')} [CI: {m.get('recall_ci_lower')} .. {m.get('recall_ci_upper')}]")
+    print(f"    FP Rate:   {m.get('fp_rate')}")
+    print(f"    Isolation Violations: {m.get('isolation_violations')}")
+
+    raise SystemExit(result.exit_code)
