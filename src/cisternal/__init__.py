@@ -74,13 +74,15 @@ from cisternal.registration.decorator import tool
 from cisternal.registration.errors import CisternalWireError
 from cisternal.registration.registry import clear_registry
 
-# M3 (assets export)
-from cisternal.assets.spec import AssetSpec
-from cisternal.assets.bundle import AssetBundle
-from cisternal.assets.source import registry_assets
-from cisternal.export.base import Emitter
-from cisternal.export.claude import ClaudeEmitter
-from cisternal.export.write import write_bundle
+# M3 (assets export) - lazily imported to avoid yaml/export overhead on startup
+_M3_LAZY: dict[str, tuple[str, str]] = {
+    "AssetSpec": ("cisternal.assets.spec", "AssetSpec"),
+    "AssetBundle": ("cisternal.assets.bundle", "AssetBundle"),
+    "registry_assets": ("cisternal.assets.source", "registry_assets"),
+    "Emitter": ("cisternal.export.base", "Emitter"),
+    "ClaudeEmitter": ("cisternal.export.claude", "ClaudeEmitter"),
+    "write_bundle": ("cisternal.export.write", "write_bundle"),
+}
 
 
 def init(
@@ -169,13 +171,20 @@ def emit_event(name: str, *, level: int | str | None = None, **fields: Any) -> N
 
 
 def _lazy_import(name: str) -> object:
-    """Lazy re-export for wire and WiredRegistry to defer fastmcp import."""
+    """Lazy re-export for wire and WiredRegistry (defer fastmcp) and M3 assets."""
     if name == "wire":
         from cisternal.registration.wired import wire as _wire
         return _wire
     if name == "WiredRegistry":
         from cisternal.registration.wired import WiredRegistry as _WiredRegistry
         return _WiredRegistry
+    if name in _M3_LAZY:
+        import importlib
+        mod_name, attr = _M3_LAZY[name]
+        mod = importlib.import_module(mod_name)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
