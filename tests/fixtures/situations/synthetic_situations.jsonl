@@ -1,0 +1,80 @@
+{"id": "sit_export_trust_01", "prompt": "How do I use export-trust to verify the agent bundles?", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_02", "prompt": "Run assets validate to check the manifest formatting.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_03", "prompt": "Use assets inspect to see what tools are registered.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_04", "prompt": "Let's run export-trust across all surfaces.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_05", "prompt": "Can you verify our export-trust configuration?", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_06", "prompt": "Check the assets inspect output for missing skills.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_07", "prompt": "Please run assets validate on the plugin bundle.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_08", "prompt": "We need to dogfood export-trust before merging.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_09", "prompt": "Does assets validate catch structural errors?", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_10", "prompt": "Execute assets inspect --manifest .praxia/manifest.toml", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_11", "prompt": "Confirm that export-trust passes in the CI environment.", "expected_skills": ["export-trust"]}
+{"id": "sit_export_trust_12", "prompt": "Run assets validate to check for dangling tool references.", "expected_skills": ["export-trust"]}
+{"id": "sit_run_cisternal_01", "prompt": "How do I run-cisternal to test telemetry?", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_02", "prompt": "Execute telemetry doctor to check OTLP connection health.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_03", "prompt": "Call emit_event to send a custom lifecycle record.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_04", "prompt": "Let's invoke run-cisternal with uv run.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_05", "prompt": "Run telemetry doctor --json to inspect the status schema.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_06", "prompt": "Use emit_event to notify the monitoring daemon.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_07", "prompt": "We should use run-cisternal for end-to-end telemetry testing.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_08", "prompt": "Verify telemetry doctor output in strict mode.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_09", "prompt": "Does emit_event handle JSON serialization cleanly?", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_10", "prompt": "The run-cisternal driver script completed stage one.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_11", "prompt": "Run telemetry doctor to ensure sockets are open.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_run_cisternal_12", "prompt": "Call emit_event with event type status_update.", "expected_skills": ["run-cisternal"]}
+{"id": "sit_customizing_tools_01", "prompt": "Should we cherry-pick this utility or vendor the entire package?", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_02", "prompt": "Let us re-implement this algorithm from scratch.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_03", "prompt": "We want to migrate this module to Rust using pyo3.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_04", "prompt": "Consult the decision-matrix before taking an external dependency.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_05", "prompt": "Can we cherry-pick the regex parser from upstream?", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_06", "prompt": "Decide whether to re-implement or accept the dependency.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_07", "prompt": "Build a pyo3 binding for the high-throughput loop.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_08", "prompt": "Review the decision-matrix trade-offs for vendoring.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_09", "prompt": "A quick cherry-pick will resolve the issue without full dependency.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_10", "prompt": "Is it safe to re-implement this hashing function?", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_11", "prompt": "Setup pyo3 bindings in the crate to expose Rust functions.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_customizing_tools_12", "prompt": "Check the decision-matrix for recommendations on licensing.", "expected_skills": ["customizing-tools"]}
+{"id": "sit_writing_skill_triggers_01", "prompt": "How do I use writing-skill-triggers to optimize my prompt matching?", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_02", "prompt": "What should we write in when_to_use for this skill?", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_03", "prompt": "We hit the skillListingMaxDescChars limit in Claude Code.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_04", "prompt": "Shorten the listing length so other skills retain their descriptions.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_05", "prompt": "Follow writing-skill-triggers rules to keep trigger concise.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_06", "prompt": "Include when_to_use only when the description alone is insufficient.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_07", "prompt": "Check skillListingMaxDescChars setting to avoid truncation.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_08", "prompt": "The listing length advisory warned that we exceeded 250 characters.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_09", "prompt": "Consult writing-skill-triggers to avoid broad words like error.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_10", "prompt": "Format the when_to_use clause with exact symptom phrases.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_11", "prompt": "Ensure the trigger conforms to skillListingMaxDescChars bounds.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_writing_skill_triggers_12", "prompt": "Optimize the listing length so the trigger pool is preserved.", "expected_skills": ["writing-skill-triggers"]}
+{"id": "sit_triage_tool_01", "prompt": "How do I use triage-tool to audit unused servers?", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_02", "prompt": "Run prune-list to identify MCP servers with zero calls.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_03", "prompt": "Check cisternal usage to inspect recent tool call counts.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_04", "prompt": "We should run triage-tool before modifying developer config.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_05", "prompt": "Inspect the prune-list recommendations for safe drops.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_06", "prompt": "Use cisternal usage to measure subagent tool invocations.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_07", "prompt": "Let triage-tool audit the active server catalog.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_08", "prompt": "Execute prune-list with the twenty session threshold.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_09", "prompt": "Review cisternal usage summary tables for interactive sessions.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_10", "prompt": "The triage-tool workflow requires manual review of drop lists.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_11", "prompt": "Run prune-list to verify per-project server retention.", "expected_skills": ["triage-tool"]}
+{"id": "sit_triage_tool_12", "prompt": "Generate a cisternal usage report in JSON format.", "expected_skills": ["triage-tool"]}
+{"id": "sit_neg_01", "prompt": "Run pytest on tests/test_parser.py to check unit tests.", "expected_skills": []}
+{"id": "sit_neg_02", "prompt": "Fix merge conflict markers in README.md", "expected_skills": []}
+{"id": "sit_neg_03", "prompt": "How do I sort a list of dictionaries by key in Python?", "expected_skills": []}
+{"id": "sit_neg_04", "prompt": "Check git status to see what files were modified.", "expected_skills": []}
+{"id": "sit_neg_05", "prompt": "Install the dependencies with uv sync.", "expected_skills": []}
+{"id": "sit_neg_06", "prompt": "Write a fast Fibonacci function using recursion with memoization.", "expected_skills": []}
+{"id": "sit_neg_07", "prompt": "Create a docker container running ubuntu latest.", "expected_skills": []}
+{"id": "sit_neg_08", "prompt": "What is the capital of France?", "expected_skills": []}
+{"id": "sit_neg_09", "prompt": "Explain the difference between a process and a thread.", "expected_skills": []}
+{"id": "sit_neg_10", "prompt": "Update the copyright year in the LICENSE file.", "expected_skills": []}
+{"id": "sit_neg_11", "prompt": "Format the Python code using ruff format.", "expected_skills": []}
+{"id": "sit_neg_12", "prompt": "How do I read an environment variable in bash?", "expected_skills": []}
+{"id": "sit_neg_13", "prompt": "Write a SQL query to join orders and customers.", "expected_skills": []}
+{"id": "sit_neg_14", "prompt": "Compile the cargo project in release mode.", "expected_skills": []}
+{"id": "sit_neg_15", "prompt": "Add type annotations to this helper function.", "expected_skills": []}
+{"id": "sit_neg_16", "prompt": "Configure GitHub Actions to run CI on pull requests.", "expected_skills": []}
+{"id": "sit_neg_17", "prompt": "Optimize this database index for range queries.", "expected_skills": []}
+{"id": "sit_neg_18", "prompt": "Print the current working directory path.", "expected_skills": []}
+{"id": "sit_neg_19", "prompt": "Convert this CSV dataset into a pandas dataframe.", "expected_skills": []}
+{"id": "sit_neg_20", "prompt": "Remove temporary build artifacts from target folder.", "expected_skills": []}

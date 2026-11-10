@@ -17,6 +17,7 @@ from cisternal.probe.telemetry_doctor import (
     resolve_doctor_consumer,
     resolve_doctor_strict_mode,
 )
+from cisternal.telemetry.otlp_exporter import otlp_sdk_available
 from cisternal.telemetry.pipeline import resolve_log_dir_from_env
 
 
@@ -76,7 +77,8 @@ def test_doctor_log_dir_and_otlp(
     assert "writable: yes" in report
     assert "CISTERNAL_OTLP_ENDPOINT: http://localhost:4317" in report
     assert "CISTERNAL_OTLP_PROTOCOL: grpc" in report
-    assert "otlp_sdk: installed" in report
+    expected_sdk = "installed" if otlp_sdk_available() else "missing"
+    assert f"otlp_sdk: {expected_sdk}" in report
 
 
 def test_doctor_job_context_myx(monkeypatch: pytest.MonkeyPatch) -> None:
