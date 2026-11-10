@@ -97,6 +97,36 @@ def load_mode_state(path: Path | str) -> dict[str, Any]:
             exit_code=3,
         )
 
+    # Required key validation per spec §3.3.1 and REV1-03
+    feat = data.get("feature", {})
+    if not isinstance(feat.get("name"), str) or not feat.get("name", "").strip():
+        raise GateCheckError(
+            f"Mode-state TOML at {p} missing required non-empty string key: [feature] name",
+            exit_code=3,
+        )
+
+    valid_stages = ("off", "shadow", "advisory", "enforce")
+    ladder = data.get("ladder", {})
+    if ladder.get("current_stage") not in valid_stages:
+        raise GateCheckError(
+            f"Mode-state TOML at {p} missing or invalid required key [ladder] current_stage (must be one of {valid_stages})",
+            exit_code=3,
+        )
+
+    shadow = data.get("shadow", {})
+    if not isinstance(shadow.get("writes_isolated"), bool):
+        raise GateCheckError(
+            f"Mode-state TOML at {p} missing required boolean key: [shadow] writes_isolated",
+            exit_code=3,
+        )
+
+    promo = data.get("promotion", {})
+    if promo.get("target_stage") not in valid_stages:
+        raise GateCheckError(
+            f"Mode-state TOML at {p} missing or invalid required key [promotion] target_stage (must be one of {valid_stages})",
+            exit_code=3,
+        )
+
     return data
 
 
@@ -141,8 +171,10 @@ def resolve_enforcer_symbol(
 
 def evaluate_gate(
     mode_data: dict[str, Any],
-    records_dir: Path,
+    records_dir: Path | None = None,
     *,
+    verdicts_file: Path | None = None,
+    labels_file: Path | None = None,
     repo_root: Path | None = None,
     confidence: float = 0.95,
 ) -> CheckResult:
@@ -150,6 +182,12 @@ def evaluate_gate(
 
     Implements non-short-circuiting gate evaluation per spec §3.3.2.
     """
+    if confidence <= 0.0 or confidence >= 1.0:
+        raise GateCheckError(
+            f"Confidence level must be strictly between 0.0 and 1.0, got {confidence}",
+            exit_code=2,
+        )
+
     feat_cfg = mode_data.get("feature", {})
     feature = str(feat_cfg.get("name", ""))
     current_stage = str(mode_data.get("ladder", {}).get("current_stage", "off"))
@@ -161,14 +199,22 @@ def evaluate_gate(
 
     # Scan telemetry records
     files_to_read: list[Path] = []
-    if records_dir.is_dir():
-        for f in sorted(records_dir.iterdir()):
-            if f.is_file() and f.name.endswith(".jsonl"):
-                files_to_read.append(f)
+    if verdicts_file:
+        files_to_read.append(Path(verdicts_file))
+    if labels_file:
+        files_to_read.append(Path(labels_file))
+    if records_dir is not None:
+        p_rec = Path(records_dir)
+        if p_rec.is_dir():
+            for f in sorted(p_rec.iterdir()):
+                if f.is_file() and f.name.endswith(".jsonl"):
+                    if f not in files_to_read:
+                        files_to_read.append(f)
 
     verdicts: dict[str, tuple[float, Any]] = {}
     labels: dict[str, tuple[int, float, Any, str]] = {}
     isolation_events: list[dict[str, Any]] = []
+    explicit_labels_file_sources: set[str] = set()
 
     for fpath in files_to_read:
         try:
@@ -203,6 +249,8 @@ def evaluate_gate(
                         raw_lbl = fields.get("label")
                         source = str(fields.get("label_source", "at_work"))
                         rank = PROVENANCE_RANKS.get(source, 0)
+                        if labels_file is not None and fpath.resolve() == Path(labels_file).resolve():
+                            explicit_labels_file_sources.add(source)
                         if s_key not in labels:
                             labels[s_key] = (rank, ts, raw_lbl, source)
                         else:
@@ -214,8 +262,15 @@ def evaluate_gate(
 
     # Refusal on empty telemetry
     if not verdicts and not labels:
+        loc = records_dir or verdicts_file or labels_file
         raise GateCheckError(
-            f"REFUSAL: 0 verdicts and 0 labels found for feature '{feature}' in {records_dir}",
+            f"REFUSAL: 0 verdicts and 0 labels found for feature '{feature}' in {loc}",
+            exit_code=2,
+        )
+    if not verdicts:
+        loc = records_dir or verdicts_file
+        raise GateCheckError(
+            f"REFUSAL: feature '{feature}' has 0 matching verdicts in {loc}. Gate check requires at least 1 verdict record.",
             exit_code=2,
         )
     if not labels:
@@ -225,6 +280,11 @@ def evaluate_gate(
         )
 
     blocking_reasons: list[str] = []
+
+    # Check threshold_basis per spec §3.3.1 and REV2-07
+    threshold_basis = promotion.get("threshold_basis")
+    if not threshold_basis or not str(threshold_basis).strip():
+        blocking_reasons.append("missing_threshold_basis")
 
     # 1. Isolation check
     enforcer_symbol = shadow_cfg.get("writes_isolated_enforced_by")
@@ -249,6 +309,11 @@ def evaluate_gate(
         blocking_reasons.append(f"insufficient_verdicts:{verdicts_total}/{min_verdicts}")
 
     allowed_sources = set(promotion.get("allowed_label_sources", ["frozen_gold", "owner_confirmed", "at_work"]))
+    if labels_file is not None:
+        disallowed = sorted({s for s in explicit_labels_file_sources if s not in allowed_sources})
+        if disallowed:
+            blocking_reasons.append(f"unpermitted_label_sources_present:{','.join(disallowed)}")
+
     # Filter labels to allowed sources
     filtered_labels = {
         sk: data for sk, data in labels.items()
@@ -355,8 +420,8 @@ def evaluate_gate(
             )
 
     # 6. Base rate comparison
-    if precision_ci_lower is not None:
-        if precision_ci_lower <= base_rate:
+    if precision_ci_lower is None or precision_ci_lower <= base_rate:
+        if "precision_lower_bound_below_base_rate" not in blocking_reasons:
             blocking_reasons.append("precision_lower_bound_below_base_rate")
 
     # 7. False positive rate
@@ -403,8 +468,11 @@ def check_mode_state(
     feature_or_path: str | Path,
     *,
     records_dir: Path | None = None,
+    verdicts_file: Path | None = None,
+    labels_file: Path | None = None,
     mode_state_dir: Path | None = None,
     repo_root: Path | None = None,
+    confidence: float = 0.95,
 ) -> CheckResult:
     """Resolve paths, parse mode-state, and evaluate promotion gates."""
     raw = str(feature_or_path)
@@ -426,11 +494,20 @@ def check_mode_state(
 
     mode_data = load_mode_state(toml_path)
 
-    # Resolve log_dir via 5-layer hierarchy if records_dir not explicitly passed
-    if records_dir is None:
+    # Resolve log_dir via 5-layer hierarchy if records_dir and overrides not explicitly passed
+    if records_dir is None and verdicts_file is None and labels_file is None:
         res_log = resolve_log_dir(cli_arg=None, repo_root=root)
         effective_records_dir = res_log.path
-    else:
+    elif records_dir is not None:
         effective_records_dir = Path(records_dir).resolve()
+    else:
+        effective_records_dir = None
 
-    return evaluate_gate(mode_data, effective_records_dir, repo_root=root)
+    return evaluate_gate(
+        mode_data,
+        effective_records_dir,
+        verdicts_file=verdicts_file,
+        labels_file=labels_file,
+        repo_root=root,
+        confidence=confidence,
+    )

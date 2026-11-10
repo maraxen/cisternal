@@ -217,6 +217,8 @@ def _map_to_binary(val: Any, positive_label: Any) -> tuple[bool, bool]:
         return False, False
     else:
         # String or primitive positive_label
+        if not isinstance(val, (str, int, float, bool)):
+            return False, False
         pos_str = str(positive_label).strip().lower()
         if isinstance(val, bool):
             val_str = "true" if val else "false"
@@ -250,6 +252,23 @@ def score_feature(
     Raises:
         ScoringRefusalError: If 0 matching labels exist for the feature (exit code 2).
     """
+    if confidence <= 0.0 or confidence >= 1.0:
+        raise ScoringRefusalError(
+            f"Confidence level must be strictly between 0.0 and 1.0, got {confidence}",
+            exit_code=2,
+        )
+
+    # 5-layer resolution fallback if no telemetry input is specified
+    if records_dir is None and verdicts_file is None and labels_file is None:
+        from cisternal.shadow.resolution import ResolutionError, resolve_log_dir
+        try:
+            res_log = resolve_log_dir(cli_arg=None)
+            records_dir = res_log.path
+        except ResolutionError as exc:
+            raise ScoringRefusalError(
+                f"Resolution error: {exc}",
+                exit_code=2,
+            ) from exc
     files_to_read: list[Path] = []
     if verdicts_file:
         files_to_read.append(Path(verdicts_file))

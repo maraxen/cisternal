@@ -335,6 +335,7 @@ min_verdicts = 5
 min_labels = 5
 min_precision = 0.70
 allowed_label_sources = ["frozen_gold"]
+threshold_basis = "pre-registered calibration"
 """)
 
     records_dir = tmp_path / "logs"
@@ -365,3 +366,215 @@ allowed_label_sources = ["frozen_gold"]
     assert "metrics" in data
     assert data["metrics"]["tp"] == 5
     assert data["metrics"]["precision"] == 1.0
+
+
+def test_check_zero_verdicts_refusal_exit_2(tmp_path: Path) -> None:
+    """Finding 1 (REV1-01 / REV2-01): 0 verdicts with 5 labels raises Exit 2 refusal."""
+    toml_path = tmp_path / "zero_v.toml"
+    toml_path.write_text("""
+[feature]
+name = "zero_v_feat"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+threshold_basis = "pre-registered calibration"
+""")
+
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    log_file = records_dir / "events.jsonl"
+    recs = [
+        {
+            "name": "shadow.label",
+            "ts": float(i),
+            "fields": {
+                "feature": "zero_v_feat",
+                "subject_key": f"s:{i}",
+                "label": True,
+                "label_source": "frozen_gold",
+            },
+        }
+        for i in range(5)
+    ]
+    _write_jsonl(log_file, recs)
+
+    with pytest.raises(GateCheckError) as exc_info:
+        check_mode_state(toml_path, records_dir=records_dir)
+    assert exc_info.value.exit_code == 2
+    assert "0 matching verdicts" in str(exc_info.value)
+
+    # CLI check also exits with code 2
+    with pytest.raises(SystemExit) as exit_info:
+        app(["shadow", "check", str(toml_path), "--records-dir", str(records_dir)])
+    assert exit_info.value.code == 2
+
+
+def test_check_base_rate_safety_undefined_precision_blocks(tmp_path: Path) -> None:
+    """Finding 2 (REV1-02): Undefined precision blocks promotion via base rate safety."""
+    toml_path = tmp_path / "always_neg.toml"
+    toml_path.write_text("""
+[feature]
+name = "always_neg_feat"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+min_verdicts = 5
+min_labels = 5
+threshold_basis = "pre-registered calibration"
+""")
+
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    log_file = records_dir / "events.jsonl"
+    # Candidate predicts False for all 5 subjects, but labels are True (TP=0, FP=0)
+    recs = []
+    for i in range(5):
+        recs.append({
+            "name": "shadow.verdict",
+            "ts": float(i),
+            "fields": {
+                "feature": "always_neg_feat",
+                "subject_key": f"s:{i}",
+                "verdict": False,
+            },
+        })
+        recs.append({
+            "name": "shadow.label",
+            "ts": float(i),
+            "fields": {
+                "feature": "always_neg_feat",
+                "subject_key": f"s:{i}",
+                "label": True,
+                "label_source": "frozen_gold",
+            },
+        })
+    _write_jsonl(log_file, recs)
+
+    res = check_mode_state(toml_path, records_dir=records_dir)
+    assert res.promotion_permitted is False
+    assert res.exit_code == 1
+    assert "precision_lower_bound_below_base_rate" in res.blocking_reasons
+
+    # Also verify disjoint subject keys
+    disjoint_dir = tmp_path / "disjoint_logs"
+    disjoint_dir.mkdir()
+    d_recs = [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "always_neg_feat", "subject_key": "v:1", "verdict": True}},
+        {"name": "shadow.verdict", "ts": 2.0, "fields": {"feature": "always_neg_feat", "subject_key": "v:2", "verdict": True}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "always_neg_feat", "subject_key": "l:1", "label": True, "label_source": "frozen_gold"}},
+        {"name": "shadow.label", "ts": 2.0, "fields": {"feature": "always_neg_feat", "subject_key": "l:2", "label": True, "label_source": "frozen_gold"}},
+    ]
+    _write_jsonl(disjoint_dir / "events.jsonl", d_recs)
+    res_disjoint = check_mode_state(toml_path, records_dir=disjoint_dir)
+    assert res_disjoint.promotion_permitted is False
+    assert "precision_lower_bound_below_base_rate" in res_disjoint.blocking_reasons
+
+
+def test_check_mode_state_toml_missing_required_keys_exit_3(tmp_path: Path) -> None:
+    """Finding 5 (REV1-03): Missing required keys in mode-state TOML raises exit code 3."""
+    bad_toml = tmp_path / "missing_name.toml"
+    bad_toml.write_text("""
+[feature]
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+threshold_basis = "test"
+""")
+    with pytest.raises(GateCheckError) as exc_info:
+        load_mode_state(bad_toml)
+    assert exc_info.value.exit_code == 3
+    assert "[feature] name" in str(exc_info.value)
+
+    with pytest.raises(SystemExit) as exit_info:
+        app(["shadow", "check", str(bad_toml)])
+    assert exit_info.value.code == 3
+
+
+def test_check_missing_threshold_basis(tmp_path: Path) -> None:
+    """Finding 8 (REV2-07): Missing threshold_basis adds blocking reason."""
+    enforcer = tmp_path / "audit.py"
+    enforcer.write_text("def run(): return True\n")
+    toml_path = tmp_path / "no_thresh.toml"
+    toml_path.write_text(f"""
+[feature]
+name = "no_thresh_feat"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+writes_isolated_enforced_by = "{enforcer}::run"
+[promotion]
+target_stage = "advisory"
+min_verdicts = 1
+min_labels = 1
+""")
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "no_thresh_feat", "subject_key": "s:1", "verdict": True}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "no_thresh_feat", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+    res = check_mode_state(toml_path, records_dir=records_dir)
+    assert res.promotion_permitted is False
+    assert "missing_threshold_basis" in res.blocking_reasons
+
+
+def test_check_labels_file_and_unpermitted_label_sources(tmp_path: Path) -> None:
+    """Finding 8 (REV2-07): --labels-file with disallowed sources records unpermitted_label_sources_present."""
+    enforcer = tmp_path / "audit.py"
+    enforcer.write_text("def run(): return True\n")
+    toml_path = tmp_path / "src_test.toml"
+    toml_path.write_text(f"""
+[feature]
+name = "src_feat"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+writes_isolated_enforced_by = "{enforcer}::run"
+[promotion]
+target_stage = "advisory"
+allowed_label_sources = ["frozen_gold"]
+threshold_basis = "pre-registered calibration"
+""")
+    v_file = tmp_path / "verdicts.jsonl"
+    _write_jsonl(v_file, [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "src_feat", "subject_key": "s:1", "verdict": True}},
+    ])
+    l_file = tmp_path / "labels.jsonl"
+    _write_jsonl(l_file, [
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "src_feat", "subject_key": "s:1", "label": True, "label_source": "retrospective"}},
+    ])
+
+    res = check_mode_state(
+        toml_path,
+        verdicts_file=v_file,
+        labels_file=l_file,
+        confidence=0.95,
+    )
+    assert res.promotion_permitted is False
+    assert any("unpermitted_label_sources_present:retrospective" in r for r in res.blocking_reasons)
+
+    # CLI check with --labels-file and --verdicts-file and --confidence
+    with pytest.raises(SystemExit) as exit_info:
+        app([
+            "shadow",
+            "check",
+            str(toml_path),
+            "--verdicts-file",
+            str(v_file),
+            "--labels-file",
+            str(l_file),
+            "--confidence",
+            "0.99",
+        ])
+    assert exit_info.value.code == 1

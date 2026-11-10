@@ -287,3 +287,117 @@ def test_cli_score_text_and_json_output(tmp_path: Path, capsys: pytest.CaptureFi
     assert data["feature"] == "cli_feat"
     assert data["tp"] == 1
     assert data["precision"] == 1.0
+
+
+def test_score_5_layer_resolution_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding 4 (REV2-03): shadow score resolves CISTERNAL_TELEMETRY_LOG_DIR when --records-dir is omitted."""
+    log_dir = tmp_path / "env_logs"
+    log_dir.mkdir()
+    log_file = log_dir / "events.jsonl"
+    _write_jsonl(log_file, [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "env_feat", "subject_key": "s:1", "verdict": True}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "env_feat", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+
+    monkeypatch.setenv("CISTERNAL_TELEMETRY_LOG_DIR", str(log_dir))
+
+    # Python API without records_dir
+    res = score_feature("env_feat")
+    assert res.tp == 1
+    assert res.precision == 1.0
+
+    # CLI without --records-dir
+    with pytest.raises(SystemExit) as exit_info:
+        app(["shadow", "score", "env_feat"])
+    assert exit_info.value.code == 0
+
+
+def test_score_invalid_records_on_unmappable_complex_objects(tmp_path: Path) -> None:
+    """Finding 7 (REV2-06): Non-primitive / unextracted objects increment invalid_records."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    log_file = records_dir / "events.jsonl"
+    _write_jsonl(log_file, [
+        # Unextractable dictionary verdict (no known prediction keys)
+        {
+            "name": "shadow.verdict",
+            "ts": 1.0,
+            "fields": {
+                "feature": "obj_feat",
+                "subject_key": "s:1",
+                "verdict": {"unknown_key": [1, 2, 3]},
+            },
+        },
+        {
+            "name": "shadow.label",
+            "ts": 1.0,
+            "fields": {
+                "feature": "obj_feat",
+                "subject_key": "s:1",
+                "label": "pass",
+                "label_source": "frozen_gold",
+            },
+        },
+    ])
+
+    res = score_feature("obj_feat", records_dir=records_dir, positive_label="pass")
+    assert res.invalid_records == 1
+    assert res.tp == 0
+    assert res.fp == 0
+    assert res.tn == 0
+    assert res.fn == 0
+
+
+def test_score_confidence_level_validation(tmp_path: Path) -> None:
+    """Finding 9 (REV2-09): Confidence level must be in (0, 1)."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    log_file = records_dir / "events.jsonl"
+    _write_jsonl(log_file, [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "conf_feat", "subject_key": "s:1", "verdict": True}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "conf_feat", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+
+    with pytest.raises(ScoringRefusalError) as exc_1:
+        score_feature("conf_feat", records_dir=records_dir, confidence=1.0)
+    assert exc_1.value.exit_code == 2
+
+    with pytest.raises(ScoringRefusalError) as exc_0:
+        score_feature("conf_feat", records_dir=records_dir, confidence=0.0)
+    assert exc_0.value.exit_code == 2
+
+    with pytest.raises(SystemExit) as cli_exit:
+        app(["shadow", "score", "conf_feat", "--records-dir", str(records_dir), "--confidence", "1.5"])
+    assert cli_exit.value.code == 2
+
+
+def test_score_iso8601_timestamps_and_flat_json_records(tmp_path: Path) -> None:
+    """Finding 9 (REV1-04): Transparent reader unwrapping of ISO 8601 timestamps and flat JSON."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    log_file = records_dir / "events.jsonl"
+    # Flat JSON without "fields" wrapper, and ISO 8601 timestamp string
+    _write_jsonl(log_file, [
+        {
+            "name": "shadow.verdict",
+            "ts": "2026-11-09T16:00:00Z",
+            "feature": "flat_iso_feat",
+            "subject_key": "s:1",
+            "verdict": True,
+        },
+        {
+            "name": "shadow.label",
+            "ts": "2026-11-09T16:05:00Z",
+            "feature": "flat_iso_feat",
+            "subject_key": "s:1",
+            "label": True,
+            "label_source": "frozen_gold",
+        },
+    ])
+
+    res = score_feature("flat_iso_feat", records_dir=records_dir)
+    assert res.verdicts_total == 1
+    assert res.labels_total == 1
+    assert res.tp == 1
+    assert res.precision == 1.0
+    assert res.recall == 1.0

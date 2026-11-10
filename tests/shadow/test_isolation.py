@@ -191,3 +191,99 @@ def test_prove_isolation_emits_telemetry_event(tmp_path: Path) -> None:
         rec.fields["enforced_by"]
         == "tests/shadow/test_isolation.py::test_prove_isolation_emits_telemetry_event"
     )
+
+
+def test_prove_isolation_detects_unreadable_file_leak(tmp_path: Path) -> None:
+    """Finding 3 (REV2-02): prove_isolation flags unreadable (chmod 000) file leaks."""
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    shadow_log = tmp_path / "shadow_log"
+    shadow_log.mkdir()
+    scratch_dir = tmp_path / "scratch"
+    scratch_dir.mkdir()
+    leak_file = scratch_dir / "unreadable_leak.bin"
+
+    def live_actor() -> str:
+        return "ok"
+
+    def shadow_actor() -> str:
+        leak_file.write_bytes(b"secret unreadable leak")
+        leak_file.chmod(0o000)
+        return "ok"
+
+    try:
+        res = prove_isolation(
+            live_actor,
+            shadow_actor,
+            live_roots=[live_dir],
+            shadow_log_dir=shadow_log,
+            check_roots=[scratch_dir],
+        )
+        assert res.passed is False
+        assert leak_file.resolve() in [p.resolve() for p in res.leaked_paths]
+    finally:
+        if leak_file.exists():
+            leak_file.chmod(0o666)
+
+
+def test_prove_isolation_detects_directory_and_symlink_leak(tmp_path: Path) -> None:
+    """Finding 3 (REV2-04): prove_isolation flags directory and broken symlink leaks."""
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    shadow_log = tmp_path / "shadow_log"
+    shadow_log.mkdir()
+    scratch_dir = tmp_path / "scratch"
+    scratch_dir.mkdir()
+    leak_subdir = scratch_dir / "leaked_subfolder"
+    leak_symlink = scratch_dir / "leaked_symlink"
+
+    def live_actor() -> str:
+        return "clean"
+
+    def shadow_actor() -> str:
+        leak_subdir.mkdir()
+        leak_symlink.symlink_to("/nonexistent/target")
+        return "clean"
+
+    res = prove_isolation(
+        live_actor,
+        shadow_actor,
+        live_roots=[live_dir],
+        shadow_log_dir=shadow_log,
+        check_roots=[scratch_dir],
+    )
+    assert res.passed is False
+    leaked_res = [p.resolve() for p in res.leaked_paths]
+    assert leak_subdir.resolve() in leaked_res
+    # Symlink target may be nonexistent so match on string path or name
+    assert any("leaked_symlink" in str(p) for p in res.leaked_paths)
+
+
+def test_prove_isolation_default_watched_dirs_catches_cwd_leak(tmp_path: Path) -> None:
+    """Finding 6 (REV2-05): Default watch set catches leak in Path.cwd()."""
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    shadow_log = tmp_path / "shadow_log"
+    shadow_log.mkdir()
+    cwd_leak = Path.cwd() / "cisternal_isolation_cwd_leak.tmp"
+
+    def live_actor() -> str:
+        return "clean"
+
+    def shadow_actor() -> str:
+        cwd_leak.write_text("unauthorized write in cwd")
+        return "clean"
+
+    try:
+        res = prove_isolation(
+            live_actor,
+            shadow_actor,
+            live_roots=[live_dir],
+            shadow_log_dir=shadow_log,
+            # No check_roots passed; relies on default watched_dirs
+        )
+        assert res.passed is False
+        assert any("cisternal_isolation_cwd_leak.tmp" in str(p) for p in res.leaked_paths)
+    finally:
+        if cwd_leak.exists():
+            cwd_leak.unlink()

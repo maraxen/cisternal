@@ -14,7 +14,7 @@ from typing import Annotated, Any
 import cyclopts
 
 from cisternal.shadow.mode_state import GateCheckError, check_mode_state
-from cisternal.shadow.resolution import ResolutionError
+from cisternal.shadow.resolution import ResolutionError, resolve_log_dir
 from cisternal.shadow.scoring import ScoringRefusalError, score_feature
 
 shadow_app = cyclopts.App(
@@ -72,6 +72,10 @@ def shadow_score(
     ] = False,
 ) -> None:
     """Score shadow verdicts against ground truth labels."""
+    if confidence <= 0.0 or confidence >= 1.0:
+        print(f"Error: confidence must be strictly between 0.0 and 1.0, got {confidence}", file=sys.stderr)
+        raise SystemExit(2)
+
     resolved_pos: Any = True
     if positive_label is not None:
         low = positive_label.strip().lower()
@@ -82,16 +86,28 @@ def shadow_score(
         else:
             resolved_pos = positive_label
 
+    effective_records_dir = records_dir
+    if records_dir is None and verdicts_file is None and labels_file is None:
+        try:
+            res_log = resolve_log_dir(cli_arg=None)
+            effective_records_dir = res_log.path
+            print(f"resolved log_dir from {res_log.provenance} ({res_log.path})", file=sys.stderr)
+        except ResolutionError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(2) from exc
+    elif records_dir is not None:
+        print(f"resolved log_dir from CLI argument ({records_dir})", file=sys.stderr)
+
     try:
         result = score_feature(
             feature=feature,
-            records_dir=records_dir,
+            records_dir=effective_records_dir,
             verdicts_file=verdicts_file,
             labels_file=labels_file,
             positive_label=resolved_pos,
             confidence=confidence,
         )
-    except ScoringRefusalError as exc:
+    except (ScoringRefusalError, ResolutionError) as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(exc.exit_code) from exc
 
@@ -138,6 +154,20 @@ def shadow_check(
             help="Directory containing events.*.jsonl files.",
         ),
     ] = None,
+    verdicts_file: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--verdicts-file"],
+            help="Specific verdicts JSONL file override.",
+        ),
+    ] = None,
+    labels_file: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--labels-file"],
+            help="Specific labels JSONL file override.",
+        ),
+    ] = None,
     mode_state_dir: Annotated[
         Path | None,
         cyclopts.Parameter(
@@ -145,6 +175,13 @@ def shadow_check(
             help="Directory containing mode-state TOML files.",
         ),
     ] = None,
+    confidence: Annotated[
+        float,
+        cyclopts.Parameter(
+            name=["--confidence"],
+            help="Confidence level for Wilson intervals (default: 0.95).",
+        ),
+    ] = 0.95,
     json_output: Annotated[
         bool,
         cyclopts.Parameter(
@@ -154,11 +191,18 @@ def shadow_check(
     ] = False,
 ) -> None:
     """Evaluate promotion readiness of a shadow feature (read-only)."""
+    if confidence <= 0.0 or confidence >= 1.0:
+        print(f"Error: confidence must be strictly between 0.0 and 1.0, got {confidence}", file=sys.stderr)
+        raise SystemExit(2)
+
     try:
         result = check_mode_state(
             feature_or_path=feature_or_path,
             records_dir=records_dir,
+            verdicts_file=verdicts_file,
+            labels_file=labels_file,
             mode_state_dir=mode_state_dir,
+            confidence=confidence,
         )
     except (GateCheckError, ResolutionError) as exc:
         print(str(exc), file=sys.stderr)
