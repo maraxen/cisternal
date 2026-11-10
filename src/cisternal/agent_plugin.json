@@ -54,7 +54,7 @@
     "metadata": {
       "description": "Agent-asset export CLI — dogfood manifest for M4 Export Trust",
       "name": "cisternal",
-      "version": "0.1.6"
+      "version": "0.1.7"
     },
     "skills": [
       {

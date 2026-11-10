@@ -7,6 +7,57 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+## 0.1.7 (2026-11-10)
+
+Two new subsystems: the shared shadow-development pattern (`cisternal.shadow`) and tool-surface
+triage (usage counting, a prune list, guidance-coverage lint and Claude Code hooks). Neither changes
+existing consumer behaviour unless adopted: manifests and packaged snapshots from 0.1.6 validate and
+pass `assets snapshot --check` unchanged.
+
+**Upgrade order for the cisternal plugin itself:** upgrade the installed tool first (it now ships a
+`cisternal-hook` command), then run `cisternal plugin update claude`. Updating the plugin first
+leaves its hooks pointing at a command that does not exist yet.
+
+### Added
+
+- **`cisternal.shadow`** (#71): mode-state TOML ladders (`off -> shadow -> advisory -> enforce`),
+  non-blocking verdict and label telemetry, a scoring engine, `cisternal shadow score` and
+  `cisternal shadow check` (read-only promotion gate), and the `prove_isolation` pytest helper.
+  Ships the `developing-in-shadow` skill. `cisternal.shadow` is loaded on first access.
+- **Tool-surface triage** (#72): `cisternal usage` (MCP, CLI, skill and ToolSearch usage across
+  transcripts, stratified main vs subagent sessions), `cisternal prune-list` (drop /
+  enable-per-project recommendations with session and calendar floors), `cisternal skill-coverage`,
+  and the `triage-tool` skill.
+- **Manifest `[families]` and `[verbs]`**, plus skill frontmatter `covers_families` and
+  `distinctive_strings`. `assets validate` reports uncovered families as advisories. It treats a
+  dangling `mcp__` tool reference as fatal only when that server's tool inventory is known, and runs
+  a static honesty lint on skills that declare `distinctive_strings` (`--baseline-ref` compares
+  against a git ref).
+- **Claude Code hooks** in cisternal's own plugin: a `PreToolUse` (Bash) hook that suggests the
+  equivalent MCP tool for a CLI command, and a `PostToolUse` (`mcp__.*`) per-session error ledger.
+  Both run the new `cisternal-hook` console script (`cisternal.usage.cli_hook:main`). The median
+  measured start-up is about 110 ms, against 210 ms through the full CLI.
+- `NormalizedError` and `normalize_error` / `normalize_exception` on adapters. They have no
+  production callers yet.
+
+### Changed
+
+- **Sessions data has no baked-in location.** `resolve_sessions_dir` resolves, in order: explicit
+  argument, `$CISTERNAL_SESSIONS_DIR`, `[tool.cisternal] sessions_dir` in `pyproject.toml`, then
+  `sessions_dir` in `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`. If none of these is set,
+  it returns `(None, "unconfigured")`. `<tool> plugin install|update` writes the config entry (and
+  says so on stderr) when the bundle ships `cisternal-hook` hooks and the key is absent. Hooks
+  never write config, and unconfigured hooks do nothing.
+- `plugin.config.write_user_config` takes `key=` and `comment=`. The default call is unchanged.
+- The test that drives the real `claude` CLI is opt-in (`CISTERNAL_E2E_CLAUDE=1`) and gets a
+  minimal environment (#73).
+
+### Fixed
+
+- The registration cache (`active_servers.json`) is reused only when a fingerprint of its inputs
+  matches. Before, a cache built in one project was served in others, and Claude Code's constant
+  rewrites of `~/.claude.json` invalidated it on almost every call.
+
 ## 0.1.6 (2026-11-02)
 
 A project whose submodules are checked out at their pinned commits can now be verified by the
