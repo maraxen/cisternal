@@ -154,10 +154,12 @@ cisternal shadow score <feature> [--records-dir <path>] [--verdicts-file <path>]
 Behavior:
 1. **Join Semantics & Stream Aggregation**:
    - Matches records on `subject_key` where `verdict.feature == label.feature == <feature>`.
-   - **Multi-Process / Multi-File Aggregation**: When `--records-dir` (or the 5-layer resolved log directory, §3.7) is specified, streams and aggregates all matching `events.*.jsonl` (and `*.jsonl`) files in the directory. Targeted single-file overrides `--verdicts-file` and `--labels-file` allow scoring specific files directly.
-   - **Latest-Timestamp Resolution**: If multiple verdicts exist for a single `subject_key`, the latest verdict by timestamp is selected.
+   - **Multi-Process / Multi-File Aggregation**: When `--records-dir` (or the 5-layer resolved log directory, §3.7) is specified, streams and aggregates every telemetry file in the directory whose name is `*.jsonl` or a rotation backup `*.jsonl.<N>` (RotatingFileHandler output, e.g. `events.<host>.<pid>.jsonl.1`). Files are read in a deterministic order: per base name, backups oldest-first (`.N` … `.1`), then the live `*.jsonl`. Targeted single-file overrides `--verdicts-file` and `--labels-file` allow scoring specific files directly; a file named by both an override and the directory is read once.
+   - **Latest-Timestamp Resolution**: If multiple verdicts exist for a single `subject_key`, the latest verdict by timestamp is selected. A missing or unparseable `ts` is treated as `0.0`. On equal timestamps the record read later wins, so with no timestamps the last write in read order is selected.
    - **Provenance Precedence**: If multiple labels exist for a single `subject_key`, the label with highest provenance precedence is selected:
-     `frozen_gold > owner_confirmed > at_work > retrospective` (with ties broken by latest timestamp).
+     `frozen_gold > owner_confirmed > at_work > retrospective` (with ties broken by latest timestamp, then read order). In `shadow check`, labels from sources outside `allowed_label_sources` are removed BEFORE this selection, so a disallowed label never displaces an allowed one.
+   - **Record Dispatch**: A record with a non-empty `name` is interpreted strictly by that name: `shadow.verdict` contributes a verdict, `shadow.label` a label, `shadow.isolation` an isolation event; any other name is ignored. Field sniffing (`verdict` / `label` keys) is used only for nameless flat records. A nameless flat record carrying both `verdict` and `label` is ambiguous and is counted as an invalid record, never as both. A `label` field inside a `shadow.verdict` record is not a ground-truth label.
+   - **Malformed Input**: Lines that are not valid JSON objects are counted as `malformed_lines` and skipped; they never abort the scan. Records whose `subject_key` is not a string are counted as invalid records.
 2. **Prediction Extraction & Positive-Class Mapping**:
    - Extracts the candidate prediction from `verdict` per §3.1.1.
    - Resolves `positive_label` from `--positive-label <val>`, mode-state TOML `[scoring] positive_label`, or default `true` / `"pass"`.
@@ -189,6 +191,7 @@ Behavior:
    - **Precision**: $\frac{TP}{TP + FP}$ alongside Wilson score confidence interval bounds at the specified confidence level (default 95%, configurable via `--confidence`).
    - **Recall**: $\frac{TP}{TP + FN}$ alongside Wilson score confidence interval bounds.
    - **Comparison against Base Rate**: Flag indicating whether the precision lower bound strictly exceeds empirical base rate.
+   - **Data Quality Counts**: `invalid_records` (unmappable or ambiguous records, §3.2 item 1) and `malformed_lines` (non-JSON or non-object lines) are reported in both the `score` output and the `check` metrics.
 6. **Wilson Score Confidence Interval Formula**:
    Computed analytically via Python standard library `math` without external dependencies (`scipy` is not required):
    $$\tilde{p} = \frac{k + \frac{z^2}{2}}{n + z^2}, \quad w = \frac{z}{n + z^2}\sqrt{\frac{k(n-k)}{n} + \frac{z^2}{4}}$$
@@ -228,7 +231,14 @@ min_recall_lower_bound = 0.65
 max_fp_rate = 0.05
 isolation_violations_max = 0
 threshold_basis = "pre-registered calibration based on domain requirement"
+# feature_version = "3f2a9c1"  # optional: only verdicts whose feature_version equals this count
 ```
+
+Schema enforcement (fail closed, exit 3):
+- Only the tables `[feature]`, `[ladder]`, `[shadow]`, `[scoring]`, `[promotion]` and the keys listed above are accepted. An unknown table or key (e.g. a typo such as `min_verdict` or `min_precison`) is a configuration error naming the offending table/key, never a silent no-op.
+- Types are checked: count keys (`min_verdicts`, `min_labels`, `isolation_violations_max`) are non-negative integers (booleans rejected); rate keys (`min_precision`, `min_precision_lower_bound`, `min_recall`, `min_recall_lower_bound`, `max_fp_rate`) are numbers in `[0, 1]`; `allowed_label_sources` is a list of strings drawn from `frozen_gold`, `owner_confirmed`, `at_work`, `retrospective`; `threshold_basis` and `feature_version` are strings; `[scoring] positive_label` is a bool, number or string.
+- `[promotion] feature_version` (optional): when set, only verdicts whose `feature_version` field equals it are counted (verdicts without the field, or with another version, are excluded before selection).
+- Environment and config layers (§3.7): an environment variable set to `none` (or empty) disables that layer and resolution fails with exit 3; it does not fall through to a lower layer.
 
 #### 3.3.2 Gate Evaluation Semantics and Exit Codes
 
@@ -249,10 +259,16 @@ Behavior:
    - If the enforcer symbol cannot be resolved or imported, records `enforcer_unimportable:<symbol>` and fails the isolation check.
 3. **Non-Short-Circuiting Gate Evaluation**:
    Evaluates all gate conditions across the telemetry store, accumulating ALL failures into `blocking_reasons` without early return:
-   - **Isolation Integrity**: Enforcer symbol must be importable, and the store must contain $\le \text{isolation\_violations\_max}$ violations (scans `shadow.isolation` events for `writes_isolated == false` or `leaked_paths` non-empty). If violations exist, records `isolation_violation_detected`.
+   - **Isolation Integrity (fail closed)**: Promotion requires all of the following; each failure is recorded and none short-circuits:
+     - `[shadow] writes_isolated` must be `true`; otherwise records `writes_isolated_declared_false`.
+     - `[shadow] writes_isolated_enforced_by` must be present and non-empty; otherwise records `enforcer_missing`. If present, the enforcer must be importable, or `enforcer_unimportable:<symbol>` is recorded.
+     - At least one `shadow.isolation` event for the feature with `writes_isolated == true` and `leaked_paths` an empty list is required as evidence; otherwise records `no_isolation_evidence`. An event missing `leaked_paths` is not evidence.
+     - The store must contain $\le \text{isolation\_violations\_max}$ violations (scans `shadow.isolation` events for `writes_isolated == false` or `leaked_paths` non-empty). If violations exist, records `isolation_violation_detected`.
+     - Enforcer paths (`writes_isolated_enforced_by` file part) are resolved only inside the repository root. An absolute path outside it, or a `..` escape, is rejected and recorded as `enforcer_unimportable`. Non-existent file parts fall back to module import.
    - **Sample Size Gates**: Total evaluated verdicts $\ge \text{min\_verdicts}$; total matching labels $\ge \text{min\_labels}$. If deficient, records `insufficient_verdicts:<actual>/<min>` and/or `insufficient_labels:<actual>/<min>`.
    - **Label Provenance**:
-     - When scanning telemetry directories, `cisternal shadow check` filters candidate labels to those whose `label_source` is in `allowed_label_sources`. Labels with sources not in `allowed_label_sources` are ignored during join and do not count toward `min_labels` or confusion metrics.
+     - `cisternal shadow check` filters candidate labels to those whose `label_source` is in `allowed_label_sources` BEFORE provenance selection. Labels with sources not in `allowed_label_sources` are ignored during join and do not count toward `min_labels` or confusion metrics.
+     - The "0 matching labels" refusal (exit 2) applies only when the feature has no label records from any source. If labels exist but all come from disallowed sources, the check is not refused; it is blocked with `insufficient_labels:0/<min>`.
      - If `--labels-file` is explicitly passed containing labels outside `allowed_label_sources`, or if labels from disallowed sources are forced into evaluation, the check records `unpermitted_label_sources_present:<sources>` in `blocking_reasons`.
    - **Precision Gates**:
      - If `min_precision` is configured: empirical precision must be $\ge \text{min\_precision}$. If deficient, records `precision_deficit:<actual>/<min>`.
@@ -269,7 +285,7 @@ Behavior:
    - **Exit 0**: Promotion permitted (`promotion_permitted: true`, `blocking_reasons = []`).
    - **Exit 1**: Promotion blocked (`promotion_permitted: false`, clean check, but blocked by one or more gate thresholds/conditions accumulated in `blocking_reasons`, including sample deficits, metric deficits, isolation violations, or `enforcer_unimportable:<symbol>`).
    - **Exit 2**: Refusal / Missing telemetry input (e.g., 0 labels or 0 verdicts matching feature in store).
-   - **Exit 3**: Configuration / Environment error (missing or malformed mode-state TOML, unresolvable directory when Layer 5 `off` refuses operation, or invalid CLI syntax). Evaluation cannot proceed.
+   - **Exit 3**: Configuration / Environment error (missing or malformed mode-state TOML, including unknown tables or keys, wrong value types, or unknown `allowed_label_sources`; an unresolvable directory when Layer 5 `off` refuses operation or an environment layer is disabled with `none`; or invalid CLI syntax). Evaluation cannot proceed. Unexpected configuration type errors are reported as exit 3 without a traceback.
 5. **Structured JSON Output (`--json`)**:
    When `--json` is passed, prints a structured payload (when $FP + TN = 0$, `"fp_rate"` is reported as `null`):
    ```json
@@ -291,7 +307,9 @@ Behavior:
        "recall_ci_lower": 0.67,
        "recall_ci_upper": 1.0,
        "fp_rate": 1.0,
-       "isolation_violations": 0
+       "isolation_violations": 0,
+       "invalid_records": 0,
+       "malformed_lines": 0
      }
    }
    ```
