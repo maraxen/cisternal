@@ -1,5 +1,5 @@
 # 261106-agy-spec-cycles Internal Docs
-Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_reviser (cycle 5 audit entry), cycle5_rereviewer (cycle 5 re-review, superseded notes), challenger_c6 / defender_c6 (cycle 6 audit entry), challenger_c7 / defender_c7 (cycle 7 audit entry), challenger_c8 / defender_c8 (cycle 8 audit entry)
+Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_reviser (cycle 5 audit entry), cycle5_rereviewer (cycle 5 re-review, superseded notes), challenger_c6 / defender_c6 (cycle 6 audit entry), challenger_c7 / defender_c7 (cycle 7 audit entry), challenger_c8 / defender_c8 (cycle 8 audit entry), worker_m6 (implemented status update), worker_remediation (independent audit entry)
 
 ## Daily
 
@@ -10,7 +10,7 @@ Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_revi
 ## Plans
 
 ## Specs
-- [261106_tool-surface-triage](specs/261106_tool-surface-triage.md) — Specification for cisternal tooling that measures MCP/skill use and coverage, prunes dead surface, checks short-description accuracy, and nudges CLI-to-MCP at the moment of the wrong action.
+- [261106_tool-surface-triage](specs/261106_tool-surface-triage.md) — Specification for cisternal tooling that measures MCP/skill use and coverage, prunes dead surface, checks short-description accuracy, and nudges CLI-to-MCP at the moment of the wrong action. (implemented)
 - [261001_wire-cli-contract](specs/261001_wire-cli-contract.md) — Declarative CLI contract with exception mapping, rich formatters, and group interop for cisternal #30
 - [260929_sidecar-tree-manifest-verification](specs/260929_sidecar-tree-manifest-verification.md) — Stop the provenance reader from presenting an unverified sidecar/env git sha as authoritative; add one shared tree-manifest writer+verifier for no-.git hosts
 - [260827_git-provenance-telemetry](specs/260827_git-provenance-telemetry.md) — Adds git SHA/branch/dirty-state capture as a first-class cisternal telemetry field, consumed consistently by bathos and myxcel
@@ -62,6 +62,7 @@ Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_revi
 ## Actuation Surfaces
 
 ## Audits
+- [261110_independent_swarm_audit](audits/261110_independent_swarm_audit.md) — Independent swarm forensic audit and zero-trust verification of tool-surface triage implementation: Tracks A–D, adversarial probes, anti-facade checks, and completed remediations.
 - [261106_cycle1_audit](audits/261106_cycle1_audit.md) — Sequential adversarial audit of tool-surface triage spec: 13 gaps conceded by defender and resolved with architectural specifications.
 - [261106_cycle2_audit](audits/261106_cycle2_audit.md) — Sequential adversarial audit of tool-surface triage spec cycle 2: 6 operational gaps resolved, achieving structural coherence.
 - [261106_cycle3_audit](audits/261106_cycle3_audit.md) — Sequential adversarial audit of tool-surface triage spec cycle 3: resolution of dependency ordering, A8 client hook consistency, and sandbox boundary clarity.

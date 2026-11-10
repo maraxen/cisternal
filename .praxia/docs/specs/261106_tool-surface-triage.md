@@ -1,7 +1,7 @@
 ---
 title: 'Tool-surface triage: usage counter, prune list, guidance coverage, progressive-disclosure check, nudge hook, triage-tool skill'
 description: Specification for cisternal tooling that measures MCP/skill use and coverage, prunes dead surface, checks short-description accuracy, and nudges CLI-to-MCP at the moment of the wrong action.
-status: draft
+status: implemented
 task_id: 261106_tool-surface-triage
 date: '261106'
 author: 'cycle5_reviser (applies spec_revision_brief A1-A16, R1-R5); challenger_c6 / defender_c6; challenger_c7 / defender_c7; challenger_c8 / defender_c8; prior cycles challenger_c1..c4 / defender_c1..c4'
@@ -10,8 +10,8 @@ adversarial_review: '.praxia/docs/audits/261106_cycle8_audit.md'
 ---
 # Tool-surface triage: usage counter, prune list, guidance coverage, progressive-disclosure check, nudge hook, triage-tool skill
 
-Claimed by: cycle5_reviser (Cycle 5 reconciliation revision), cycle5_rereviewer (Cycle 5 re-review corrections), challenger_c6 / defender_c6 (Cycle 6 gap resolution), challenger_c7 / defender_c7 (Cycle 7 gap resolution), challenger_c8 / defender_c8 (Cycle 8 verification), previously defender_c4, worker_docs_indexer
-task_id: 261106_tool-surface-triage · status: draft (post-cycle-8; runtime claims remain unverified until implementation tests and probes execute) · home: cisternal · origin: bathos background job, 2026-11-06
+Claimed by: cycle5_reviser (Cycle 5 reconciliation revision), cycle5_rereviewer (Cycle 5 re-review corrections), challenger_c6 / defender_c6 (Cycle 6 gap resolution), challenger_c7 / defender_c7 (Cycle 7 gap resolution), challenger_c8 / defender_c8 (Cycle 8 verification), previously defender_c4, worker_docs_indexer, worker_m6 (Cycle 9 implementation & verification)
+task_id: 261106_tool-surface-triage · status: implemented · home: cisternal · origin: bathos background job, 2026-11-06
 
 ## Problem
 Agents under-use MCP tools and skills they already have. They often fall back to CLI calls or work without the relevant skill loaded. Goal: cisternal ships tooling that measures tool and skill usage and coverage, prunes unused surface safely, checks guidance quality, and nudges agents from CLI to MCP when they make the CLI call. Every number in the preliminary probes is exploratory and unregistered (see Evidence). C0 re-derives the metrics under conditions registered in a committed sidecar before its first run.
@@ -475,3 +475,26 @@ Claimed by: challenger_c7, defender_c7. Audit: `.praxia/docs/audits/261106_cycle
 ### Cycle 8 Verification (Sequential Adversarial Challenge & Defense) — 2026-11-08
 Claimed by: challenger_c8, defender_c8. Audit: `.praxia/docs/audits/261106_cycle8_audit.md`.
 - Sequential Challenger 8 -> Defender 8 pass verified all resolutions from Cycles 5, 6, and 7 (`GAP-23` through `GAP-41`, `RISK-01`, `RISK-02`), all brief items (`A1`–`A16`, `R1`–`R5`), and all Phase 3 invariants against the worktree source code, yielding no new genuine specification gap. Status remains `draft` pending implementation and execution of the specified probes and test suite.
+
+### Cycle 9 Implementation & Verification (End-to-End Production Implementation) — 2026-11-09
+Claimed by: worker_m1, worker_m2, worker_m3, worker_m4, worker_m5, worker_m6 (Milestone M6 closeout).
+- **End-to-End Implementation Across Tracks A, B, C, D (M1 through M5)**:
+  - **Track A (Pre-0 & Shared Infra, M1)**: Implemented derived-data directory resolver (`src/cisternal/usage/paths.py`) with precedence layers, atomic append (`<= 4096` bytes), and size capping; implemented `src/cisternal/usage/transcript.py` with canonical tool key normalization, compound CLI parsing (`parse_cli_commands`), nested transcript discovery (`discover_transcript_files`), worktree repo key resolution (`resolve_repo_key`), and session stratification.
+  - **Track B (Parallel Pre-1, M2)**: Implemented non-abstract default normalization methods `normalize_error` and `normalize_exception` on `AdapterBase` (`src/cisternal/adapters/base.py`) returning standardized error envelopes, with specialized overrides for `BathosAdapter`, `PassthroughAdapter`, `ContemplexAdapter`, `XpeririAdapter`, and `MyxcelAdapter`.
+  - **Track C (Mainline, M3 & M4)**: Committed pre-registered sidecar and implemented `cisternal usage` reporting stratified interactive vs headless metrics and Wilson intervals; implemented active registration scanning and `cisternal prune-list` with session/day floors and whitelisting; added `covers_families` and `distinctive_strings` metadata to `SkillAsset` and validated against dangling tool references; migrated 4 shipped skills and implemented `cisternal skill-coverage`; implemented static honesty lint (`assets validate` Checks a, b, c); authored non-destructive `triage-tool` skill with `listing_chars <= 150` and regenerated agent plugin snapshot and golden digests.
+  - **Track D (Hooks Track, M5)**: Implemented client `PostToolUse` error-ledger writer (`<sessions dir>/<session_id>/errors.jsonl`) with adapter envelopes; implemented client `PreToolUse` nudge hook with compound command support, dynamic tool resolution from `active_servers.json`, and suppression after errors.
+- **Test Verification Counts**:
+  - Full pytest test suite: 2,119 passed (17 skipped, 0 failures).
+  - Hook tests: 31 passed (`tests/test_hooks.py`).
+  - Adversarial post-tool-use tests: 86 passed (`tests/test_post_tool_use_adversarial.py`).
+  - Adversarial M5 hook tests: 43 passed (`tests/test_adversarial_m5_hooks.py`).
+  - Skill coverage tests: 42 passed (`tests/test_cli_coverage.py`, `tests/test_adversarial_m4_coverage.py`, `tests/test_skill_coverage.py`).
+  - Golden & Rust parity tests: 37 passed (`tests/test_golden_matrix.py`, `tests/test_registration_golden.py`).
+- **CLI Gate Verification**:
+  - `uv run cisternal assets validate --manifest .praxia/manifest.toml`: exit code 0.
+  - `uv run cisternal assets snapshot --manifest .praxia/manifest.toml --out src/cisternal/agent_plugin.json --check`: exit code 0 (`snapshot up to date`).
+  - `uv run cisternal skill-coverage`: PASS (precision 1.0000, recall 1.0000 on synthetic situation suite).
+- **Benchmark Performance**:
+  - PreToolUse warm p95 <= 0.15 ms (measured 0.137 ms; budget <= 150 ms).
+  - PreToolUse cold p95 <= 3.98 ms (measured 2.721 ms; budget <= 150 ms).
+- **Status Promotion**: Promoted specification status from `draft` to `implemented`.
