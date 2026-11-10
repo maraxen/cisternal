@@ -130,7 +130,7 @@ def build_doctor_report(consumer_filter: str | None = None) -> DoctorReport:
         otlp_sdk_available,
         resolve_otlp_protocol,
     )
-    from cisternal.telemetry.pipeline import get_pipeline, resolve_log_dir_from_env
+    from cisternal.telemetry.pipeline import get_pipeline, resolve_writer_log_dir
 
     checks: list[DoctorCheck] = []
     raw_telemetry = os.environ.get("CISTERNAL_TELEMETRY", "").strip()
@@ -148,7 +148,7 @@ def build_doctor_report(consumer_filter: str | None = None) -> DoctorReport:
             )
         )
 
-    log_dir = resolve_log_dir_from_env()
+    log_dir = resolve_writer_log_dir()
     writable = probe_log_dir_writable(log_dir)
     checks.append(
         DoctorCheck(

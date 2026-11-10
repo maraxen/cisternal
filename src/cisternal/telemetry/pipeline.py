@@ -219,21 +219,68 @@ class EventPipeline:
         return self._listener._export_count
 
 
+_LEGACY_LOG_DIR_NAME = Path(".cisternal") / "logs"
+
+
+def _legacy_log_dir() -> Path:
+    """Legacy writer default, used when log_dir is unconfigured or env-disabled."""
+    return Path.home() / _LEGACY_LOG_DIR_NAME
+
+
 def resolve_log_dir_from_env() -> Path:
-    """Resolve JSONL log directory from env precedence (spec §3.2).
+    """Resolve JSONL log directory from environment variables only.
 
-    ``CISTERNAL_LOG_DIR`` > ``BTH_LOG_DIR`` > ``CTXP_LOG_DIR`` > ``~/.cisternal/logs``
+    Uses the shared precedence list in ``cisternal.shadow.resolution.LOG_DIR_ENV_VARS``
+    (CISTERNAL_TELEMETRY_LOG_DIR > CISTERNAL_LOG_DIR > BTH_LOG_DIR > CTXP_LOG_DIR).
+    The first variable that is set decides; an empty or "none" value disables the
+    env layer and yields the legacy ``~/.cisternal/logs``. Config files are not
+    consulted; use ``resolve_writer_log_dir`` for the full writer resolution.
     """
-    import os
+    # Local import: cisternal.shadow imports this module (via shadow.events).
+    from cisternal.shadow.resolution import LOG_DIR_ENV_VARS, env_setting, is_disabled_value
 
-    raw = (
-        os.getenv("CISTERNAL_LOG_DIR")
-        or os.getenv("BTH_LOG_DIR")
-        or os.getenv("CTXP_LOG_DIR")
-    )
-    if raw is None:
-        return Path.home() / ".cisternal" / "logs"
-    return Path(raw)
+    hit = env_setting(LOG_DIR_ENV_VARS)
+    if hit is None or is_disabled_value(hit[1]):
+        return _legacy_log_dir()
+    return Path(hit[1].strip())
+
+
+def resolve_writer_log_dir(
+    *,
+    repo_root: Path | None = None,
+    user_config_file: Path | None = None,
+) -> Path:
+    """Resolve the writer's log dir through the shared reader resolver (layers 2-4).
+
+    Falls back to the legacy ``~/.cisternal/logs`` when log_dir is off (nothing
+    is configured, or an env var explicitly disabled it). A malformed
+    pyproject.toml or user config also falls back, with a stderr warning: the
+    writer runs inside the host process and telemetry must never break startup
+    (C4/C5). The reader (``cisternal shadow score/check``) still fails loudly
+    with exit 3 on the same malformed file.
+    """
+    import sys
+
+    try:
+        # Local import: cisternal.shadow imports this module (via shadow.events).
+        from cisternal.shadow.resolution import LogDirOffError, resolve_log_dir
+
+        try:
+            return resolve_log_dir(
+                cli_arg=None,
+                repo_root=repo_root,
+                user_config_file=user_config_file,
+            ).path
+        except LogDirOffError:
+            return _legacy_log_dir()
+    except Exception as exc:  # never raise in the host process (C4/C5)
+        legacy = _legacy_log_dir()
+        print(
+            f"[cisternal] Warning: could not resolve log_dir ({exc}); "
+            f"writing telemetry to {legacy}",
+            file=sys.stderr,
+        )
+        return legacy
 
 
 def _normalize_level(level: int | str | None) -> int | None:
@@ -298,10 +345,17 @@ def init_pipeline(
     If the pipeline is already initialized, return the existing instance.
     Otherwise, create a new one with the given parameters.
 
-    Spec §3.2: log_dir env resolution: CISTERNAL_LOG_DIR > BTH_LOG_DIR > CTXP_LOG_DIR > ~/.cisternal/logs
+    Spec §3.2 (unified with the reader, see ``cisternal.shadow.resolution``):
+    log_dir env precedence is CISTERNAL_TELEMETRY_LOG_DIR > CISTERNAL_LOG_DIR >
+    BTH_LOG_DIR > CTXP_LOG_DIR, then pyproject ``[tool.cisternal.telemetry]``,
+    then the user config ``[telemetry]``. If nothing is configured, or an env
+    var explicitly disables log_dir (empty or "none"), the legacy default
+    ~/.cisternal/logs is used. A malformed config file, or any other error while
+    resolving (deleted cwd, unresolvable home, symlink loop), is reported on
+    stderr and also falls back to ~/.cisternal/logs; init never raises here.
 
     Args:
-        log_dir: Directory for JSONL logs. If None, resolves via env vars or defaults to ~/.cisternal/logs.
+        log_dir: Directory for JSONL logs. If None, resolves via ``resolve_writer_log_dir``.
         max_bytes: Max file size before rotation.
         backup_count: Backup files to keep.
         exporters: Custom exporters. If None, uses JsonlExporter with log_dir.
@@ -328,9 +382,9 @@ def init_pipeline(
         # Initialize exporter list (copy to avoid mutating caller's list)
         exporters = list(exporters) if exporters is not None else []
 
-        # Resolve log_dir: explicit > env vars > default
+        # Resolve log_dir: explicit > shared reader resolution (env, pyproject, user config) > legacy default
         if log_dir is None:
-            log_dir = resolve_log_dir_from_env()
+            log_dir = resolve_writer_log_dir()
         else:
             log_dir = Path(log_dir)
 

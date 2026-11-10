@@ -104,6 +104,9 @@ def hook_post_tool_failure() -> None:
     main(["post-tool-failure"])
 
 
+from cisternal.shadow.cli import shadow_app  # noqa: E402
+app.command(shadow_app)
+
 # cisternal's own plugin, through the same sub-app every tool can mount
 # (`cisternal plugin install claude`). Dogfoods cisternal.plugin.
 from cisternal.plugin import PluginSpec, plugin_app  # noqa: E402

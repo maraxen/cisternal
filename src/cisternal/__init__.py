@@ -178,6 +178,14 @@ def _lazy_import(name: str) -> object:
     if name == "WiredRegistry":
         from cisternal.registration.wired import WiredRegistry as _WiredRegistry
         return _WiredRegistry
+    if name == "shadow":
+        # Shadow development pattern (PR #71), loaded on first access so the
+        # Claude Code hook path does not pay for it.
+        import importlib
+
+        mod = importlib.import_module("cisternal.shadow")
+        globals()["shadow"] = mod
+        return mod
     if name in _M3_LAZY:
         import importlib
         mod_name, attr = _M3_LAZY[name]
@@ -231,4 +239,6 @@ __all__ = [
     "Emitter",
     "ClaudeEmitter",
     "write_bundle",
+    # Shadow development pattern
+    "shadow",
 ]
