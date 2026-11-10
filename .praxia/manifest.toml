@@ -23,6 +23,10 @@ path = ".praxia/skills/customizing-tools/SKILL.md"
 name = "writing-skill-triggers"
 path = ".praxia/skills/writing-skill-triggers/SKILL.md"
 
+[[plugin.skills]]
+name = "developing-in-shadow"
+path = ".praxia/skills/developing-in-shadow/SKILL.md"
+
 [[plugin.agents]]
 name = "validate-helper"
 path = ".praxia/agents/validate-helper.md"
