@@ -20,6 +20,20 @@ from cisternal.probe.telemetry_doctor import (
 from cisternal.telemetry.pipeline import resolve_log_dir_from_env
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Never probe the developer's real ~/.cisternal or ~/.config/cisternal.
+
+    The doctor's log_dir_writable check otherwise depends on the host: it fails under a
+    sandbox that cannot write $HOME, and a personal config.toml can redirect it. With no
+    env var set, resolution falls through to the legacy default under the patched HOME.
+    """
+    for name in ("CISTERNAL_TELEMETRY_LOG_DIR", "CISTERNAL_LOG_DIR", "BTH_LOG_DIR", "CTXP_LOG_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+
 def _check(report, check_id: str):
     for item in report.checks:
         if item.id == check_id:
