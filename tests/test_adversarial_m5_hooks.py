@@ -513,6 +513,12 @@ class TestAdversarialCrossCwdResolution:
         monkeypatch.setenv("HOME", str(fake_home))
         monkeypatch.setenv("XDG_STATE_HOME", str(fake_xdg))
         monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
+        # Layer 4 is the user config (no baked-in default); point it at fake_xdg.
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        (tmp_path / "cfg" / "cisternal").mkdir(parents=True)
+        (tmp_path / "cfg" / "cisternal" / "config.toml").write_text(
+            f'sessions_dir = "{fake_xdg / "cisternal" / "sessions"}"\n', encoding="utf-8"
+        )
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
 
         session_id = "sess_adv_cross_cwd"

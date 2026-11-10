@@ -18,12 +18,48 @@ __all__ = [
     "TRUNCATION_MARKER",
     "atomic_append_jsonl",
     "resolve_sessions_dir",
+    "user_config_path",
+    "write_sessions_config",
 ]
 
 MAX_RECORD_LINE_BYTES: int = 4096
 MAX_FILE_SIZE_BYTES: int = 1_048_576  # 1 MiB (1024 * 1024 bytes)
 TRUNCATION_MARKER: str = " ...[TRUNCATED]"
 OFF_VALUES: frozenset[str] = frozenset({"", "off", "none"})
+
+
+SESSIONS_CONFIG_KEY = "sessions_dir"
+
+
+def user_config_path() -> Path:
+    """``${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`` (same file as the marketplace)."""
+    base = os.environ.get("XDG_CONFIG_HOME") or "~/.config"
+    return Path(base).expanduser() / "cisternal" / "config.toml"
+
+
+def _resolve_user_config_sessions_dir(*, is_hook: bool) -> tuple[Path | None, str] | None:
+    config = user_config_path()
+    try:
+        if not config.is_file():
+            return None
+        doc = tomllib.loads(config.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as exc:
+        if is_hook:
+            return None, "off"  # fail open: no ledger rather than a crash
+        msg = f"{config}: invalid TOML: {exc}"
+        raise ValueError(msg) from exc
+    if SESSIONS_CONFIG_KEY not in doc:
+        return None
+    raw_obj = doc[SESSIONS_CONFIG_KEY]
+    if not isinstance(raw_obj, str):
+        if is_hook:
+            return None, "off"
+        msg = f"{config}: {SESSIONS_CONFIG_KEY} must be a string, got {raw_obj!r}"
+        raise ValueError(msg)
+    raw_val = raw_obj.strip()
+    if raw_val.lower() in OFF_VALUES:
+        return None, "off"
+    return (config.parent / Path(raw_val).expanduser()).resolve(), str(config)
 
 
 def _resolve_pyproject_sessions_dir(
@@ -86,9 +122,11 @@ def resolve_sessions_dir(
        - Hook mode (`is_hook=True`): anchored to $CLAUDE_PROJECT_DIR. If unset or empty,
          Layer 3 is SKIPPED completely, falling directly to Layer 4 (GAP-26).
        - Non-hook mode: anchored to `project_dir` or `Path.cwd()`.
-    4. XDG default: `$XDG_STATE_HOME/cisternal/sessions`, fallback `~/.local/state/cisternal/sessions`
-       -> (path, "XDG state default")
-    5. Disabled / off switch: value `""`, `"off"` or `"none"` at any layer returns `(None, "off")`.
+    4. `sessions_dir` in `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`
+       -> (path, "<config path>"); relative values resolve against the config dir.
+       Plugin install writes this entry (see :func:`write_sessions_config`).
+    5. Nothing configured -> `(None, "unconfigured")`. No default path is baked in.
+    Off switch: `""`, `"off"` or `"none"` at any layer returns `(None, "off")`.
 
     Returns:
         tuple[Path | None, str]: `(resolved_path, winning_layer)`
@@ -129,14 +167,14 @@ def resolve_sessions_dir(
     if res is not None:
         return res
 
-    # --- Layer 4: XDG state default ---
-    xdg_state = os.environ.get("XDG_STATE_HOME", "").strip()
-    if xdg_state:
-        base = Path(xdg_state).expanduser()
-    else:
-        base = Path("~/.local/state").expanduser()
-
-    return (base / "cisternal" / "sessions").resolve(), "XDG state default"
+    # --- Layer 4: sessions_dir in the per-machine user config ---
+    # ${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml, written by
+    # `<tool> plugin install` when it installs cisternal-hook hooks (never by a
+    # hook). No path is baked in here: unconfigured means off.
+    res = _resolve_user_config_sessions_dir(is_hook=is_hook)
+    if res is not None:
+        return res
+    return None, "unconfigured"
 
 
 def _format_and_truncate_record(
@@ -270,3 +308,36 @@ def atomic_append_jsonl(
             os.close(fd)
     except Exception:
         return False
+
+
+def default_sessions_value() -> str:
+    """The value plugin install records: under ``$XDG_STATE_HOME`` if set, else ``~/.local/state``."""
+    xdg_state = os.environ.get("XDG_STATE_HOME", "").strip()
+    base = xdg_state if xdg_state else "~/.local/state"
+    return f"{base.rstrip('/')}/cisternal/sessions"
+
+
+def write_sessions_config(value: str | None = None) -> tuple[Path, bool]:
+    """Record ``sessions_dir = value`` in the user config; return ``(path, written)``.
+
+    An existing ``sessions_dir`` key (including ``"off"``) is left alone and
+    ``written`` is False. Delegates the atomic, symlink-preserving write to
+    :func:`cisternal.plugin.config.write_user_config`.
+    """
+    from cisternal.plugin.config import write_user_config
+
+    config = user_config_path()
+    if config.is_file():
+        try:
+            doc = tomllib.loads(config.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            msg = f"{config}: invalid TOML: {exc}"
+            raise ValueError(msg) from exc
+        if SESSIONS_CONFIG_KEY in doc:
+            return config, False
+    path = write_user_config(
+        value or default_sessions_value(),
+        key=SESSIONS_CONFIG_KEY,
+        comment="Session ledgers and registration cache for the cisternal-hook hooks.",
+    )
+    return path, True

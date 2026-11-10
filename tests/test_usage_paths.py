@@ -32,6 +32,15 @@ def _concurrency_worker(args: tuple[str, int, int]) -> int:
     return success
 
 
+def _user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> Path:
+    """Point XDG_CONFIG_HOME at tmp and write ``sessions_dir = value`` (layer 4)."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    config = tmp_path / "cfg" / "cisternal" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'sessions_dir = "{value}"\n', encoding="utf-8")
+    return config
+
+
 class TestResolveSessionsDir:
     """Test the 5-layer precedence resolver for derived session directories."""
 
@@ -163,7 +172,7 @@ class TestResolveSessionsDir:
     ) -> None:
         monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+        config = _user_config(tmp_path, monkeypatch, str(tmp_path / "xdg" / "cisternal" / "sessions"))
 
         decoy_dir = tmp_path / "decoy_cwd"
         decoy_dir.mkdir()
@@ -179,7 +188,7 @@ class TestResolveSessionsDir:
             data_dir=None, is_hook=True, project_dir=None
         )
         assert resolved == (tmp_path / "xdg" / "cisternal" / "sessions").resolve()
-        assert layer == "XDG state default"
+        assert layer == str(config)
 
     def test_layer3_malformed_pyproject_cli_raises_value_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -208,7 +217,7 @@ class TestResolveSessionsDir:
     ) -> None:
         monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+        config = _user_config(tmp_path, monkeypatch, str(tmp_path / "xdg" / "cisternal" / "sessions"))
 
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("invalid = [toml syntax", encoding="utf-8")
@@ -217,7 +226,7 @@ class TestResolveSessionsDir:
             data_dir=None, is_hook=True, project_dir=None
         )
         assert resolved == (tmp_path / "xdg" / "cisternal" / "sessions").resolve()
-        assert layer == "XDG state default"
+        assert layer == str(config)
 
     def test_layer3_non_utf8_pyproject_hook_fails_open(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -225,7 +234,7 @@ class TestResolveSessionsDir:
         """Test that in hook mode, non-UTF-8 pyproject.toml fails open to Layer 4 XDG default."""
         monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+        config = _user_config(tmp_path, monkeypatch, str(tmp_path / "xdg" / "cisternal" / "sessions"))
 
         pyproject = tmp_path / "pyproject.toml"
         # Write invalid UTF-8 bytes (ISO-8859-1 accented byte \xe9)
@@ -235,44 +244,64 @@ class TestResolveSessionsDir:
             data_dir=None, is_hook=True, project_dir=None
         )
         assert resolved == (tmp_path / "xdg" / "cisternal" / "sessions").resolve()
-        assert layer == "XDG state default"
+        assert layer == str(config)
 
-    def test_layer4_xdg_state_home_set(
+    def test_layer4_user_config_sessions_dir(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "custom_xdg"))
-
+        config = _user_config(tmp_path, monkeypatch, "relative/sessions")
         empty_dir = tmp_path / "empty_dir"
         empty_dir.mkdir()
 
-        resolved, layer = resolve_sessions_dir(
-            data_dir=None, is_hook=False, project_dir=empty_dir
-        )
-        assert (
-            resolved == (tmp_path / "custom_xdg" / "cisternal" / "sessions").resolve()
-        )
-        assert layer == "XDG state default"
+        resolved, layer = resolve_sessions_dir(project_dir=empty_dir)
+        assert resolved == (config.parent / "relative" / "sessions").resolve()
+        assert layer == str(config)
 
-    def test_layer4_xdg_state_home_unset_fallback(
+    def test_unconfigured_is_off_with_no_baked_in_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Derived-data dirs are configuration: nothing configured -> no path."""
+        monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
+        monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        empty_dir = tmp_path / "empty_dir"
+        empty_dir.mkdir()
+
+        for is_hook in (False, True):
+            assert resolve_sessions_dir(is_hook=is_hook, project_dir=empty_dir) == (
+                None,
+                "unconfigured",
+            )
+        assert not (tmp_path / "state").exists()
+
+    def test_layer4_user_config_off_value(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
+        _user_config(tmp_path, monkeypatch, "off")
+        empty_dir = tmp_path / "empty_dir"
+        empty_dir.mkdir()
+        assert resolve_sessions_dir(project_dir=empty_dir) == (None, "off")
+
+    def test_layer4_malformed_user_config_raises_cli_fails_open_hook(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-        monkeypatch.delenv("XDG_STATE_HOME", raising=False)
-
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        config = tmp_path / "cfg" / "cisternal" / "config.toml"
+        config.parent.mkdir(parents=True)
         empty_dir = tmp_path / "empty_dir"
         empty_dir.mkdir()
 
-        resolved, layer = resolve_sessions_dir(
-            data_dir=None, is_hook=False, project_dir=empty_dir
-        )
-        expected = (
-            Path("~/.local/state").expanduser() / "cisternal" / "sessions"
-        ).resolve()
-        assert resolved == expected
-        assert layer == "XDG state default"
+        for text in ("sessions_dir = [broken", "sessions_dir = false\n"):
+            config.write_text(text, encoding="utf-8")
+            with pytest.raises(ValueError):
+                resolve_sessions_dir(project_dir=empty_dir)
+            assert resolve_sessions_dir(is_hook=True, project_dir=empty_dir) == (None, "off")
 
 
 class TestAtomicAppendJsonl:
@@ -509,3 +538,56 @@ class TestAtomicAppendJsonl:
             seen_records.add(key)
 
         assert len(seen_records) == workers * count_per_worker
+
+
+class TestInstallWritesSessionsConfig:
+    """`<tool> plugin install` records sessions_dir for bundles with cisternal-hook hooks."""
+
+    @staticmethod
+    def _bundle(*scripts: str) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(hook_specs=[SimpleNamespace(script=s) for s in scripts])
+
+    @pytest.fixture
+    def env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.delenv("CISTERNAL_SESSIONS_DIR", raising=False)
+        monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.chdir(tmp_path)
+        return tmp_path / "cfg" / "cisternal" / "config.toml"
+
+    def test_writes_entry_and_keeps_existing_keys(
+        self, env: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from cisternal.plugin.app import _ensure_sessions_config
+
+        env.parent.mkdir(parents=True)
+        env.write_text('plugin_marketplace = "~/mkt"\n', encoding="utf-8")
+        _ensure_sessions_config(self._bundle("cisternal-hook pre-tool-use"), dry_run=False)
+
+        import tomllib
+
+        doc = tomllib.loads(env.read_text(encoding="utf-8"))
+        assert doc["plugin_marketplace"] == "~/mkt"
+        assert doc["sessions_dir"].endswith("/state/cisternal/sessions")
+        assert "wrote sessions_dir" in capsys.readouterr().err
+        resolved, layer = resolve_sessions_dir()
+        assert resolved == (env.parent.parent.parent / "state" / "cisternal" / "sessions").resolve()
+        assert layer == str(env)
+
+    def test_no_write_without_cisternal_hooks_or_in_dry_run(self, env: Path) -> None:
+        from cisternal.plugin.app import _ensure_sessions_config
+
+        _ensure_sessions_config(self._bundle("other-tool hook"), dry_run=False)
+        _ensure_sessions_config(self._bundle("cisternal-hook pre-tool-use"), dry_run=True)
+        assert not env.exists()
+
+    def test_existing_off_entry_is_left_alone(self, env: Path) -> None:
+        from cisternal.plugin.app import _ensure_sessions_config
+
+        env.parent.mkdir(parents=True)
+        env.write_text('sessions_dir = "off"\n', encoding="utf-8")
+        _ensure_sessions_config(self._bundle("cisternal-hook pre-tool-use"), dry_run=False)
+        assert env.read_text(encoding="utf-8") == 'sessions_dir = "off"\n'

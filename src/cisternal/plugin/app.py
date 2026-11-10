@@ -482,6 +482,47 @@ _PruneShadowedOpt = Annotated[
 ]
 
 
+def _ships_cisternal_hooks(bundle: AssetBundle) -> bool:
+    """True when the bundle installs ``cisternal-hook`` hooks, which need a sessions dir."""
+    return any(
+        str(getattr(h, "script", "")).split(" ", 1)[0] == "cisternal-hook"
+        for h in getattr(bundle, "hook_specs", ()) or ()
+    )
+
+
+def _ensure_sessions_config(bundle: AssetBundle, *, dry_run: bool) -> None:
+    """Record ``sessions_dir`` in the user config for a bundle with cisternal hooks.
+
+    The library bakes in no sessions path (derived-data dirs are configuration),
+    so installing the hooks is what writes the per-machine entry, visibly. An
+    existing entry, including ``"off"``, is left alone.
+    """
+    if not _ships_cisternal_hooks(bundle):
+        return
+    from cisternal.usage.paths import (  # noqa: PLC0415
+        SESSIONS_CONFIG_KEY,
+        default_sessions_value,
+        resolve_sessions_dir,
+        user_config_path,
+        write_sessions_config,
+    )
+
+    resolved, layer = resolve_sessions_dir()
+    if layer != "unconfigured":
+        return
+    value = default_sessions_value()
+    if dry_run:
+        print(f'would write {SESSIONS_CONFIG_KEY} = "{value}" to {user_config_path()}')
+        return
+    config, written = write_sessions_config(value)
+    if written:
+        print(
+            f'cisternal: wrote {SESSIONS_CONFIG_KEY} = "{value}" to {config} '
+            "(hook session ledgers; set it to \"off\" to disable)",
+            file=sys.stderr,
+        )
+
+
 def _fail(exc: Exception) -> NoReturn:
     _log.error("cisternal.plugin: %s", exc)
     raise SystemExit(1) from exc
@@ -534,6 +575,7 @@ def plugin_app(spec: PluginSpec, *, name: str = "plugin") -> cyclopts.App:
                 if claude_only:
                     raise PluginError(f"{', '.join(claude_only)}: Claude Code only, not antigravity")
             bundle, source = load_bundle(spec, manifest=manifest)
+            _ensure_sessions_config(bundle, dry_run=dry_run)
             if surface == "antigravity":
                 if dry_run:
                     verb = "update" if require_installed else "install (or update)"
