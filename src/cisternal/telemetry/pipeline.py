@@ -252,12 +252,17 @@ def resolve_writer_log_dir(
 ) -> Path:
     """Resolve the writer's log dir through the shared reader resolver (layers 2-4).
 
-    Falls back to the legacy ``~/.cisternal/logs`` only when log_dir is off:
-    nothing is configured (Layer 5) or an env var explicitly disabled it. Any
-    other ResolutionError (malformed pyproject.toml or user config) propagates.
+    Falls back to the legacy ``~/.cisternal/logs`` when log_dir is off (nothing
+    is configured, or an env var explicitly disabled it). A malformed
+    pyproject.toml or user config also falls back, with a stderr warning: the
+    writer runs inside the host process and telemetry must never break startup
+    (C4/C5). The reader (``cisternal shadow score/check``) still fails loudly
+    with exit 3 on the same malformed file.
     """
+    import sys
+
     # Local import: cisternal.shadow imports this module (via shadow.events).
-    from cisternal.shadow.resolution import LogDirOffError, resolve_log_dir
+    from cisternal.shadow.resolution import LogDirOffError, ResolutionError, resolve_log_dir
 
     try:
         return resolve_log_dir(
@@ -267,6 +272,14 @@ def resolve_writer_log_dir(
         ).path
     except LogDirOffError:
         return _legacy_log_dir()
+    except ResolutionError as exc:
+        legacy = _legacy_log_dir()
+        print(
+            f"[cisternal] Warning: log_dir config is malformed ({exc}); "
+            f"writing telemetry to {legacy}",
+            file=sys.stderr,
+        )
+        return legacy
 
 
 def _normalize_level(level: int | str | None) -> int | None:

@@ -180,6 +180,18 @@ def test_malformed_pyproject_exit_3(tmp_path: Path) -> None:
     assert exc_info.value.exit_code == 3
 
 
+def test_writer_falls_back_with_warning_on_malformed_config(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The writer never raises at startup; the reader still exits 3 (above)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text("[tool\n", encoding="utf-8")
+    got = resolve_writer_log_dir(repo_root=repo, user_config_file=tmp_path / "nope.toml")
+    assert got == Path.home() / ".cisternal" / "logs"
+    assert "malformed" in capsys.readouterr().err
+
+
 def test_malformed_user_config_exit_3(tmp_path: Path, isolated: dict[str, Path]) -> None:
     cfg = tmp_path / "config.toml"
     cfg.write_text("[telemetry\n", encoding="utf-8")
