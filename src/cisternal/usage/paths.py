@@ -23,7 +23,7 @@ __all__ = [
 MAX_RECORD_LINE_BYTES: int = 4096
 MAX_FILE_SIZE_BYTES: int = 1_048_576  # 1 MiB (1024 * 1024 bytes)
 TRUNCATION_MARKER: str = " ...[TRUNCATED]"
-OFF_VALUES: frozenset[str] = frozenset({"", "off"})
+OFF_VALUES: frozenset[str] = frozenset({"", "off", "none"})
 
 
 def _resolve_pyproject_sessions_dir(
@@ -51,7 +51,16 @@ def _resolve_pyproject_sessions_dir(
         if isinstance(tool, dict):
             cisternal_cfg = tool.get("cisternal")
             if isinstance(cisternal_cfg, dict) and "sessions_dir" in cisternal_cfg:
-                raw_val = str(cisternal_cfg["sessions_dir"]).strip()
+                raw_obj = cisternal_cfg["sessions_dir"]
+                if not isinstance(raw_obj, str):
+                    if is_hook:
+                        continue  # Fail-open in hook mode
+                    msg = (
+                        f"{candidate}: [tool.cisternal] sessions_dir must be a string, "
+                        f"got {raw_obj!r}"
+                    )
+                    raise ValueError(msg)
+                raw_val = raw_obj.strip()
                 if raw_val.lower() in OFF_VALUES:
                     return None, "off"
                 val_path = Path(raw_val).expanduser()
@@ -79,7 +88,7 @@ def resolve_sessions_dir(
        - Non-hook mode: anchored to `project_dir` or `Path.cwd()`.
     4. XDG default: `$XDG_STATE_HOME/cisternal/sessions`, fallback `~/.local/state/cisternal/sessions`
        -> (path, "XDG state default")
-    5. Disabled / off switch: value `""` or `"off"` at any layer returns `(None, "off")`.
+    5. Disabled / off switch: value `""`, `"off"` or `"none"` at any layer returns `(None, "off")`.
 
     Returns:
         tuple[Path | None, str]: `(resolved_path, winning_layer)`

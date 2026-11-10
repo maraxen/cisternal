@@ -178,8 +178,15 @@ def check_uncovered_families(bundle: AssetBundle) -> list[str]:
 
 
 def check_dangling_tool_names(bundle: AssetBundle) -> list[str]:
-    """Emit fatal warnings for quoted tool names absent from the hermetic known-tool set."""
+    """Emit fatal warnings for quoted tool names absent from the hermetic known-tool set.
+
+    A reference is judged only when its server has a known tool inventory in this
+    bundle (families, verbs or registry commands). A tool of another plugin's
+    server -- or of a server whose tools this bundle never lists -- cannot be
+    called dangling hermetically, so it is not reported.
+    """
     known_tools, declared_servers = build_hermetic_tool_index(bundle)
+    inventoried_servers = {t.split("/", 1)[0] for t in known_tools if "/" in t}
     warnings: list[str] = []
 
     for skill in bundle.skills:
@@ -213,6 +220,9 @@ def check_dangling_tool_names(bundle: AssetBundle) -> list[str]:
 
         seen_dangling: set[str] = set()
         for raw_token, canonical in candidates:
+            server = canonical.split("/", 1)[0] if "/" in canonical else ""
+            if server not in inventoried_servers:
+                continue
             if canonical not in known_tools and raw_token not in seen_dangling:
                 seen_dangling.add(raw_token)
                 warnings.append(
@@ -258,12 +268,22 @@ def check_baseline_capability_erosion(
     manifest_path: Path | None = None,
     cwd: Path | None = None,
 ) -> list[str]:
-    """Check (a) baseline: baseline distinctive strings retained in listing, body, or references."""
-    work_dir = cwd or (
-        manifest_path.parent
-        if manifest_path and manifest_path.parent.is_dir()
-        else Path.cwd()
-    )
+    """Check (a) baseline: baseline distinctive strings retained in listing, body, or references.
+
+    Skill paths in a manifest are plugin-root-relative (the manifest's
+    ``<root>/.praxia/manifest.toml`` layout, as :class:`ManifestAssetSource`
+    reads them). Git is run from the plugin root and each blob is addressed as
+    ``<ref>:./<path>`` -- relative to that directory, not the repository root --
+    so a plugin nested in a larger repository resolves the same files.
+    """
+    import os  # noqa: PLC0415
+    import tomllib  # noqa: PLC0415
+
+    plugin_root: Path | None = None
+    if manifest_path and manifest_path.is_file():
+        plugin_root = manifest_path.resolve().parent.parent
+    work_dir = (cwd or plugin_root or Path.cwd()).resolve()
+    path_root = plugin_root or work_dir
 
     # Verify baseline ref
     rev_res = subprocess.run(
@@ -275,45 +295,40 @@ def check_baseline_capability_erosion(
     if rev_res.returncode != 0:
         raise ValueError(f"invalid baseline ref: {baseline_ref}")
 
-    # Map skill name to relative path in git repo
+    # Map skill name to its plugin-root-relative path
     skill_paths: dict[str, str] = {}
     if manifest_path and manifest_path.is_file():
         try:
-            import tomli
-        except ImportError:
-            try:
-                import tomllib as tomli
-            except ImportError:
-                tomli = None
-
-        if tomli:
-            try:
-                with open(manifest_path, "rb") as f:
-                    data = tomli.load(f)
-                plugin = data.get("plugin", {})
-                for entry in plugin.get("skills", []):
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("name")
-                        and entry.get("path")
-                    ):
-                        p = Path(entry["path"])
-                        full = (manifest_path.parent / p).resolve()
-                        try:
-                            rel = full.relative_to(work_dir.resolve()).as_posix()
-                        except ValueError:
-                            rel = entry["path"]
-                        skill_paths[entry["name"]] = rel
-            except Exception:
-                pass
+            with open(manifest_path, "rb") as f:
+                data = tomllib.load(f)
+            plugin = data.get("plugin", {})
+            for entry in plugin.get("skills", []):
+                if isinstance(entry, dict) and entry.get("name") and entry.get("path"):
+                    skill_paths[str(entry["name"])] = str(entry["path"])
+        except (OSError, tomllib.TOMLDecodeError, AttributeError, TypeError):
+            pass
 
     warnings: list[str] = []
     for skill in bundle.skills:
-        rel_path = skill_paths.get(skill.name, f".praxia/skills/{skill.name}/SKILL.md")
+        rel_to_root = skill_paths.get(
+            skill.name, f".praxia/skills/{skill.name}/SKILL.md"
+        )
+        skill_file = path_root / rel_to_root
+        if (
+            not skill_file.exists()
+            and manifest_path is not None
+            and (manifest_path.resolve().parent / rel_to_root).exists()
+        ):
+            # Tolerate manifest-dir-relative entries (not what the loader reads).
+            skill_file = manifest_path.resolve().parent / rel_to_root
+        rel_to_cwd = Path(os.path.relpath(skill_file, work_dir)).as_posix()
+        # "./" or "../" makes git resolve the path against cwd, not the repo root.
+        prefix = "" if rel_to_cwd.startswith("../") else "./"
+        blob = f"{baseline_ref}:{prefix}{rel_to_cwd}"
 
         # Check if skill existed at baseline ref
         cat_res = subprocess.run(
-            ["git", "cat-file", "-e", f"{baseline_ref}:{rel_path}"],
+            ["git", "cat-file", "-e", blob],
             capture_output=True,
             text=True,
             cwd=work_dir,
@@ -323,7 +338,7 @@ def check_baseline_capability_erosion(
             continue
 
         show_res = subprocess.run(
-            ["git", "show", f"{baseline_ref}:{rel_path}"],
+            ["git", "show", blob],
             capture_output=True,
             text=True,
             cwd=work_dir,

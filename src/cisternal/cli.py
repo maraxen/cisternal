@@ -1094,7 +1094,6 @@ def validate_assets(
     ] = False,
 ) -> None:
     """Validate loaded assets: structural checks + golden digest (exit 0/1)."""
-    import subprocess  # noqa: PLC0415
     from cisternal.assets.load import load_asset_report  # noqa: PLC0415
     from cisternal.assets.validate_golden import (  # noqa: PLC0415
         golden_digest_path,
@@ -1107,16 +1106,6 @@ def validate_assets(
         _log.error("cisternal.cli: unsupported validate surface %r", surface)
         raise SystemExit(2)
 
-    if baseline_ref:
-        rev_res = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{baseline_ref}^{{commit}}"],
-            capture_output=True,
-            text=True,
-        )
-        if rev_res.returncode != 0:
-            _log.error("cisternal.cli: invalid baseline ref %r", baseline_ref)
-            raise SystemExit(2)
-
     report = load_asset_report(manifest=manifest, registry=registry)
 
     from cisternal.assets.validate import (  # noqa: PLC0415
@@ -1125,12 +1114,18 @@ def validate_assets(
     )
 
     guidance_warnings, guidance_advisories = validate_bundle_guidance(report.bundle)
-    honesty_warnings, honesty_advisories = validate_bundle_honesty(
-        report.bundle,
-        manifest_path=manifest,
-        baseline_ref=baseline_ref,
-        report_only=report_only,
-    )
+    # The baseline ref is resolved in the manifest's repository (the plugin
+    # root), not the process cwd, so the ref check lives in the validator.
+    try:
+        honesty_warnings, honesty_advisories = validate_bundle_honesty(
+            report.bundle,
+            manifest_path=manifest,
+            baseline_ref=baseline_ref,
+            report_only=report_only,
+        )
+    except ValueError as exc:
+        _log.error("cisternal.cli: %s (%r)", exc, baseline_ref)
+        raise SystemExit(2) from exc
 
     all_conflicts = list(report.conflicts)
     all_warnings = (
@@ -1398,7 +1393,7 @@ def usage(
     """Analyze MCP, CLI, skill, and ToolSearch usage across session transcripts (Spec §C0)."""
     from cisternal.plugin.shared import claude_home
     from cisternal.usage.paths import resolve_sessions_dir
-    from cisternal.usage.usage import compute_usage_summary
+    from cisternal.usage.usage import ToolCallStats, compute_usage_summary
 
     resolved_sessions, sessions_layer = resolve_sessions_dir(
         data_dir=sessions_dir, project_dir=project_root
@@ -1422,12 +1417,22 @@ def usage(
             print("Sessions telemetry disabled (layer: off).")
         return
 
+    # Always pass the resolved root: a missing --projects-dir yields an empty
+    # report instead of silently analysing the default ~/.claude/projects.
     usage_summary = compute_usage_summary(
-        projects_root=resolved_projects if resolved_projects.is_dir() else None,
+        projects_root=resolved_projects,
         log_dir=log_dir,
     )
 
     if json_output:
+        combined_durations = {
+            k: ToolCallStats(
+                durations_ms=v.main_interactive.durations_ms
+                + v.subagent_headless.durations_ms
+            )
+            for k, v in usage_summary.tools.items()
+            if v.main_interactive.durations_ms or v.subagent_headless.durations_ms
+        }
         doc: dict[str, Any] = {
             "version": "1.0",
             "metadata": {
@@ -1551,18 +1556,15 @@ def usage(
                     },
                 },
             },
+            # count, p50, p95 and mean all describe the same combined sample.
             "durations_ms": {
                 k: {
-                    "count": len(
-                        v.main_interactive.durations_ms
-                        + v.subagent_headless.durations_ms
-                    ),
-                    "p50": v.main_interactive.p50,
-                    "p95": v.main_interactive.p95,
-                    "mean": v.main_interactive.mean_duration,
+                    "count": len(c.durations_ms),
+                    "p50": c.p50,
+                    "p95": c.p95,
+                    "mean": c.mean_duration,
                 }
-                for k, v in usage_summary.tools.items()
-                if v.main_interactive.durations_ms or v.subagent_headless.durations_ms
+                for k, c in combined_durations.items()
             },
         }
         print(json.dumps(doc, indent=2))
@@ -1706,9 +1708,17 @@ def prune_list(
     )
     resolved_projects = projects_dir or (claude_home() / "projects")
 
-    registrations = scan_active_registrations(sessions_dir=resolved_sessions)
+    # Pass "off" through explicitly: sessions_dir=None would make the scanner
+    # re-resolve (and write active_servers.json to the XDG default).
+    registrations = scan_active_registrations(
+        sessions_dir=resolved_sessions if resolved_sessions is not None else "off"
+    )
+    # Canonicalize transcript tool names against the same registered servers the
+    # report buckets by; without them `mcp__plugin_<p>_<s>__<t>` keys as
+    # `<p>_<s>/<t>` and a heavily used server `<s>` shows 0 calls.
     usage_summary = compute_usage_summary(
-        projects_root=resolved_projects if resolved_projects.is_dir() else None
+        projects_root=resolved_projects,
+        declared_servers=registrations.servers,
     )
 
     report = compute_prune_recommendations(
@@ -1925,7 +1935,9 @@ def skill_coverage(
         return
 
     # Transcript opportunity mining
-    p_dir = projects_dir or (Path.home() / ".claude" / "projects")
+    from cisternal.plugin.shared import claude_home  # noqa: PLC0415
+
+    p_dir = projects_dir or (claude_home() / "projects")
     opp_report = mine_skill_opportunities(
         projects_dir=p_dir if p_dir.is_dir() else None,
         skills=monitored_skills,

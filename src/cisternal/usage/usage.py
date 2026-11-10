@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 from typing import Any, Literal, Sequence
 
+from cisternal.usage.hooks import classify_mcp_error
 from cisternal.usage.transcript import (
     VerbSpec,
     VerbTable,
@@ -115,8 +116,10 @@ class ToolCallStats:
         if not self.durations_ms:
             return None
         sorted_d = sorted(self.durations_ms)
-        idx = int(0.95 * len(sorted_d))
-        return sorted_d[min(idx, len(sorted_d) - 1)]
+        # Nearest-rank p95: the ceil(0.95 n)-th value (1-based). int(0.95 n) as a
+        # 0-based index returns the maximum for every n <= 20.
+        idx = max(0, math.ceil(0.95 * len(sorted_d)) - 1)
+        return sorted_d[idx]
 
     @property
     def mean_duration(self) -> float | None:
@@ -246,26 +249,19 @@ def _parse_timestamp(ts: Any) -> float | None:
     return None
 
 
-def _is_error_result(result_content: Any, is_error_flag: bool | None) -> bool:
+def _is_error_result(
+    canonical: str, result_content: Any, is_error_flag: bool | None
+) -> bool:
+    """Protocol error flag, else the same per-server envelope rules the hook ledger uses."""
     if is_error_flag is True:
         return True
-    if isinstance(result_content, str):
-        try:
-            parsed = json.loads(result_content)
-            if isinstance(parsed, dict):
-                if parsed.get("ok") is False or "error_code" in parsed:
-                    return True
-        except Exception:
-            pass
-        if "error" in result_content.lower() and "failed" in result_content.lower():
-            return True
-    elif isinstance(result_content, dict):
-        if result_content.get("ok") is False or "error_code" in result_content:
-            return True
-    return False
+    is_err, _, _ = classify_mcp_error(canonical, result_content)
+    return is_err
 
 
-def _load_server_log_durations(log_dir: Path | None) -> list[tuple[str, float, float]]:
+def _load_server_log_durations(
+    log_dir: Path | None, declared_servers: Sequence[str] = ()
+) -> list[tuple[str, float, float]]:
     """Load (canonical_tool, timestamp_sec, duration_ms) from server JSONL logs."""
     if not log_dir or not log_dir.is_dir():
         return []
@@ -286,14 +282,17 @@ def _load_server_log_durations(log_dir: Path | None) -> list[tuple[str, float, f
                         continue
 
                     # Extract tool, duration_ms, timestamp
-                    tool = doc.get("tool") or doc.get("fields", {}).get("tool")
-                    duration = doc.get("duration_ms") or doc.get("fields", {}).get(
-                        "duration_ms"
-                    )
+                    fields = doc.get("fields")
+                    if not isinstance(fields, dict):
+                        fields = {}
+                    tool = doc.get("tool") or fields.get("tool")
+                    duration = doc.get("duration_ms")
+                    if duration is None:
+                        duration = fields.get("duration_ms")
                     ts = (
                         doc.get("timestamp")
                         or doc.get("ts")
-                        or doc.get("fields", {}).get("timestamp")
+                        or fields.get("timestamp")
                     )
 
                     if tool and duration is not None:
@@ -304,7 +303,9 @@ def _load_server_log_durations(log_dir: Path | None) -> list[tuple[str, float, f
                                 # Normalize tool if needed
                                 c_tool = str(tool)
                                 if c_tool.startswith("mcp__"):
-                                    c_tool = canonical_tool_key(c_tool)
+                                    c_tool = canonical_tool_key(
+                                        c_tool, declared_servers=declared_servers
+                                    )
                                 records.append((c_tool, t_sec, d_val))
                             except (ValueError, TypeError):
                                 continue
@@ -347,7 +348,7 @@ def compute_usage_summary(
         file_items = list(discover_transcript_files(p_root)) if p_root.is_dir() else []
 
     # 2. Load optional server logs for duration enrichment
-    server_records = _load_server_log_durations(log_dir)
+    server_records = _load_server_log_durations(log_dir, declared_servers)
 
     # Accumulators
     total_sessions = 0
@@ -413,11 +414,14 @@ def compute_usage_summary(
             if raw.get("cwd"):
                 session_cwd = str(raw["cwd"])
                 break
-            if raw.get("payload", {}).get("cwd"):
-                session_cwd = str(raw["payload"]["cwd"])
+            ev_payload = raw.get("payload")
+            if isinstance(ev_payload, dict) and ev_payload.get("cwd"):
+                session_cwd = str(ev_payload["cwd"])
                 break
 
-        repo_key = resolve_repo_key(session_cwd or str(s_path.parent), resolved_slug)
+        # No recorded cwd -> fold by project slug. The transcript's own directory
+        # (or a subagent's <slug>/<session>/subagents dir) is not a repository.
+        repo_key = resolve_repo_key(session_cwd or None, resolved_slug)
         sessions_by_repo[repo_key] = sessions_by_repo.get(repo_key, 0) + 1
 
         # Track prior mentions for E3 ToolSearch provenance
@@ -502,11 +506,15 @@ def compute_usage_summary(
                     query = str(t_input.get("query") or "")
                     if query.startswith("select:"):
                         ts_select_exact[stratum] += 1
-                        target_tool = query.removeprefix("select:").strip()
-                        # Provenance check (E3)
-                        if any(
-                            target_tool in m or m in target_tool for m in prior_mentions
-                        ):
+                        targets = [
+                            t.strip()
+                            for t in query.removeprefix("select:").split(",")
+                            if t.strip()
+                        ]
+                        # Provenance check (E3): a selected tool name must have been
+                        # mentioned verbatim earlier; substring overlap with any
+                        # 3+ char word ("run", "sql") is not a mention.
+                        if any(t in prior_mentions for t in targets):
                             ts_prior_mention[stratum] += 1
                         else:
                             ts_deferred_only[stratum] += 1
@@ -568,16 +576,16 @@ def compute_usage_summary(
                         canonical = None
                 elif "/" in t_name:
                     canonical = t_name
-                # Bare tool name without server context is rejected per GAP-04 / NC
-                elif declared_servers and len(declared_servers) == 1:
-                    canonical = f"{declared_servers[0]}/{t_name}"
+                # Bare names in a transcript are Claude Code built-ins (Read, Edit,
+                # Agent, ...); transcripts always record MCP tools by wire name, so a
+                # bare name is never attributed to a declared server here.
 
                 if canonical:
                     # Determine result status
                     res_error_flag, res_content = tool_results.get(
                         call_id, (None, None)
                     )
-                    is_err = _is_error_result(res_content, res_error_flag)
+                    is_err = _is_error_result(canonical, res_content, res_error_flag)
 
                     # Duration enrichment
                     matched_duration: float | None = None

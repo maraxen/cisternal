@@ -218,8 +218,10 @@ def load_monitored_skills(
                                 for s_name, meta in skills_meta.items():
                                     if not isinstance(meta, dict):
                                         continue
-                                    covers = tuple(meta.get("covers_families", ()))
-                                    distinctive = tuple(
+                                    covers = _as_string_tuple(
+                                        meta.get("covers_families", ())
+                                    )
+                                    distinctive = _as_string_tuple(
                                         meta.get("distinctive_strings", ())
                                     )
                                     if distinctive:
@@ -257,8 +259,10 @@ def load_monitored_skills(
                             fm, body = _split_frontmatter(content)
                             warns: list[str] = []
                             doc = parse_frontmatter(fm, warns, f"skill {sdir.name!r}")
-                            distinctive = tuple(doc.get("distinctive_strings", ()))
-                            covers = tuple(doc.get("covers_families", ()))
+                            distinctive = _as_string_tuple(
+                                doc.get("distinctive_strings", ())
+                            )
+                            covers = _as_string_tuple(doc.get("covers_families", ()))
                             desc = str(doc.get("description", ""))
                             if distinctive:
                                 monitored_skills[sdir.name] = SkillAsset(
@@ -411,6 +415,46 @@ def evaluate_situation_set(
     return report, records
 
 
+def _resolve_skill_name(raw: Any, skills: Mapping[str, SkillAsset]) -> str | None:
+    """Map a Skill invocation (``<skill>`` or plugin-qualified ``<plugin>:<skill>``) to a monitored name."""
+    name = str(raw or "").strip()
+    if not name:
+        return None
+    if name in skills:
+        return name
+    if ":" in name:
+        bare = name.split(":", 1)[1]
+        if bare in skills:
+            return bare
+    return None
+
+
+def _is_prompt_record(raw: Mapping[str, Any]) -> bool:
+    """True when a user-typed record is a real prompt, not a tool result or injected meta text.
+
+    Claude Code writes every tool result back as a ``type: "user"`` record whose
+    content is a list of ``tool_result`` blocks, and injects skill bodies and
+    command output as ``isMeta`` user records; neither starts a new turn.
+    """
+    if raw.get("isMeta") is True:
+        return False
+    msg = raw.get("message") if isinstance(raw.get("message"), dict) else raw
+    content = msg.get("content") if isinstance(msg, Mapping) else None
+    if isinstance(content, list) and content:
+        if all(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return False
+    return True
+
+
+def _as_string_tuple(value: Any) -> tuple[str, ...]:
+    """A YAML/JSON list of strings, or one scalar string, as a tuple (never split per character)."""
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    if isinstance(value, (list, tuple)):
+        return tuple(str(v) for v in value)
+    return ()
+
+
 def _extract_user_prompt(ev: TranscriptEvent) -> str:
     """Extract prompt text from user event across Claude Code and synthetic formats."""
     raw = ev.raw_record if isinstance(ev.raw_record, dict) else {}
@@ -471,14 +515,17 @@ def mine_skill_opportunities(
                 raw_type = str(raw.get("type") or raw.get("event") or "")
                 ev_type = ev.event_type
 
-                is_user = ev_type in ("user", "user_turn", "human") or raw_type in (
-                    "user",
-                    "user_turn",
-                    "human",
-                )
+                is_user = (
+                    ev_type in ("user", "user_turn", "human")
+                    or raw_type in ("user", "user_turn", "human")
+                ) and _is_prompt_record(raw)
 
                 if is_user:
                     text = _extract_user_prompt(ev)
+                    # Close the previous turn: an opportunity with no invocation
+                    # in its own turn is missed.
+                    for s_name in current_turn_skills - turn_invoked_skills:
+                        stats[s_name][3] += 1
                     # Reset turn-level tracking on each new user turn
                     current_turn_skills = set()
                     turn_actions_seen_after_opp = set()
@@ -524,9 +571,8 @@ def mine_skill_opportunities(
 
                     # Check if Skill tool or direct skill name invocation
                     if tool_name == "Skill":
-                        sk_arg = inp.get("skill")
-                        if sk_arg and str(sk_arg) in skills:
-                            sk_str = str(sk_arg)
+                        sk_str = _resolve_skill_name(inp.get("skill"), skills)
+                        if sk_str is not None:
                             if sk_str not in turn_invoked_skills:
                                 turn_invoked_skills.add(sk_str)
                                 invoked_in_session.add(sk_str)
@@ -563,8 +609,8 @@ def mine_skill_opportunities(
                     sk_list = raw.get("skills") or raw.get("invoked_skills") or []
                     if isinstance(sk_list, list):
                         for sk in sk_list:
-                            sk_str = str(sk)
-                            if sk_str in skills:
+                            sk_str = _resolve_skill_name(sk, skills)
+                            if sk_str is not None:
                                 if sk_str not in turn_invoked_skills:
                                     turn_invoked_skills.add(sk_str)
                                     invoked_in_session.add(sk_str)
@@ -575,10 +621,10 @@ def mine_skill_opportunities(
                                     ):
                                         stats[sk_str][2] += 1  # loaded_before_action
 
+            # Close the session's last turn.
+            for s_name in current_turn_skills - turn_invoked_skills:
+                stats[s_name][3] += 1
             for s_name in skills:
-                opps = stats[s_name][0]
-                invs = stats[s_name][1]
-                stats[s_name][3] = max(0, opps - invs)
                 stats[s_name][4] += post_load_tools.get(s_name, 0)
 
     result_stats = {

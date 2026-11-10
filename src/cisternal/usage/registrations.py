@@ -72,14 +72,19 @@ def _atomic_write_cache(cache_file: Path, data: dict[str, Any]) -> None:
 
 
 def scan_active_registrations(
-    sessions_dir: Path | None = None,
+    sessions_dir: Path | str | None = None,
     *,
     claude_dir: Path | None = None,
     marketplace_dir: Path | None = None,
     manifest_path: Path | None = None,
     force: bool = False,
 ) -> ActiveRegistrations:
-    """Scan active Claude Code registrations, plugin manifests, and bundle assets."""
+    """Scan active Claude Code registrations, plugin manifests, and bundle assets.
+
+    ``sessions_dir`` is layer 1 of the sessions-dir resolver: ``None`` re-resolves
+    from the environment/pyproject/XDG layers, while ``"off"``/``"none"``/``""``
+    disables the ``active_servers.json`` cache (nothing is read or written).
+    """
     # 1. Resolve sessions dir
     s_dir, _ = resolve_sessions_dir(data_dir=sessions_dir)
     cache_file = (s_dir / "active_servers.json") if s_dir else None

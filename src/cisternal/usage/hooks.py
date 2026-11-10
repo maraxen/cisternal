@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 from cisternal.usage.paths import atomic_append_jsonl, resolve_sessions_dir
@@ -14,6 +15,17 @@ from cisternal.usage.registrations import ActiveRegistrations, scan_active_regis
 from cisternal.usage.transcript import canonical_tool_key, parse_cli_commands
 
 _log = logging.getLogger("cisternal.usage.hooks")
+
+# A session id becomes a directory name under the sessions dir; anything that
+# could escape it (absolute paths, "..", separators) is rejected.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _safe_session_id(raw: Any) -> str | None:
+    session_id = str(raw or "").strip()
+    if not session_id or not _SESSION_ID_RE.match(session_id) or ".." in session_id:
+        return None
+    return session_id
 
 
 def classify_mcp_error(
@@ -157,8 +169,8 @@ def handle_post_tool_use(
         if not tool_name.startswith("mcp__"):
             return False
 
-        session_id = str(payload.get("session_id") or "").strip()
-        if not session_id:
+        session_id = _safe_session_id(payload.get("session_id"))
+        if session_id is None:
             return False
 
         s_dir = sessions_dir
@@ -324,7 +336,7 @@ def handle_pre_tool_use(
         if not matches:
             return None
 
-        session_id = str(payload.get("session_id") or "").strip()
+        session_id = _safe_session_id(payload.get("session_id"))
         ledger_path = (
             (s_dir / session_id / "errors.jsonl")
             if session_id
