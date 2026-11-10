@@ -71,6 +71,9 @@ telemetry_app = cyclopts.App(
 app.command(assets_app)
 app.command(telemetry_app)
 
+from cisternal.shadow.cli import shadow_app  # noqa: E402
+app.command(shadow_app)
+
 # cisternal's own plugin, through the same sub-app every tool can mount
 # (`cisternal plugin install claude`). Dogfoods cisternal.plugin.
 from cisternal.plugin import PluginSpec, plugin_app  # noqa: E402
