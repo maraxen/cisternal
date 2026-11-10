@@ -295,7 +295,7 @@ def evaluate_gate(
 
     isolation_violations_count = 0
     for iso in isolation_events:
-        if iso.get("writes_isolated") is False or (iso.get("leaked_paths") and len(iso.get("leaked_paths")) > 0):
+        if iso.get("writes_isolated") is False or bool(iso.get("leaked_paths")):
             isolation_violations_count += 1
 
     max_iso_violations = promotion.get("isolation_violations_max", 0)
