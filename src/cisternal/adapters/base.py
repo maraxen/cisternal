@@ -20,6 +20,7 @@ propagates normally.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import importlib
 import logging
 import json
@@ -83,7 +84,9 @@ _GOOGLE_AUTH_COOKIE_NAMES = (
 # H and S) and "SIDCC=" backtracks past the "SID" alternative (no "=" right
 # after "SID") to match "SIDCC" instead.
 _COOKIE_NAME_VALUE_RE = re.compile(
-    r"\b(" + "|".join(re.escape(n) for n in _GOOGLE_AUTH_COOKIE_NAMES) + r")=([^;,\s\"']+)"
+    r"\b("
+    + "|".join(re.escape(n) for n in _GOOGLE_AUTH_COOKIE_NAMES)
+    + r")=([^;,\s\"']+)"
 )
 
 # `f.sid=<value>` / `sid=<value>` query-string session params (case-insensitive
@@ -125,9 +128,47 @@ def _redact_secrets(text: str) -> str:
     redacted = _AUTHORIZATION_BEARER_RE.sub(f"Authorization: {_REDACTED}", text)
     redacted = _BEARER_RE.sub(_REDACTED, redacted)
     redacted = _COOKIE_HEADER_RE.sub(f"Cookie: {_REDACTED}", redacted)
-    redacted = _COOKIE_NAME_VALUE_RE.sub(lambda m: f"{m.group(1)}={_REDACTED}", redacted)
+    redacted = _COOKIE_NAME_VALUE_RE.sub(
+        lambda m: f"{m.group(1)}={_REDACTED}", redacted
+    )
     redacted = _SID_PARAM_RE.sub(lambda m: f"{m.group(1)}={_REDACTED}", redacted)
     return redacted
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedError:
+    """Normalized error representation for adapter results and exceptions (spec §Pre-1).
+
+    Pure data container. Never writes to disk or emits telemetry directly.
+    """
+
+    is_error: bool
+    error_code: str
+    error_message: str
+    resolution_hint: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert normalized error to dictionary envelope.
+
+        Returns:
+            Dict containing 'ok' (bool), 'error_code' (str), 'message' (str),
+            and 'resolution_hint' (str | None).
+        """
+        return {
+            "ok": not self.is_error,
+            "error_code": self.error_code,
+            "message": self.error_message,
+            "resolution_hint": self.resolution_hint,
+        }
+
+    def __getitem__(self, item: str) -> Any:
+        return self.to_dict()[item]
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return self.to_dict().get(item, default)
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.to_dict()
 
 
 class AdapterBase(ABC):
@@ -165,7 +206,9 @@ class AdapterBase(ABC):
         name = "mcp.call_start"
         if name not in self.ALLOWED_NAMES:
             self._swallow_name_error(name)
-        self._safe_emit_event(name, tool=tool_name, arg_keys=arg_keys, request_id=request_id)
+        self._safe_emit_event(
+            name, tool=tool_name, arg_keys=arg_keys, request_id=request_id
+        )
 
     def emit_end(self, tool_name: str, request_id: str, duration_ms: float) -> None:
         """Emit mcp.call_end event.
@@ -178,7 +221,9 @@ class AdapterBase(ABC):
         name = "mcp.call_end"
         if name not in self.ALLOWED_NAMES:
             self._swallow_name_error(name)
-        self._safe_emit_event(name, tool=tool_name, request_id=request_id, duration_ms=duration_ms)
+        self._safe_emit_event(
+            name, tool=tool_name, request_id=request_id, duration_ms=duration_ms
+        )
 
     def emit_error(self, tool_name: str, request_id: str, exc: BaseException) -> None:
         """Emit mcp.tool_error event.
@@ -244,6 +289,79 @@ class AdapterBase(ABC):
         """
         print(f"[cisternal] ILLEGAL event name: {name!r}", file=sys.stderr)
 
+    def normalize_error(self, raw_err: Any) -> NormalizedError:
+        """Normalize raw adapter error or result into NormalizedError (spec §Pre-1).
+
+        Default non-abstract implementation examining dict structure:
+        - Checks for `ok is False`, `is_error is True`, or present `error_code`.
+        - Pure function: zero file I/O.
+
+        Args:
+            raw_err: Any raw return value or error dict from tool execution.
+
+        Returns:
+            NormalizedError instance.
+        """
+        if isinstance(raw_err, NormalizedError):
+            return raw_err
+        if isinstance(raw_err, BaseException):
+            return self.normalize_exception(raw_err)
+
+        if isinstance(raw_err, dict):
+            ok_val = raw_err.get("ok")
+            is_err_val = raw_err.get("is_error")
+            code_val = raw_err.get("error_code") or raw_err.get("code")
+
+            if (
+                ok_val is False
+                or is_err_val is True
+                or (bool(code_val) and ok_val is not True)
+            ):
+                code_str = getattr(code_val, "name", None) or str(
+                    code_val or "UNKNOWN_ERROR"
+                )
+                error_message = str(
+                    raw_err.get("error_message")
+                    or raw_err.get("message")
+                    or raw_err.get("error")
+                    or ""
+                )
+                resolution_hint = (
+                    raw_err.get("resolution_hint") or raw_err.get("hint") or None
+                )
+                return NormalizedError(
+                    is_error=True,
+                    error_code=code_str,
+                    error_message=error_message,
+                    resolution_hint=resolution_hint,
+                )
+
+        return NormalizedError(
+            is_error=False,
+            error_code="",
+            error_message="",
+            resolution_hint=None,
+        )
+
+    def normalize_exception(self, exc: BaseException) -> NormalizedError:
+        """Normalize raised exception into NormalizedError (spec §Pre-1).
+
+        Default non-abstract implementation extracting exception type and scrubbed message.
+        Pure function: zero file I/O.
+
+        Args:
+            exc: The caught exception.
+
+        Returns:
+            NormalizedError instance with is_error=True.
+        """
+        return NormalizedError(
+            is_error=True,
+            error_code=type(exc).__name__,
+            error_message=_redact_secrets(str(exc)),
+            resolution_hint=None,
+        )
+
 
 class BathosAdapter(AdapterBase):
     """Adapter for bathos v3 middleware.
@@ -284,6 +402,54 @@ class BathosAdapter(AdapterBase):
             "resolution_hint": "",
         }
 
+    def normalize_error(self, raw_err: Any) -> NormalizedError:
+        """Normalize Bathos error envelope (reads ok, error_code, error, resolution_hint)."""
+        if isinstance(raw_err, NormalizedError):
+            return raw_err
+        if isinstance(raw_err, BaseException):
+            return self.normalize_exception(raw_err)
+
+        if isinstance(raw_err, dict):
+            ok_val = raw_err.get("ok")
+            if ok_val is False:
+                code_val = raw_err.get("error_code")
+                code = getattr(code_val, "name", None) or str(code_val or "INTERNAL")
+                msg = str(raw_err.get("error") or raw_err.get("message") or "")
+                hint = raw_err.get("resolution_hint") or None
+                return NormalizedError(
+                    is_error=True,
+                    error_code=code,
+                    error_message=msg,
+                    resolution_hint=hint,
+                )
+            if ok_val is True:
+                return NormalizedError(
+                    is_error=False,
+                    error_code="",
+                    error_message="",
+                    resolution_hint=None,
+                )
+            if raw_err.get("error_code"):
+                code_val = raw_err["error_code"]
+                code = getattr(code_val, "name", None) or str(code_val)
+                msg = str(raw_err.get("error") or raw_err.get("message") or "")
+                hint = raw_err.get("resolution_hint") or None
+                return NormalizedError(
+                    is_error=True,
+                    error_code=code,
+                    error_message=msg,
+                    resolution_hint=hint,
+                )
+            if bool(raw_err.get("error")) and isinstance(raw_err.get("error"), str):
+                hint = raw_err.get("resolution_hint") or None
+                return NormalizedError(
+                    is_error=True,
+                    error_code="INTERNAL",
+                    error_message=str(raw_err["error"]),
+                    resolution_hint=hint,
+                )
+        return super().normalize_error(raw_err)
+
 
 class PassthroughAdapter(AdapterBase):
     """Adapter for a real FastMCP v3 server (bugfix, cisternal/mcp-middleware-fix).
@@ -317,6 +483,23 @@ class PassthroughAdapter(AdapterBase):
         ``CisternalMiddleware(reraise=True)``, which never calls this."""
         raise exc
 
+    def normalize_error(self, raw_err: Any) -> NormalizedError:
+        """Normalize FastMCP or passthrough tool result without re-raising."""
+        if isinstance(raw_err, NormalizedError):
+            return raw_err
+        if isinstance(raw_err, BaseException):
+            return self.normalize_exception(raw_err)
+
+        if getattr(raw_err, "is_error", None) is True:
+            return NormalizedError(
+                is_error=True,
+                error_code="TOOL_ERROR",
+                error_message=str(getattr(raw_err, "content", "") or raw_err),
+                resolution_hint=None,
+            )
+
+        return super().normalize_error(raw_err)
+
 
 class ContemplexAdapter(AdapterBase):
     """Adapter for contemplex v2 decorator (sync).
@@ -345,6 +528,41 @@ class ContemplexAdapter(AdapterBase):
             contemplex_errors.ErrorCode.INTERNAL, f"{type(exc).__name__}: {exc}"
         )
 
+    def normalize_error(self, raw_err: Any) -> NormalizedError:
+        """Normalize Contemplex tool response or err_envelope structure."""
+        if isinstance(raw_err, NormalizedError):
+            return raw_err
+        if isinstance(raw_err, BaseException):
+            return self.normalize_exception(raw_err)
+
+        if isinstance(raw_err, dict):
+            ok_val = raw_err.get("ok")
+            code_val = raw_err.get("error_code") or raw_err.get("error_type")
+            if ok_val is False or (bool(code_val) and ok_val is not True):
+                code = getattr(code_val, "name", None) or str(code_val or "INTERNAL")
+                msg = str(
+                    raw_err.get("error")
+                    or raw_err.get("message")
+                    or raw_err.get("error_message")
+                    or raw_err.get("error_type")
+                    or ""
+                )
+                hint = raw_err.get("resolution_hint") or raw_err.get("hint") or None
+                return NormalizedError(
+                    is_error=True,
+                    error_code=code,
+                    error_message=msg,
+                    resolution_hint=hint,
+                )
+            if ok_val is True:
+                return NormalizedError(
+                    is_error=False,
+                    error_code="",
+                    error_message="",
+                    resolution_hint=None,
+                )
+        return super().normalize_error(raw_err)
+
 
 class XpeririAdapter(AdapterBase):
     """Adapter for xperiri v2 decorator (sync, JSON-string MCP returns).
@@ -367,6 +585,59 @@ class XpeririAdapter(AdapterBase):
         payload.update(fields)
         return json.dumps(payload, sort_keys=True)
 
+    def _normalize_dict_payload(self, data: dict[str, Any]) -> NormalizedError:
+        ok_val = data.get("ok")
+        code_val = data.get("error_code")
+        if ok_val is False or (bool(code_val) and ok_val is not True):
+            code = getattr(code_val, "name", None) or str(code_val or "INTERNAL")
+            msg = str(data.get("error") or data.get("message") or "")
+            hint = data.get("resolution_hint") or data.get("hint") or None
+            return NormalizedError(
+                is_error=True,
+                error_code=code,
+                error_message=msg,
+                resolution_hint=hint,
+            )
+        if ok_val is True:
+            return NormalizedError(
+                is_error=False,
+                error_code="",
+                error_message="",
+                resolution_hint=None,
+            )
+        return super().normalize_error(data)
+
+    def normalize_error(self, raw_err: Any) -> NormalizedError:
+        """Normalize Xperiri JSON-string or dict return into NormalizedError."""
+        if isinstance(raw_err, NormalizedError):
+            return raw_err
+        if isinstance(raw_err, BaseException):
+            return self.normalize_exception(raw_err)
+
+        if isinstance(raw_err, str):
+            try:
+                decoded = json.loads(raw_err)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return NormalizedError(
+                    is_error=False,
+                    error_code="",
+                    error_message="",
+                    resolution_hint=None,
+                )
+            if isinstance(decoded, dict):
+                return self._normalize_dict_payload(decoded)
+            return NormalizedError(
+                is_error=False,
+                error_code="",
+                error_message="",
+                resolution_hint=None,
+            )
+
+        if isinstance(raw_err, dict):
+            return self._normalize_dict_payload(raw_err)
+
+        return super().normalize_error(raw_err)
+
 
 class MyxcelAdapter(AdapterBase):
     """Adapter for myxcel v2 decorator (async MCP tools, dict returns).
@@ -386,3 +657,47 @@ class MyxcelAdapter(AdapterBase):
     def shape_error(self, tool_name: str, exc: BaseException, **fields: Any) -> Any:
         """Shape error: myxcel _tool_error envelope."""
         return {"error": type(exc).__name__, "message": str(exc)}
+
+    def normalize_error(self, raw_err: Any) -> NormalizedError:
+        """Normalize Myxcel in-band error dict or tool error."""
+        if isinstance(raw_err, NormalizedError):
+            return raw_err
+        if isinstance(raw_err, BaseException):
+            return self.normalize_exception(raw_err)
+
+        if isinstance(raw_err, dict):
+            ok_val = raw_err.get("ok")
+            if ok_val is True:
+                return NormalizedError(
+                    is_error=False,
+                    error_code="",
+                    error_message="",
+                    resolution_hint=None,
+                )
+
+            err_field = raw_err.get("error")
+            has_non_empty_error = isinstance(err_field, str) and bool(err_field)
+
+            if (has_non_empty_error and ok_val is not True) or ok_val is False:
+                code = str(raw_err.get("error_code") or "MYXCEL_ERROR")
+                msg = str(raw_err.get("message") or err_field or "")
+                hint = raw_err.get("resolution_hint") or None
+                return NormalizedError(
+                    is_error=True,
+                    error_code=code,
+                    error_message=msg,
+                    resolution_hint=hint,
+                )
+            return NormalizedError(
+                is_error=False,
+                error_code="",
+                error_message="",
+                resolution_hint=None,
+            )
+
+        return NormalizedError(
+            is_error=False,
+            error_code="",
+            error_message="",
+            resolution_hint=None,
+        )
