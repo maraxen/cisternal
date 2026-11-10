@@ -396,16 +396,17 @@ In accordance with Fixed Owner Decision 5, derived-data locations are never hard
 | Resolution Layer | Mode-State Directory (`mode_state_dir`) | Telemetry Log Directory (`log_dir`) |
 |---|---|---|
 | **Layer 1: CLI / API** | `--mode-state-dir <dir>` or positional TOML path | `--records-dir <dir>` or `--verdicts-file` / `--labels-file` |
-| **Layer 2: Environment Variable** | `CISTERNAL_MODE_STATE_DIR` (empty or `"none"` disables) | `CISTERNAL_TELEMETRY_LOG_DIR` or `CISTERNAL_LOG_DIR` (empty or `"none"` disables) |
+| **Layer 2: Environment Variable** | `CISTERNAL_MODE_STATE_DIR` (empty or `"none"` disables) | First *set* of `CISTERNAL_TELEMETRY_LOG_DIR` > `CISTERNAL_LOG_DIR` > `BTH_LOG_DIR` > `CTXP_LOG_DIR` (empty or `"none"` disables) |
 | **Layer 3: `pyproject.toml`** | Table `[tool.cisternal.shadow]`, key `mode_state_dir` | Table `[tool.cisternal.telemetry]`, key `log_dir` |
 | **Layer 4: User Config** | `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`, table `[shadow]`, key `mode_state_dir` | `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml`, table `[telemetry]`, key `log_dir` |
-| **Layer 5: Fallback** | `off` (refuses operation with exit code 2 or 3) | `off` (refuses operation with exit code 2) |
+| **Layer 5: Fallback** | `off` (refuses operation with exit code 3) | `off` (refuses operation with exit code 3) |
 
 #### Diagnostics & Error Contract:
 1. **Provenance Reporting**: Commands print or log which layer resolved each path (e.g., `resolved mode_state_dir from pyproject.toml (.praxia/mode_state)`).
-2. **Environment Variable Precedence**: For telemetry log directory, `CISTERNAL_TELEMETRY_LOG_DIR` takes precedence, falling back to legacy alias `CISTERNAL_LOG_DIR`.
-3. **Fail Loudly on Malformed Configuration**: If a configuration file exists in any layer but cannot be parsed as valid TOML, cisternal fails immediately with exit code 3 and diagnostic details naming the file and error.
-4. **Explicit Off**: If resolution falls through to Layer 5 (`off`), operations requiring that path refuse execution with an explicit error listing all checked layers.
+2. **Environment Variable Precedence**: For the telemetry log directory the precedence list is defined once (`cisternal.shadow.resolution.LOG_DIR_ENV_VARS`) and shared by the telemetry writer (`cisternal.init()`) and the shadow readers: `CISTERNAL_TELEMETRY_LOG_DIR > CISTERNAL_LOG_DIR > BTH_LOG_DIR > CTXP_LOG_DIR`. The first variable that is *set* decides; later variables are not consulted.
+3. **Explicit Disable**: An env value that is empty, whitespace or `"none"` (case-insensitive) disables the path outright: resolution stops at Layer 5 (`off`, exit 3) and does NOT fall through to later variables or to Layers 3–4.
+4. **Fail Loudly on Malformed Configuration**: If a configuration file exists in any layer but cannot be parsed as valid TOML (or a section is not a table), `cisternal shadow score|check` fail immediately with exit code 3 and diagnostic details naming the file and error. The telemetry writer is the one exception: it runs inside the host process and must never break startup, so it warns on stderr and writes to the legacy `~/.cisternal/logs`.
+5. **Explicit Off**: If resolution falls through to Layer 5 (`off`), shadow operations requiring that path refuse execution (exit 3) with an explicit error listing all checked layers. The telemetry writer instead keeps its legacy default `~/.cisternal/logs`, so existing producers are unaffected.
 
 ---
 
