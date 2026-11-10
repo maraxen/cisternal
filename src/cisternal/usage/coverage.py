@@ -567,7 +567,8 @@ def mine_skill_opportunities(
 
                 for b in tool_blocks:
                     tool_name = str(b.get("name") or "")
-                    inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    raw_inp = b.get("input")
+                    inp: dict[str, Any] = raw_inp if isinstance(raw_inp, dict) else {}
 
                     # Check if Skill tool or direct skill name invocation
                     if tool_name == "Skill":

@@ -1,11 +1,21 @@
 ---
 name: developing-in-shadow
 description: "Shared shadow-development pattern: mode-state ladders, non-blocking telemetry, scoring, gate checks, and isolation audits."
+covers_families: []
+distinctive_strings:
+  - "developing-in-shadow"
+  - "cisternal shadow check"
+  - "cisternal shadow score"
+  - "shadow-development"
 ---
 
 # developing-in-shadow
 
 The shadow-development pattern allows candidate logic or experimental subagents to run alongside production or test workflows, recording what they would have done without actuating or causing side effects, calibrating empirical accuracy against ground truth, and enforcing pre-registered promotion gates before cutover.
+
+## When to Use
+
+Use when a new gate, classifier, mapper or subagent should run beside the live path before it is trusted: authoring a `.praxia/mode_state/<feature>.toml`, emitting shadow verdicts, scoring them against labels with `cisternal shadow score`, or checking a promotion gate with `cisternal shadow check`.
 
 ## Stage Ladder
 
@@ -64,7 +74,7 @@ cisternal.init()
 
 If uninitialized, shadow emit functions preserve library isolation and return `False` without raising or spawning background threads.
 
-### Step 3: Emit Candidate Verdicts
+### Step 3: Emit Candidate Verdicts (non-blocking telemetry)
 
 In the candidate evaluation path, emit non-blocking verdicts:
 
