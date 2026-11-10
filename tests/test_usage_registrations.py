@@ -213,3 +213,79 @@ sql = ["bathos/run_sql", "standalone_server/query"]
         assert reg.tools.get("custom_ext/do_work") == "mcp__plugin_custom_ext_custom_ext__do_work"
         assert "custom_ext" in reg.verbs
 
+
+
+class TestRegistrationsCacheFingerprint:
+    """The cache is reused only when every scan input matches (PR #72 review #8)."""
+
+    @staticmethod
+    def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{}", encoding="utf-8")
+        (home / ".claude.json").write_text(
+            json.dumps({"mcpServers": {"praxia": {}}, "numStartups": 1}), encoding="utf-8"
+        )
+        return home, claude_dir, tmp_path / "sessions"
+
+    def test_cache_built_in_project_a_misses_in_project_b(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, claude_dir, sessions_dir = self._env(tmp_path, monkeypatch)
+        proj_a = tmp_path / "a"
+        proj_b = tmp_path / "b"
+        proj_a.mkdir()
+        proj_b.mkdir()
+        (proj_a / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"only_in_a": {}}}), encoding="utf-8"
+        )
+
+        monkeypatch.chdir(proj_a)
+        reg_a = scan_active_registrations(sessions_dir=sessions_dir, claude_dir=claude_dir)
+        assert "only_in_a" in reg_a.servers
+
+        monkeypatch.chdir(proj_b)
+        reg_b = scan_active_registrations(sessions_dir=sessions_dir, claude_dir=claude_dir)
+        assert "only_in_a" not in reg_b.servers
+        assert "praxia" in reg_b.servers
+
+    def test_claude_json_churn_without_server_change_hits_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home, claude_dir, sessions_dir = self._env(tmp_path, monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        scan_active_registrations(sessions_dir=sessions_dir, claude_dir=claude_dir)
+        cache_file = sessions_dir / "active_servers.json"
+        first = cache_file.stat().st_mtime_ns
+
+        # Claude Code rewrites ~/.claude.json constantly; unrelated keys change.
+        (home / ".claude.json").write_text(
+            json.dumps({"mcpServers": {"praxia": {}}, "numStartups": 2}), encoding="utf-8"
+        )
+        scan_active_registrations(sessions_dir=sessions_dir, claude_dir=claude_dir)
+        assert cache_file.stat().st_mtime_ns == first  # served from cache, not rewritten
+
+        # A real server change must invalidate it.
+        (home / ".claude.json").write_text(
+            json.dumps({"mcpServers": {"praxia": {}, "new_one": {}}}), encoding="utf-8"
+        )
+        reg = scan_active_registrations(sessions_dir=sessions_dir, claude_dir=claude_dir)
+        assert "new_one" in reg.servers
+
+    def test_manifest_path_change_misses_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, claude_dir, sessions_dir = self._env(tmp_path, monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        scan_active_registrations(sessions_dir=sessions_dir, claude_dir=claude_dir)
+        fp1 = json.loads((sessions_dir / "active_servers.json").read_text())["fingerprint"]
+        manifest = tmp_path / "manifest.toml"
+        manifest.write_text('[plugin]\nname = "x"\n', encoding="utf-8")
+        scan_active_registrations(
+            sessions_dir=sessions_dir, claude_dir=claude_dir, manifest_path=manifest
+        )
+        fp2 = json.loads((sessions_dir / "active_servers.json").read_text())["fingerprint"]
+        assert fp1 != fp2

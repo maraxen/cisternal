@@ -11,6 +11,7 @@ Invariants:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 import logging
 import os
@@ -51,6 +52,56 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     except Exception as exc:
         _log.warning("Failed to read JSON from %s: %s", path, exc)
         return {}
+
+
+_CACHE_VERSION = "2"
+
+
+def _file_identity(path: Path) -> list[Any] | None:
+    """Cheap identity for an input file: resolved path, mtime_ns, size (None if absent)."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return [str(path.resolve()), st.st_mtime_ns, st.st_size]
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _cache_fingerprint(
+    *,
+    claude_json_data: dict[str, Any],
+    settings_file: Path,
+    local_mcp_file: Path,
+    plugin_files: list[Path],
+    bundle_path: Path | None,
+    manifest_path: Path | None,
+) -> str:
+    """Hash every input the scan result depends on (cisternal PR #72 review #8).
+
+    ``~/.claude.json`` is rewritten by Claude Code constantly, so only the part the
+    scan reads (its top-level ``mcpServers`` names) enters the fingerprint; the
+    small host files are content-hashed; plugin files and the bundle are keyed by
+    (resolved path, mtime_ns, size).
+    """
+    servers = claude_json_data.get("mcpServers")
+    inputs = {
+        "v": _CACHE_VERSION,
+        "cwd": str(Path.cwd().resolve()),
+        "settings": [str(settings_file.resolve()), _file_sha256(settings_file)],
+        "claude_json_servers": sorted(servers) if isinstance(servers, dict) else [],
+        "local_mcp": [str(local_mcp_file.resolve()), _file_sha256(local_mcp_file)],
+        "plugins": [_file_identity(p) for p in plugin_files],
+        "bundle": _file_identity(bundle_path) if bundle_path else None,
+        "manifest": _file_identity(manifest_path) if manifest_path else None,
+    }
+    blob = json.dumps(inputs, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 
 def _atomic_write_cache(cache_file: Path, data: dict[str, Any]) -> None:
@@ -115,15 +166,29 @@ def scan_active_registrations(
     except OSError:
         pass
 
-    max_mtime = 0.0
-    for f in candidate_files:
+    # Bundle source: an explicit manifest wins, else cisternal's own bundle.
+    bundle_source: Any = None
+    if not (manifest_path and manifest_path.is_file()):
         try:
-            if f.is_file():
-                mt = f.stat().st_mtime
-                if mt > max_mtime:
-                    max_mtime = mt
-        except OSError:
-            continue
+            from cisternal.plugin.app import PluginSpec, locate_bundle
+
+            bundle_source = locate_bundle(PluginSpec(name="cisternal", package="cisternal"))
+        except Exception:
+            bundle_source = None
+
+    # 3. Read host settings and ~/.claude.json read-only
+    settings_data = _read_json_file(settings_file)
+    claude_json_data = _read_json_file(claude_json_file)
+    local_mcp_data = _read_json_file(local_mcp_file)
+
+    fingerprint = _cache_fingerprint(
+        claude_json_data=claude_json_data,
+        settings_file=settings_file,
+        local_mcp_file=local_mcp_file,
+        plugin_files=candidate_files[3:],
+        bundle_path=bundle_source.path if bundle_source is not None else None,
+        manifest_path=manifest_path if (manifest_path and manifest_path.is_file()) else None,
+    )
 
     try:
         cache_is_file = bool(cache_file and cache_file.is_file())
@@ -132,35 +197,28 @@ def scan_active_registrations(
 
     if cache_file and cache_is_file and not force:
         try:
-            cache_mtime = cache_file.stat().st_mtime
-            if cache_mtime >= max_mtime:
-                raw_cache = json.loads(cache_file.read_text(encoding="utf-8"))
-                if isinstance(raw_cache, dict):
-                    return ActiveRegistrations(
-                        servers=tuple(raw_cache.get("servers", ())),
-                        tools=dict(raw_cache.get("tools", {})),
-                        verbs=dict(raw_cache.get("verbs", {})),
-                        families={
-                            str(k): tuple(str(x) for x in v)
-                            for k, v in raw_cache.get("families", {}).items()
-                        },
-                        plugins={
-                            str(p_name): PluginAssetInfo(
-                                servers=tuple(p_info.get("servers", ())),
-                                hooks=tuple(p_info.get("hooks", ())),
-                                commands=tuple(p_info.get("commands", ())),
-                                skills=tuple(p_info.get("skills", ())),
-                            )
-                            for p_name, p_info in raw_cache.get("plugins", {}).items()
-                        },
-                    )
+            raw_cache = json.loads(cache_file.read_text(encoding="utf-8"))
+            if isinstance(raw_cache, dict) and raw_cache.get("fingerprint") == fingerprint:
+                return ActiveRegistrations(
+                    servers=tuple(raw_cache.get("servers", ())),
+                    tools=dict(raw_cache.get("tools", {})),
+                    verbs=dict(raw_cache.get("verbs", {})),
+                    families={
+                        str(k): tuple(str(x) for x in v)
+                        for k, v in raw_cache.get("families", {}).items()
+                    },
+                    plugins={
+                        str(p_name): PluginAssetInfo(
+                            servers=tuple(p_info.get("servers", ())),
+                            hooks=tuple(p_info.get("hooks", ())),
+                            commands=tuple(p_info.get("commands", ())),
+                            skills=tuple(p_info.get("skills", ())),
+                        )
+                        for p_name, p_info in raw_cache.get("plugins", {}).items()
+                    },
+                )
         except Exception as exc:
             _log.warning("Cache active_servers.json invalid or corrupt: %s", exc)
-
-    # 3. Read host settings and ~/.claude.json read-only
-    settings_data = _read_json_file(settings_file)
-    claude_json_data = _read_json_file(claude_json_file)
-    local_mcp_data = _read_json_file(local_mcp_file)
 
     active_servers: set[str] = set()
     server_to_plugin: dict[str, str] = {}
@@ -299,10 +357,11 @@ def scan_active_registrations(
         # Load cisternal's own bundle via locate_bundle / loads_snapshot (Spec §C1 / GAP-40)
         from cisternal.assets.manifest import ManifestAssetSource
         from cisternal.assets.snapshot import loads_snapshot
-        from cisternal.plugin.app import PluginSpec, locate_bundle
 
         try:
-            source = locate_bundle(PluginSpec(name="cisternal", package="cisternal"))
+            source = bundle_source
+            if source is None:
+                raise LookupError("no cisternal bundle located")
             if source.kind == "snapshot":
                 default_bundle = loads_snapshot(source.path.read_text(encoding="utf-8"))
             else:
@@ -354,7 +413,8 @@ def scan_active_registrations(
     # 8. Write atomic cache to <sessions dir>/active_servers.json via temp file + os.replace
     if cache_file:
         cache_data = {
-            "version": "1.0",
+            "version": _CACHE_VERSION,
+            "fingerprint": fingerprint,
             "servers": list(registrations.servers),
             "tools": registrations.tools,
             "verbs": registrations.verbs,
