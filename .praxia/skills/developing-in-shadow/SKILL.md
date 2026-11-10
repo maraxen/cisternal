@@ -127,6 +127,8 @@ def test_charter_mapper_isolation(tmp_path):
     assert res.passed
 ```
 
+Pass `feature=` so the call emits a `shadow.isolation` event (it emits nothing when `feature` is empty, and also when telemetry is uninitialized). `cisternal shadow check` blocks promotion unless it finds a passing isolation event, `writes_isolated = true` and a named enforcer.
+
 ### Step 7: Check Promotion Readiness
 
 Run the read-only gate evaluation:
@@ -142,12 +144,14 @@ cisternal shadow check bearings_charter_mapper --records-dir /path/to/logs
 
 Note: `cisternal shadow check` is strictly read-only. It never mutates mode-state files or git; advancing stages requires an explicit commit.
 
-## Worked Example: Bearings AC-9 (bathos spec 261104)
+## Worked Example: Bearings AC-9 (bathos spec 261104) — illustrative
+
+The numbers below are illustrative, not results: Bearings AC-9 has not been run through this pattern yet. They are chosen so every gate in the Step 1 mode-state passes.
 
 In Bathos Bearings (spec 261104), a candidate reader maps experiment sidecars (`.bth.toml`) to research charter purposes:
 1. Mode-state pre-registered at `.praxia/mode_state/bearings_charter_mapper.toml` with `target_stage = "advisory"`.
 2. Telemetry records are written during batch sidecar evaluation with `emit_verdict`.
-3. Ground truth is labeled across 20 frozen reference sidecars (`frozen_gold`).
-4. `cisternal shadow score bearings_charter_mapper` confirms precision 0.90 [Wilson 95% CI: 0.73 .. 0.97] against base rate 0.50.
-5. `prove_isolation` validates that sidecar reads make zero filesystem writes outside `shadow_log_dir`.
-6. `cisternal shadow check bearings_charter_mapper` exits with code 0, permitting the owner to promote `current_stage` to `"advisory"`.
+3. Ground truth is labeled across 60 frozen reference sidecars (`frozen_gold`), 30 positive and 30 negative (base rate 0.50).
+4. `cisternal shadow score bearings_charter_mapper` would report TP=27, FP=1, FN=3, TN=29: precision 0.964 [Wilson 95% CI: 0.823 .. 0.994], recall 0.900 [0.744 .. 0.965], false positive rate 0.033. The precision lower bound (0.823) clears both `min_precision_lower_bound = 0.70` and the base rate.
+5. `prove_isolation(..., feature="bearings_charter_mapper")` passes and emits a passing `shadow.isolation` event. The gate requires this evidence: with no passing event, `check` blocks with `no_isolation_evidence`.
+6. Only when all of the above hold does `cisternal shadow check bearings_charter_mapper` exit 0, permitting the owner to promote `current_stage` to `"advisory"` by an explicit commit. A smaller sample fails closed: for example 18/20 gives a precision lower bound of 0.699, below the 0.70 gate, and `check` exits 1.
