@@ -54,6 +54,7 @@ dev = [
 
 [project.scripts]
 cisternal = "cisternal.cli:app"
+cisternal-hook = "cisternal.usage.cli_hook:main"
 
 [project.entry-points."cisternal.emitters"]
 antigravity = "cisternal.export.registry:antigravity_factory"

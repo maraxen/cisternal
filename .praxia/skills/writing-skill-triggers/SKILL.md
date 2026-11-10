@@ -1,9 +1,21 @@
 ---
 name: writing-skill-triggers
-description: Use when writing or shortening a skill's description or when_to_use, when a skill fails to fire or fires on the wrong task, or when `cisternal assets validate` warns about listing length.
+description: Use `writing-skill-triggers` when writing or shortening a skill's description or when_to_use, when a skill fails to fire or fires on the wrong task, or when `cisternal assets validate` warns about listing length.
+covers_families: []
+distinctive_strings:
+  - "writing-skill-triggers"
+  - "when_to_use"
+  - "skillListingMaxDescChars"
+  - "listing length"
 ---
 
 # Writing skill triggers
+
+## When to Use
+
+Use `writing-skill-triggers` when writing or shortening a skill's description or when_to_use, when a skill fails to fire or fires on the wrong task, or when `cisternal assets validate` warns about listing length.
+
+## Scope
 
 A trigger is the `description` plus `when_to_use`: the only text a model sees when deciding whether
 to load a skill. Its job is to match a moment, not to explain the skill.

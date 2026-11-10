@@ -1,7 +1,19 @@
 ---
 name: run-cisternal
 description: Build, run, and drive cisternal — the telemetry substrate + agent-asset export CLI/library. Use when asked to run cisternal, start its CLI, test the assets export/inspect/validate flow, exercise the telemetry API (init/tool/wire/span/emit_event), or verify a plugin bundle before publishing.
+covers_families: []
+distinctive_strings:
+  - "run-cisternal"
+  - "telemetry doctor"
+  - "assets export"
+  - "emit_event"
 ---
+
+## When to Use
+
+Use when asked to run cisternal, start its CLI, test the assets export/inspect/validate flow, exercise the telemetry API (`init`/`@tool`/`wire`/`span`/`emit_event`), or verify a plugin bundle before publishing.
+
+## Scope
 
 cisternal is a Python library + CLI (`cisternal` console script), not a
 GUI/server app — it's driven by importing it directly and by invoking

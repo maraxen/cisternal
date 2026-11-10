@@ -1,9 +1,21 @@
 ---
 name: customizing-tools
 description: "Decides how to acquire functionality that already exists elsewhere: accept a dependency, vendor it, cherry-pick, re-implement, take design inspiration, or learn process lessons from a postmortem. Also covers migrating a stable Python module to Rust via pyo3. Use for \"should we add this as a dependency\", \"should we vendor or fork this\", \"is this safe to depend on\", \"not invented here\", \"migrate this to Rust\", or before adopting any package, crate or library."
+covers_families: []
+distinctive_strings:
+  - "cherry-pick"
+  - "re-implement"
+  - "pyo3"
+  - "decision-matrix"
 ---
 
 # Customizing tools
+
+## When to Use
+
+Use for deciding how to acquire external functionality (accept dependency, vendor, cherry-pick, re-implement, inspiration, lessons) or before migrating a Python module to Rust via pyo3.
+
+## Scope
 
 Six ways exist to acquire functionality that already lives somewhere else: accept a dependency,
 vendor it, cherry-pick from it, re-implement it, derive inspiration from it, or derive lessons

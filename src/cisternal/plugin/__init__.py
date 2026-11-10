@@ -15,16 +15,33 @@ resolves.
 Fastmcp-free.
 """
 
-from cisternal.plugin.app import (
-    INSTALLABLE_SURFACES,
-    BundleSource,
-    PluginError,
-    PluginSpec,
-    load_bundle,
-    locate_bundle,
-    plugin_app,
-)
+from __future__ import annotations
+
+import importlib
+from typing import TYPE_CHECKING, Any
+
 from cisternal.plugin.config import marketplace_root_source, resolve_marketplace_root
+
+if TYPE_CHECKING:
+    from cisternal.plugin.app import (
+        INSTALLABLE_SURFACES,
+        BundleSource,
+        PluginError,
+        PluginSpec,
+        load_bundle,
+        locate_bundle,
+        plugin_app,
+    )
+
+_APP_EXPORTS = {
+    "INSTALLABLE_SURFACES",
+    "BundleSource",
+    "PluginError",
+    "PluginSpec",
+    "load_bundle",
+    "locate_bundle",
+    "plugin_app",
+}
 
 __all__ = [
     "INSTALLABLE_SURFACES",
@@ -37,3 +54,12 @@ __all__ = [
     "plugin_app",
     "resolve_marketplace_root",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in _APP_EXPORTS:
+        mod = importlib.import_module(".app", __name__)
+        val = getattr(mod, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

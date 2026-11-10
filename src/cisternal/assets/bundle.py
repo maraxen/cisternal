@@ -53,7 +53,8 @@ Fields:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +143,8 @@ class SkillAsset:
     shell: str = ""
     license: str = ""
     compatibility: str = ""
+    covers_families: tuple[str, ...] = ()
+    distinctive_strings: tuple[str, ...] = ()
 
     @property
     def effective_when_to_use(self) -> str:
@@ -235,6 +238,8 @@ class AssetBundle:
     agents: tuple[AgentAsset, ...] = ()
     hook_specs: tuple[HookSpecAsset, ...] = ()
     marketplace: MarketplaceAsset | None = None
+    families: dict[str, tuple[str, ...]] = field(default_factory=dict, hash=False)
+    verbs: dict[str, Any] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -262,6 +267,15 @@ class AssetBundle:
                 )
             ),
         )
+        if self.families:
+            object.__setattr__(
+                self,
+                "families",
+                {
+                    str(k): tuple(str(x) for x in v)
+                    for k, v in sorted(self.families.items())
+                },
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,3 +285,4 @@ class LoadReport:
     bundle: AssetBundle
     warnings: tuple[str, ...] = ()
     conflicts: tuple[str, ...] = ()
+    advisories: tuple[str, ...] = ()

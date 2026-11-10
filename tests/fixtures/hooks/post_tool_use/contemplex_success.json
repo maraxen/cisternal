@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_ctxp_01",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_contemplex_contemplex__brainstorm_start",
+  "tool_input": {
+    "task": "cache_design"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"session_id\": \"ctxp_99\", \"status\": \"started\", \"phase\": \"problem_framing\", \"ok\": true}"
+      }
+    ],
+    "is_error": false
+  }
+}

@@ -118,8 +118,13 @@ def marketplace_root_source(
     return None, "unconfigured"
 
 
-def write_user_config(value: str = GENERATED_DEFAULT) -> Path:
-    """Record ``plugin_marketplace = value`` in the user config file; return its path.
+def write_user_config(
+    value: str = GENERATED_DEFAULT,
+    *,
+    key: str = CONFIG_KEY,
+    comment: str | None = None,
+) -> Path:
+    """Record ``key = value`` (default ``plugin_marketplace``) in the user config file; return its path.
 
     Creates the file (and its directory) if missing. An existing file that
     lacks the key gets it as the first line -- a top-level key must precede
@@ -132,14 +137,17 @@ def write_user_config(value: str = GENERATED_DEFAULT) -> Path:
     link = user_config_path()
     config = link.resolve() if link.is_symlink() else link
     existing = config.read_text(encoding="utf-8") if config.is_file() else None
-    if existing is not None and CONFIG_KEY in _read_toml(config):
+    if existing is not None and key in _read_toml(config):
         return config
-    header = (
-        "# cisternal per-machine config (generated; edit freely).\n"
-        "# Shared Claude plugin marketplace used by `<tool> plugin install` and\n"
-        "# `cisternal assets publish-shared` / `update-all`.\n"
-    )
-    line = f"{CONFIG_KEY} = {_toml_string(value)}\n"
+    header = "# cisternal per-machine config (generated; edit freely).\n"
+    if key == CONFIG_KEY:
+        header += (
+            "# Shared Claude plugin marketplace used by `<tool> plugin install` and\n"
+            "# `cisternal assets publish-shared` / `update-all`.\n"
+        )
+    note = f"# {comment}\n" if comment else ""
+    line = f"{key} = {_toml_string(value)}\n"
+    line = note + line
     text = header + line if existing is None else line + existing
     config.parent.mkdir(parents=True, exist_ok=True)
     mode = config.stat().st_mode & 0o777 if existing is not None else 0o644

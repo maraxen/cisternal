@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_bathos_01",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_bathos_bathos__run_sql",
+  "tool_input": {
+    "query": "SELECT count(*) FROM runs"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\": true, \"count\": 42, \"error_code\": null, \"error\": null}"
+      }
+    ],
+    "is_error": false
+  }
+}

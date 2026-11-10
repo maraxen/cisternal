@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_myxcel_01",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_myxcel_myxcel__job_status",
+  "tool_input": {
+    "job_id": 98765
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"job_id\": 98765, \"state\": \"RUNNING\", \"partition\": \"sched_mit_charlie\"}"
+      }
+    ],
+    "is_error": false
+  }
+}

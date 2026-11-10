@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_xperiri_02",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_xperiri_xperiri__run_experiment",
+  "tool_input": {
+    "exp_name": "invalid_exp"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\": false, \"error\": \"Invalid experiment configuration: missing target_msa\", \"error_code\": \"INVALID_CONFIG\"}"
+      }
+    ],
+    "is_error": false
+  }
+}

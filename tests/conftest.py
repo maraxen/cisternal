@@ -109,4 +109,6 @@ def _isolate_user_config(tmp_path_factory: pytest.TempPathFactory, monkeypatch: 
     developer's machine config.
     """
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg")))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("CISTERNAL_LOG_DIR", str(tmp_path_factory.mktemp("logs")))
     monkeypatch.delenv("CISTERNAL_PLUGIN_MARKETPLACE", raising=False)

@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_bathos_02",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_bathos_bathos__run_sql",
+  "tool_input": {
+    "query": "SELECT * FROM missing_table"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\": false, \"error_code\": \"SQLITE_ERROR\", \"error\": \"no such table: missing_table\", \"resolution_hint\": \"run bth sql .schema\"}"
+      }
+    ],
+    "is_error": false
+  }
+}

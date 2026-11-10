@@ -33,6 +33,18 @@ SNAPSHOT_SCHEMA = 1
 __all__ = ["SNAPSHOT_SCHEMA", "bundle_from_dict", "dumps_snapshot", "loads_snapshot"]
 
 
+# McpAsset fields added in 0.1.1a14 (`[plugin.mcp] launch` / `uvx_from`).
+_MCP_LATE_DEFAULTS = {"launch": "path", "uvx_from": ""}
+_SKILL_LATE_DEFAULTS = {
+    "covers_families": [],
+    "distinctive_strings": [],
+}
+_BUNDLE_LATE_DEFAULTS = {
+    "families": {},
+    "verbs": {},
+}
+
+
 def dumps_snapshot(bundle: AssetBundle) -> str:
     """Serialize *bundle* deterministically (sorted keys, trailing newline)."""
     data = _serialize_bundle(bundle)
@@ -43,12 +55,15 @@ def dumps_snapshot(bundle: AssetBundle) -> str:
         for key, default in _MCP_LATE_DEFAULTS.items():
             if srv.get(key) == default:
                 srv.pop(key)
+    for skill in data.get("skills", ()):
+        for key, default in _SKILL_LATE_DEFAULTS.items():
+            if skill.get(key) in (default, [], ()):
+                skill.pop(key)
+    for key, default in _BUNDLE_LATE_DEFAULTS.items():
+        if data.get(key) in (default, {}, ()):
+            data.pop(key)
     doc = {"schema": SNAPSHOT_SCHEMA, "bundle": data}
     return json.dumps(doc, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-
-
-# McpAsset fields added in 0.1.1a14 (`[plugin.mcp] launch` / `uvx_from`).
-_MCP_LATE_DEFAULTS = {"launch": "path", "uvx_from": ""}
 
 
 def loads_snapshot(text: str) -> AssetBundle:
@@ -60,7 +75,9 @@ def loads_snapshot(text: str) -> AssetBundle:
         raise ValueError(msg) from exc
     if not isinstance(doc, dict) or doc.get("schema") != SNAPSHOT_SCHEMA:
         found = doc.get("schema") if isinstance(doc, dict) else None
-        msg = f"unsupported bundle snapshot schema {found!r} (expected {SNAPSHOT_SCHEMA})"
+        msg = (
+            f"unsupported bundle snapshot schema {found!r} (expected {SNAPSHOT_SCHEMA})"
+        )
         raise ValueError(msg)
     if not isinstance(doc.get("bundle"), dict):
         msg = "malformed bundle snapshot: 'bundle' must be an object"
@@ -96,7 +113,9 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
                     paths=tuple(s.get("paths", ())),
                     argument_hint=s.get("argument_hint", ""),
                     arguments=tuple(s.get("arguments", ())),
-                    disable_model_invocation=bool(s.get("disable_model_invocation", False)),
+                    disable_model_invocation=bool(
+                        s.get("disable_model_invocation", False)
+                    ),
                     user_invocable=bool(s.get("user_invocable", True)),
                     allowed_tools=tuple(s.get("allowed_tools", ())),
                     disallowed_tools=tuple(s.get("disallowed_tools", ())),
@@ -107,6 +126,8 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
                     shell=s.get("shell", ""),
                     license=s.get("license", ""),
                     compatibility=s.get("compatibility", ""),
+                    covers_families=tuple(s.get("covers_families", ())),
+                    distinctive_strings=tuple(s.get("distinctive_strings", ())),
                 )
                 for s in data.get("skills", ())
             ),
@@ -132,6 +153,11 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
                 for h in data.get("hook_specs", ())
             ),
             marketplace=MarketplaceAsset(**marketplace) if marketplace else None,
+            families={
+                str(k): tuple(str(x) for x in v)
+                for k, v in data.get("families", {}).items()
+            },
+            verbs=dict(data.get("verbs", {})),
         )
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         msg = f"malformed bundle snapshot: {exc!r}"

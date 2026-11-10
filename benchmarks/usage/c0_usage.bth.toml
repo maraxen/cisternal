@@ -1,0 +1,67 @@
+[experiment]
+hypothesis = "Client session transcripts provide an accurate primary source of truth for tool, CLI, skill, and ToolSearch usage, confirming exploratory findings that agents under-use MCP relative to CLI (E1), rarely keyword-search (E2), and exhibit elevated CLI fallback rates following MCP tool errors (E4)."
+description = "Pre-registration for C0 usage counter derivation across local Claude Code session transcripts with optional cisternal server telemetry duration enrichment. Establishes registered hypotheses and falsifiable outcome criteria for E1-E5 re-derivations, per-skill counts, C3 precision and recall, and C4b fire rates."
+task_id = "261106_tool-surface-triage"
+scripts = [
+  "scripts/usage/c0_derive.py",
+  "scripts/usage/c3_coverage.py"
+]
+conditions = { transcript_root = "auto", date_window = "14d", session_type_signal = "subagents_path_or_isSidechain", min_sessions_floor = 20 }
+
+[outcomes.pass]
+condition = "paired_controls_pass == true AND total_sessions >= 20 AND e4_error_rate_lower > e4_success_rate_upper"
+reasoning = "Paired positive (N=5) and negative (N=0) controls pass; session volume clears the floor; and the re-derived E4 fallback rate after MCP error is strictly and statistically significantly higher than after success (non-overlapping 95% Wilson confidence intervals)."
+decision = "proceed"
+is_residual = false
+
+[outcomes.marginal]
+condition = "paired_controls_pass == true AND total_sessions >= 20 AND e4_error_rate_lower <= e4_success_rate_upper"
+reasoning = "Controls pass and sample size is sufficient, but E4 confidence intervals overlap. Fallback behavior may be driven by factors other than tool errors (e.g. workflow habits or CLI preference)."
+decision = "investigate"
+is_residual = false
+
+[outcomes.inconclusive]
+condition = "paired_controls_pass == true AND total_sessions < 20"
+reasoning = "Controls pass, but insufficient sessions (< 20) were discovered in the lookback window. Metrics cannot be certified as representative."
+decision = "expand-window"
+is_residual = false
+
+[outcomes.fail]
+condition = "paired_controls_pass == false"
+reasoning = "Paired synthetic controls failed (planted tool != 5, uncalled tool != 0, or empty count dict). The transcript parsing core is invalid."
+decision = "abandon"
+is_residual = true
+
+[result_schema]
+timestamp = "str"
+cisternal_commit = "str"
+paired_controls_pass = "bool"
+total_sessions = "int"
+total_main_interactive_sessions = "int"
+total_subagent_headless_sessions = "int"
+calendar_days_span = "float"
+e1_bathos_mcp_calls = "int"
+e1_bathos_cli_calls = "int"
+e1_mcp_ratio = "float"
+e2_toolsearch_select_calls = "int"
+e2_toolsearch_keyword_calls = "int"
+e3_select_deferred_only = "int"
+e3_select_prior_mention = "int"
+e4_error_fallback_events = "int"
+e4_error_total_events = "int"
+e4_error_rate = "float"
+e4_error_rate_lower = "float"
+e4_error_rate_upper = "float"
+e4_success_fallback_events = "int"
+e4_success_total_events = "int"
+e4_success_rate = "float"
+e4_success_rate_lower = "float"
+e4_success_rate_upper = "float"
+c3_precision_point_estimate = "float"
+c3_precision_lower = "float"
+c3_precision_upper = "float"
+c3_recall_point_estimate = "float"
+c3_recall_lower = "float"
+c3_recall_upper = "float"
+c4b_short_fire_rate = "float"
+c4b_long_fire_rate = "float"
