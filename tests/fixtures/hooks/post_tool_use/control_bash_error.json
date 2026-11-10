@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_control_01",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "bth sql 'SELECT bad_syntax'"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Error: near 'bad_syntax': syntax error"
+      }
+    ],
+    "is_error": true
+  }
+}

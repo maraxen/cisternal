@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_xperiri_01",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_xperiri_xperiri__run_experiment",
+  "tool_input": {
+    "exp_name": "fold_test"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\": true, \"experiment_id\": \"exp-42\", \"status\": \"running\"}"
+      }
+    ],
+    "is_error": false
+  }
+}

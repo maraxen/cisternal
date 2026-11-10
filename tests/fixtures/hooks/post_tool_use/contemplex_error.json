@@ -1,0 +1,18 @@
+{
+  "session_id": "sess_test_ctxp_02",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_contemplex_contemplex__brainstorm_reply",
+  "tool_input": {
+    "session_id": "ctxp_99",
+    "action": "finalize"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\": false, \"error_code\": \"GATE_BLOCKED\", \"message\": \"Phase transition blocked: pre-mortem review required\"}"
+      }
+    ],
+    "is_error": false
+  }
+}

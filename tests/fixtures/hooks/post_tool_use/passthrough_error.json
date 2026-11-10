@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_passthrough_02",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_passthrough_passthrough__echo",
+  "tool_input": {
+    "message": "fail"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "RuntimeError: division by zero in tool handler"
+      }
+    ],
+    "is_error": true
+  }
+}

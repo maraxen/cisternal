@@ -1,0 +1,17 @@
+{
+  "session_id": "sess_test_myxcel_02",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__plugin_myxcel_myxcel__job_status",
+  "tool_input": {
+    "job_id": 99999
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\": \"JobNotFoundError\", \"message\": \"SLURM job 99999 not found in queue or sacct\"}"
+      }
+    ],
+    "is_error": false
+  }
+}
