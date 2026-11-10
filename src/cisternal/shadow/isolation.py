@@ -10,10 +10,15 @@ Provides prove_isolation to audit candidate features before promotion:
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import shutil
+import stat
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -180,37 +185,260 @@ def _deltas_content_match(
     return True
 
 
+logger = logging.getLogger(__name__)
+
+_MANIFEST_NAME = "manifest.json"
+_OWNER_RWX = stat.S_IRWXU
+
+
+class IsolationRestoreError(RuntimeError):
+    """A live root could not be restored. The backup is kept on disk at ``backup_path``."""
+
+    def __init__(self, reason: str, backup_path: Path) -> None:
+        super().__init__(f"{reason}; original contents are preserved in backup at {backup_path}")
+        self.backup_path = backup_path
+
+
+@contextmanager
+def _temp_mode(p: Path, bits: int) -> Iterator[None]:
+    """Temporarily add owner permission bits to p; the original mode is restored on exit."""
+    st = os.lstat(p)
+    original = stat.S_IMODE(st.st_mode)
+    if stat.S_ISLNK(st.st_mode) or (original & bits) == bits:
+        yield
+        return
+    os.chmod(p, original | bits)
+    try:
+        yield
+    finally:
+        os.chmod(p, original)
+
+
+def _copy_meta(st: os.stat_result, dst: Path) -> None:
+    """Apply mode and timestamps from st to dst (dst must not be a symlink)."""
+    os.chmod(dst, stat.S_IMODE(st.st_mode))
+    os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def _digest(p: Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _same_bytes(a: Path, b: Path) -> bool:
+    """Content equality; an unreadable operand counts as different so it gets rewritten."""
+    try:
+        with _temp_mode(a, stat.S_IRUSR), _temp_mode(b, stat.S_IRUSR):
+            return _digest(a) == _digest(b)
+    except OSError:
+        return False
+
+
+def _is_protected(rel: Path, protected: list[Path]) -> bool:
+    """True if rel is an entry that backup could not read, or lies beneath one."""
+    return any(rel == s or s in rel.parents for s in protected)
+
+
+def _has_protected_below(rel: Path, protected: list[Path]) -> bool:
+    return any(rel in s.parents for s in protected)
+
+
+def _remove_path(p: Path) -> None:
+    """Delete p, including read-only directories. Never follows symlinks."""
+    st = os.lstat(p)
+    if stat.S_ISDIR(st.st_mode):
+        os.chmod(p, stat.S_IMODE(st.st_mode) | _OWNER_RWX)
+        for name in os.listdir(p):
+            _remove_path(p / name)
+        os.rmdir(p)
+    else:
+        os.unlink(p)
+
+
+def _mirror_entry(src: Path, dst: Path, rel: Path, skipped: list[Path]) -> None:
+    """Copy src to dst keeping symlinks, modes and mtimes.
+
+    Entries that cannot be read are recorded in ``skipped`` (relative to the root) and are
+    never touched by the restore.
+    """
+    st = os.lstat(src)
+    if stat.S_ISLNK(st.st_mode):
+        os.symlink(os.readlink(src), dst)
+        return
+    if stat.S_ISDIR(st.st_mode):
+        dst.mkdir()
+        # Children are visited while src is still readable and searchable (lstat needs +x).
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(_temp_mode(src, stat.S_IRUSR | stat.S_IXUSR))
+                names = sorted(os.listdir(src))
+            except OSError:
+                skipped.append(rel)
+                names = []
+            for name in names:
+                _mirror_entry(src / name, dst / name, rel / name, skipped)
+        _copy_meta(st, dst)
+        return
+    if not stat.S_ISREG(st.st_mode):
+        skipped.append(rel)  # fifos, sockets, devices are never read
+        return
+    try:
+        with _temp_mode(src, stat.S_IRUSR):
+            shutil.copyfile(src, dst)
+    except OSError:
+        dst.unlink(missing_ok=True)
+        skipped.append(rel)
+        return
+    _copy_meta(st, dst)
+
+
 def _backup_roots(roots: list[Path], backup_dir: Path) -> None:
-    """Backup all existing files under roots into backup_dir."""
+    """Mirror each existing live root into backup_dir and write a manifest last.
+
+    The manifest records whether each root existed and which entries were skipped; restore
+    refuses to run without it.
+    """
+    entries: list[dict[str, Any]] = []
     for idx, r in enumerate(roots):
-        r_res = r.resolve()
-        if r_res.exists():
-            dest = backup_dir / f"root_{idx}"
-            if r_res.is_dir():
-                shutil.copytree(r_res, dest)
-            else:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(r_res, dest)
+        r_res = Path(r).resolve()
+        existed = os.path.lexists(r_res)
+        skipped: list[Path] = []
+        if existed:
+            _mirror_entry(r_res, backup_dir / f"root_{idx}", Path("."), skipped)
+        entries.append(
+            {
+                "index": idx,
+                "path": str(r_res),
+                "existed": existed,
+                "skipped": [p.as_posix() for p in skipped],
+            }
+        )
+    (backup_dir / _MANIFEST_NAME).write_text(
+        json.dumps({"roots": entries}, indent=2), encoding="utf-8"
+    )
+
+
+def _read_manifest(backup_dir: Path, n_roots: int) -> list[dict[str, Any]]:
+    try:
+        entries = json.loads((backup_dir / _MANIFEST_NAME).read_text(encoding="utf-8"))["roots"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise IsolationRestoreError(
+            f"backup manifest unreadable ({type(exc).__name__})", backup_dir
+        ) from exc
+    if len(entries) != n_roots:
+        raise IsolationRestoreError("backup manifest does not match live roots", backup_dir)
+    return entries
+
+
+def _materialize(bak: Path, live: Path, rel: Path, protected: list[Path]) -> None:
+    """Create live (which does not exist) as a copy of bak."""
+    bst = os.lstat(bak)
+    if stat.S_ISLNK(bst.st_mode):
+        os.symlink(os.readlink(bak), live)
+        return
+    if stat.S_ISDIR(bst.st_mode):
+        live.mkdir()
+        with _temp_mode(bak, stat.S_IRUSR | stat.S_IXUSR):
+            for name in sorted(os.listdir(bak)):
+                _sync_entry(live / name, bak / name, rel / name, protected)
+        _copy_meta(bst, live)
+        return
+    with _temp_mode(bak, stat.S_IRUSR):
+        shutil.copyfile(bak, live)
+    _copy_meta(bst, live)
+
+
+def _replace(live: Path, bak: Path, rel: Path, protected: list[Path]) -> None:
+    if _has_protected_below(rel, protected):
+        raise OSError(f"cannot replace {live}: unreadable entries lie beneath it")
+    _remove_path(live)
+    _materialize(bak, live, rel, protected)
+
+
+def _sync_dir(live: Path, bak: Path, rel: Path, protected: list[Path], bst: os.stat_result) -> None:
+    lst = os.lstat(live)
+    os.chmod(live, stat.S_IMODE(lst.st_mode) | _OWNER_RWX)
+    # bak must stay searchable while its children are compared (lstat needs +x).
+    with _temp_mode(bak, stat.S_IRUSR | stat.S_IXUSR):
+        bak_names = sorted(os.listdir(bak))
+        bak_set = set(bak_names)
+        for name in os.listdir(live):
+            if name in bak_set or _is_protected(rel / name, protected):
+                continue
+            _remove_path(live / name)
+        for name in bak_names:
+            _sync_entry(live / name, bak / name, rel / name, protected)
+    _copy_meta(bst, live)
+
+
+def _sync_entry(live: Path, bak: Path, rel: Path, protected: list[Path]) -> None:
+    """Make live match bak for one entry, touching only what differs.
+
+    Entries that backup could not read are never modified or deleted.
+    """
+    if _is_protected(rel, protected):
+        if not os.path.lexists(live):
+            logger.warning("cannot restore unreadable entry %s (not backed up)", live)
+        return
+    if not os.path.lexists(live):
+        _materialize(bak, live, rel, protected)
+        return
+    bst = os.lstat(bak)
+    lst = os.lstat(live)
+    if stat.S_IFMT(lst.st_mode) != stat.S_IFMT(bst.st_mode):
+        _replace(live, bak, rel, protected)
+        return
+    if stat.S_ISLNK(bst.st_mode):
+        if os.readlink(live) != os.readlink(bak):
+            _replace(live, bak, rel, protected)
+        return
+    if stat.S_ISDIR(bst.st_mode):
+        _sync_dir(live, bak, rel, protected, bst)
+        return
+    if not _same_bytes(live, bak):
+        with _temp_mode(bak, stat.S_IRUSR), _temp_mode(live, stat.S_IWUSR):
+            shutil.copyfile(bak, live)
+    _copy_meta(bst, live)
 
 
 def _restore_roots(roots: list[Path], backup_dir: Path) -> None:
-    """Restore roots to their exact state stored in backup_dir."""
-    for idx, r in enumerate(roots):
-        r_res = r.resolve()
-        # Clean current state
-        if r_res.exists():
-            if r_res.is_dir():
-                shutil.rmtree(r_res)
-            else:
-                r_res.unlink()
-        # Restore backup if it existed
-        src = backup_dir / f"root_{idx}"
-        if src.exists():
-            if src.is_dir():
-                shutil.copytree(src, r_res)
-            else:
-                r_res.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, r_res)
+    """Restore each live root in place from backup_dir.
+
+    Nothing is deleted wholesale: extra entries created by the run are removed, differing
+    entries are rewritten, and the backup stays on disk until the caller discards it.
+    """
+    entries = _read_manifest(backup_dir, len(roots))
+    try:
+        for idx, r in enumerate(roots):
+            entry = entries[idx]
+            r_res = Path(r).resolve()
+            if not entry["existed"]:
+                if os.path.lexists(r_res):
+                    _remove_path(r_res)
+                continue
+            protected = [Path(s) for s in entry["skipped"]]
+            _sync_entry(r_res, backup_dir / f"root_{idx}", Path("."), protected)
+    except OSError as exc:
+        raise IsolationRestoreError(f"restore of live root failed ({exc})", backup_dir) from exc
+
+
+def _restore_after_failure(roots: list[Path], backup_dir: Path) -> IsolationRestoreError | None:
+    try:
+        _restore_roots(roots, backup_dir)
+    except IsolationRestoreError as exc:
+        logger.error("prove_isolation aborted and live restore failed: %s", exc)
+        return exc
+    return None
+
+
+def _discard_backup(backup_dir: Path) -> None:
+    try:
+        _remove_path(backup_dir)
+    except OSError as exc:
+        logger.warning("could not delete isolation backup %s: %s", backup_dir, exc)
 
 
 def prove_isolation(
@@ -259,9 +487,10 @@ def prove_isolation(
         if repo is not None:
             watched_dirs.add(repo.resolve())
 
-    with tempfile.TemporaryDirectory(prefix="cisternal_isolation_backup_") as temp_backup:
-        backup_path = Path(temp_backup)
-
+    # The backup is kept on disk unless every step succeeds, so a failed restore never
+    # leaves a live root destroyed with no copy of its contents.
+    backup_path = Path(tempfile.mkdtemp(prefix="cisternal_isolation_backup_"))
+    try:
         # Backup live_roots before baseline live run
         _backup_roots(resolved_live_roots, backup_path)
         pre_live_snap = _snapshot(resolved_live_roots)
@@ -285,6 +514,15 @@ def prove_isolation(
         shadow_delta = _compute_delta(pre_live_snap, post_shadow_live)
         post_shadow_watched = _snapshot(list(watched_dirs))
         watched_delta = _compute_delta(pre_shadow_watched, post_shadow_watched, track_mtime=True)
+    except BaseException as exc:
+        restore_exc = _restore_after_failure(resolved_live_roots, backup_path)
+        if restore_exc is not None:
+            exc.add_note(str(restore_exc))
+        raise
+
+    # Shadow-phase writes must not persist in the audited live roots.
+    _restore_roots(resolved_live_roots, backup_path)
+    _discard_backup(backup_path)
 
     # Verification & Audit
     return_identical = (actor_output == shadow_output)
