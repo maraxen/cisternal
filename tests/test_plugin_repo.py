@@ -7,6 +7,7 @@ Covers `cisternal.assets.launch`, `cisternal.plugin.repo`, and the
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -177,14 +178,28 @@ def test_index_entry_pins_the_release_tag(tmp_path: Path, capsys: pytest.Capture
     assert entry["source"] == {"source": "git-subdir", "url": "maraxen/fx", "path": "plugin", "ref": "v2.3.4"}
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.environ.get("CISTERNAL_E2E_CLAUDE") != "1",
+    reason="opt-in (CISTERNAL_E2E_CLAUDE=1): runs the real claude CLI, which contacts api.anthropic.com",
+)
 @pytest.mark.skipif(shutil.which("claude") is None, reason="needs the real claude CLI")
 def test_real_claude_installs_the_repo_bundle(tmp_path: Path) -> None:
-    """End to end against the real CLI, in a throwaway CLAUDE_CONFIG_DIR."""
-    import os
+    """End to end against the real CLI, in a throwaway CLAUDE_CONFIG_DIR and HOME.
 
+    The child gets a minimal environment rather than ``os.environ``, so the
+    caller's session tokens and unrelated API keys never reach a real CLI
+    that talks to the network.
+    """
     repo = _checkout(tmp_path)
     assert _run(_app(), ["repo-bundle", "--manifest", str(repo / ".praxia" / "manifest.toml")]) == 0
-    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")}
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(home),
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"),
+    }
     for argv in (
         ["claude", "plugin", "validate", str(repo)],
         ["claude", "plugin", "marketplace", "add", str(repo)],
