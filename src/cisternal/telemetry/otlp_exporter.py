@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from opentelemetry.trace import Span, Status, StatusCode
+if TYPE_CHECKING:
+    from opentelemetry.trace import Span
 
 from .exporter import ExporterBase
 from .record import Record
@@ -154,6 +155,8 @@ class OtlpExporter(ExporterBase):
         span.end(end_time=_ns_from_ts(record.ts))
 
     def _export_tool_error(self, record: Record) -> None:
+        from opentelemetry.trace import Status, StatusCode
+
         tool = str(record.fields.get("tool", "mcp.tool"))
         key = self._pair_key(record)
         with self._lock:
@@ -201,6 +204,8 @@ class OtlpExporter(ExporterBase):
         if duration_ms := record.fields.get("duration_ms"):
             span.set_attribute("duration_ms", float(duration_ms))
         if record.fields.get("ok") is False:
+            from opentelemetry.trace import Status, StatusCode
+
             span.set_status(Status(StatusCode.ERROR))
         span.end(end_time=_ns_from_ts(record.ts))
 

@@ -73,13 +73,26 @@ def _file_sha256(path: Path) -> str | None:
         return None
 
 
+def _bundle_candidate_files() -> list[Path]:
+    """Every file ``locate_bundle`` could pick for cisternal's own bundle.
+
+    Statting this superset (packaged snapshot plus each ``.praxia/manifest.toml``
+    above the package) keeps the cache-hit path free of ``cisternal.plugin.app``
+    (cyclopts) and ``importlib.metadata``; a superset only costs extra misses.
+    """
+    pkg_dir = Path(__file__).resolve().parents[1]
+    files = [pkg_dir / "agent_plugin.json"]
+    files.extend(d / ".praxia" / "manifest.toml" for d in pkg_dir.parents)
+    return [f for f in files if f.is_file()]
+
+
 def _cache_fingerprint(
     *,
     claude_json_data: dict[str, Any],
     settings_file: Path,
     local_mcp_file: Path,
     plugin_files: list[Path],
-    bundle_path: Path | None,
+    bundle_files: list[Path],
     manifest_path: Path | None,
 ) -> str:
     """Hash every input the scan result depends on (cisternal PR #72 review #8).
@@ -97,7 +110,7 @@ def _cache_fingerprint(
         "claude_json_servers": sorted(servers) if isinstance(servers, dict) else [],
         "local_mcp": [str(local_mcp_file.resolve()), _file_sha256(local_mcp_file)],
         "plugins": [_file_identity(p) for p in plugin_files],
-        "bundle": _file_identity(bundle_path) if bundle_path else None,
+        "bundle": [_file_identity(p) for p in bundle_files],
         "manifest": _file_identity(manifest_path) if manifest_path else None,
     }
     blob = json.dumps(inputs, sort_keys=True, default=str).encode("utf-8")
@@ -166,16 +179,6 @@ def scan_active_registrations(
     except OSError:
         pass
 
-    # Bundle source: an explicit manifest wins, else cisternal's own bundle.
-    bundle_source: Any = None
-    if not (manifest_path and manifest_path.is_file()):
-        try:
-            from cisternal.plugin.app import PluginSpec, locate_bundle
-
-            bundle_source = locate_bundle(PluginSpec(name="cisternal", package="cisternal"))
-        except Exception:
-            bundle_source = None
-
     # 3. Read host settings and ~/.claude.json read-only
     settings_data = _read_json_file(settings_file)
     claude_json_data = _read_json_file(claude_json_file)
@@ -186,7 +189,7 @@ def scan_active_registrations(
         settings_file=settings_file,
         local_mcp_file=local_mcp_file,
         plugin_files=candidate_files[3:],
-        bundle_path=bundle_source.path if bundle_source is not None else None,
+        bundle_files=_bundle_candidate_files(),
         manifest_path=manifest_path if (manifest_path and manifest_path.is_file()) else None,
     )
 
@@ -358,10 +361,10 @@ def scan_active_registrations(
         from cisternal.assets.manifest import ManifestAssetSource
         from cisternal.assets.snapshot import loads_snapshot
 
+        from cisternal.plugin.app import PluginSpec, locate_bundle
+
         try:
-            source = bundle_source
-            if source is None:
-                raise LookupError("no cisternal bundle located")
+            source = locate_bundle(PluginSpec(name="cisternal", package="cisternal"))
             if source.kind == "snapshot":
                 default_bundle = loads_snapshot(source.path.read_text(encoding="utf-8"))
             else:
