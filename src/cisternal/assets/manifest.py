@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from cisternal.assets.bundle import (
     AgentAsset,
@@ -68,6 +69,8 @@ class ManifestAssetSource:
         # [plugin.export_command] is praxia session argv, not command-file paths.
         commands = ()
         warnings.extend(validate_extension_sections(plugin, self._root))
+        families = _load_families(raw, plugin, name, warnings)
+        verbs = _load_verbs(raw, plugin)
 
         bundle = AssetBundle(
             metadata=metadata,
@@ -77,8 +80,49 @@ class ManifestAssetSource:
             agents=agents,
             hook_specs=hook_specs,
             marketplace=marketplace,
+            families=families,
+            verbs=verbs,
         )
         return LoadReport(bundle=bundle, warnings=tuple(warnings))
+
+
+def _load_families(
+    raw: dict[str, Any],
+    plugin: dict[str, Any],
+    plugin_name: str,
+    warnings: list[str],
+) -> dict[str, tuple[str, ...]]:
+    families: dict[str, list[str]] = {}
+    for src in (raw.get("families"), plugin.get("families")):
+        if not isinstance(src, dict):
+            continue
+        for fam_name, members in src.items():
+            if fam_name not in families:
+                families[fam_name] = []
+            items = members if isinstance(members, list) else [members]
+            for item in items:
+                tool_key = str(item).strip()
+                if not tool_key:
+                    continue
+                if "/" not in tool_key:
+                    if plugin_name:
+                        tool_key = f"{plugin_name}/{tool_key}"
+                    else:
+                        warnings.append(
+                            f"bare tool name {tool_key!r} in family {fam_name!r} "
+                            "has no server prefix and manifest has no plugin name"
+                        )
+                if tool_key not in families[fam_name]:
+                    families[fam_name].append(tool_key)
+    return {k: tuple(v) for k, v in sorted(families.items())}
+
+
+def _load_verbs(raw: dict[str, Any], plugin: dict[str, Any]) -> dict[str, Any]:
+    verbs: dict[str, Any] = {}
+    for src in (raw.get("verbs"), plugin.get("verbs")):
+        if isinstance(src, dict):
+            verbs.update(src)
+    return verbs
 
 
 def _empty_report(warnings: list[str]) -> LoadReport:
@@ -97,7 +141,9 @@ def _read_text(path: Path, warnings: list[str], label: str) -> str | None:
 _SKILL_RESOURCE_DIRS = ("references", "scripts", "assets")
 
 
-def _load_skill_resources(skill_dir: Path, name: str, warnings: list[str]) -> tuple[tuple[str, str], ...]:
+def _load_skill_resources(
+    skill_dir: Path, name: str, warnings: list[str]
+) -> tuple[tuple[str, str], ...]:
     """Walk a skill's ``references/``/``scripts/``/``assets/`` sibling dirs.
 
     Returns ``(relative_path, content)`` pairs, forward-slash paths, sorted
@@ -167,11 +213,15 @@ def _load_skills(
         triggers: tuple[str, ...] = ()
         for raw_triggers in (entry.get("triggers"), fm_keys.get("triggers")):
             if isinstance(raw_triggers, list):
-                triggers += tuple(str(t) for t in raw_triggers if str(t) not in triggers)
+                triggers += tuple(
+                    str(t) for t in raw_triggers if str(t) not in triggers
+                )
 
         fields = skill_fields((entry_keys, fm_keys), warnings, label)
         for key in dropped_keys(fm_keys):
-            warnings.append(f"{label}: frontmatter key {key!r} is not carried by export")
+            warnings.append(
+                f"{label}: frontmatter key {key!r} is not carried by export"
+            )
 
         resources = _load_skill_resources(skill_path.parent, name, warnings)
 
@@ -285,15 +335,25 @@ def _load_mcp(
     argv = tuple(str(part) for part in command)
     launch = str(mcp.get("launch") or "path")
     if launch not in LAUNCH_MODES:
-        warnings.append(f"plugin.mcp.launch {launch!r} is not one of {LAUNCH_MODES}; using 'path'")
+        warnings.append(
+            f"plugin.mcp.launch {launch!r} is not one of {LAUNCH_MODES}; using 'path'"
+        )
         launch = "path"
     uvx_from = str(mcp.get("uvx_from") or "")
     if uvx_from and launch != "uvx":
-        warnings.append("plugin.mcp.uvx_from is set but launch is not 'uvx'; it is ignored")
-    return (McpAsset(name=plugin_name or "mcp", command=argv, launch=launch, uvx_from=uvx_from),)
+        warnings.append(
+            "plugin.mcp.uvx_from is set but launch is not 'uvx'; it is ignored"
+        )
+    return (
+        McpAsset(
+            name=plugin_name or "mcp", command=argv, launch=launch, uvx_from=uvx_from
+        ),
+    )
 
 
-def _load_marketplace(plugin: dict[str, object], plugin_name: str) -> MarketplaceAsset | None:
+def _load_marketplace(
+    plugin: dict[str, object], plugin_name: str
+) -> MarketplaceAsset | None:
     marketplace = plugin.get("marketplace")
     if not isinstance(marketplace, dict):
         return None
@@ -314,7 +374,9 @@ def _load_marketplace(plugin: dict[str, object], plugin_name: str) -> Marketplac
     )
 
 
-_FRONTMATTER_RE = re.compile(r"---[ \t]*\r?\n(?:(.*?)\r?\n)?---[ \t]*(?:\r?\n|$)", re.DOTALL)
+_FRONTMATTER_RE = re.compile(
+    r"---[ \t]*\r?\n(?:(.*?)\r?\n)?---[ \t]*(?:\r?\n|$)", re.DOTALL
+)
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:

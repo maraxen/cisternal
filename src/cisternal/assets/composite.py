@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from cisternal.assets.bundle import (
     AssetBundle,
@@ -57,6 +58,24 @@ def merge_registry(
     )
     conflicts.extend(cmd_conflicts)
 
+    # Merge families dictionaries
+    merged_families: dict[str, tuple[str, ...]] = dict(manifest_report.bundle.families)
+    for fam_name, tools in registry_b.families.items():
+        if fam_name in merged_families:
+            existing = list(merged_families[fam_name])
+            for t in tools:
+                if t not in existing:
+                    existing.append(t)
+            merged_families[fam_name] = tuple(existing)
+        else:
+            merged_families[fam_name] = tuple(tools)
+
+    # Merge verbs dictionaries
+    merged_verbs: dict[str, Any] = {
+        **manifest_report.bundle.verbs,
+        **registry_b.verbs,
+    }
+
     # Registry contributes commands only (L13); other kinds from manifest.
     # The version is final here, so this is where `launch = "uvx"` MCP
     # servers get their pinned `uvx --from <tool>==<version>` command.
@@ -70,11 +89,14 @@ def merge_registry(
         agents=manifest_report.bundle.agents,
         hook_specs=manifest_report.bundle.hook_specs,
         marketplace=manifest_report.bundle.marketplace,
+        families=merged_families,
+        verbs=merged_verbs,
     )
     return LoadReport(
         bundle=resolve_mcp_launch(bundle),
         warnings=tuple(warnings),
         conflicts=tuple(conflicts),
+        advisories=tuple(manifest_report.advisories),
     )
 
 

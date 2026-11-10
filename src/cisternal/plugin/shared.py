@@ -19,9 +19,10 @@ import subprocess
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from cisternal.assets.bundle import AssetBundle
+if TYPE_CHECKING:
+    from cisternal.assets.bundle import AssetBundle
 
 _log = logging.getLogger("cisternal.plugin")
 
@@ -46,7 +47,9 @@ class PublishResult:
 
 def read_plugin_version(plugin_dir: Path) -> str | None:
     try:
-        doc = json.loads((plugin_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        doc = json.loads(
+            (plugin_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         return None
     version = doc.get("version") if isinstance(doc, dict) else None
@@ -116,8 +119,23 @@ def publish_bundle(
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
     write_bundle(files, out)
+    source_payload = dict(source)
+    source_payload["skills_meta"] = {
+        s.name: {
+            "covers_families": list(s.covers_families),
+            "distinctive_strings": list(s.distinctive_strings),
+            "description": s.description,
+            "when_to_use": s.when_to_use,
+        }
+        for s in versioned.skills
+    }
+    if versioned.families:
+        source_payload["families"] = {k: list(v) for k, v in versioned.families.items()}
+    if versioned.verbs:
+        source_payload["verbs"] = versioned.verbs
+
     (out / ".claude-plugin" / SOURCE_SIDECAR).write_text(
-        json.dumps(source, indent=2) + "\n", encoding="utf-8"
+        json.dumps(source_payload, indent=2) + "\n", encoding="utf-8"
     )
 
     merge_marketplace_entry(
@@ -178,9 +196,12 @@ def handle_shadowed(results: list[PublishResult], *, prune: bool) -> None:
         print("rerun with --prune-shadowed to move these into a backup")
         return
     stamp = time.strftime("%Y%m%dT%H%M%S")
-    backup_root = Path(
-        os.environ.get("CISTERNAL_SHADOW_BACKUP_DIR") or "~/.cisternal/shadowed"
-    ).expanduser() / stamp
+    backup_root = (
+        Path(
+            os.environ.get("CISTERNAL_SHADOW_BACKUP_DIR") or "~/.cisternal/shadowed"
+        ).expanduser()
+        / stamp
+    )
     for r, path in shadowed:
         dest = backup_root / path.relative_to(home)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -261,24 +282,32 @@ def refresh_claude(
         return 0
 
     stale = [
-        r for r in results
-        if f"{r.name}@{mkt_name}" in installed and installed[f"{r.name}@{mkt_name}"] != r.version
+        r
+        for r in results
+        if f"{r.name}@{mkt_name}" in installed
+        and installed[f"{r.name}@{mkt_name}"] != r.version
     ]
     for r in results:
         if r.changed and f"{r.name}@{mkt_name}" not in installed:
-            print(f"{r.name}@{mkt_name}: published, not installed -- "
-                  f"claude plugin install {r.name}@{mkt_name} --scope user")
+            print(
+                f"{r.name}@{mkt_name}: published, not installed -- "
+                f"claude plugin install {r.name}@{mkt_name} --scope user"
+            )
     if not stale:
         print("claude: installed plugins already match the published versions")
         return 0
 
     update = subprocess.run(
-        [claude_bin, "plugin", "marketplace", "update", mkt_name], capture_output=True, text=True
+        [claude_bin, "plugin", "marketplace", "update", mkt_name],
+        capture_output=True,
+        text=True,
     )
     if update.returncode != 0:
         _log.error(
             "cisternal: `claude plugin marketplace update %s` failed (exit %d): %s",
-            mkt_name, update.returncode, update.stderr.strip(),
+            mkt_name,
+            update.returncode,
+            update.stderr.strip(),
         )
         return 1
 
@@ -291,7 +320,9 @@ def refresh_claude(
         if upd.returncode != 0:
             _log.error(
                 "cisternal: `claude plugin update %s` failed (exit %d): %s",
-                plugin_id, upd.returncode, upd.stderr.strip(),
+                plugin_id,
+                upd.returncode,
+                upd.stderr.strip(),
             )
             failures += 1
         else:

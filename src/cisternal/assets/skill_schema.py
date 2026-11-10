@@ -42,6 +42,8 @@ FIELD_KINDS: dict[str, str] = {
     "shell": "str",
     "license": "str",
     "compatibility": "str",
+    "covers_families": "list",
+    "distinctive_strings": "list",
 }
 
 #: Keys the loader reads elsewhere (name/description/triggers) and so never
@@ -53,9 +55,7 @@ UNMODELLED = {"hooks", "background", "metadata"}
 
 # Zero-width, control, private-use and direction characters, plus < and >
 # (the docs forbid all of them in a skill name).
-_BAD_NAME_CHARS = re.compile(
-    "[<>\x00-\x1f\x7f​-‏‪-‮⁦-⁩-]"
-)
+_BAD_NAME_CHARS = re.compile("[<>\x00-\x1f\x7f​-‏‪-‮⁦-⁩-]")
 
 
 def norm_key(key: str) -> str:
@@ -81,7 +81,9 @@ def parse_frontmatter(fm: str, warnings: list[str], label: str) -> dict[str, Any
     return {norm_key(str(k)): v for k, v in doc.items()}
 
 
-def _as_list(value: object, key: str, warnings: list[str], label: str) -> tuple[str, ...]:
+def _as_list(
+    value: object, key: str, warnings: list[str], label: str
+) -> tuple[str, ...]:
     if isinstance(value, list):
         return tuple(str(v) for v in value)
     if isinstance(value, str):
@@ -92,7 +94,9 @@ def _as_list(value: object, key: str, warnings: list[str], label: str) -> tuple[
             "(Claude Code accepts a space-separated string; use a YAML list)"
         )
         return (value,) if value.strip() else ()
-    warnings.append(f"{label}: {key!r} must be a list or string, got {type(value).__name__}")
+    warnings.append(
+        f"{label}: {key!r} must be a list or string, got {type(value).__name__}"
+    )
     return ()
 
 
@@ -139,6 +143,21 @@ def check_skill(skill: SkillAsset) -> list[str]:
             f"skill {skill.name!r}: description + when_to_use is {skill.listing_chars} chars, "
             f"over the {LISTING_CAP_CHARS}-char listing cap (the excess is truncated)"
         )
+    if skill.distinctive_strings:
+        if len(skill.distinctive_strings) > 5:
+            out.append(
+                f"skill {skill.name!r}: distinctive_strings has {len(skill.distinctive_strings)} entries, "
+                "over the 5-entry limit"
+            )
+        for s in skill.distinctive_strings:
+            if not s or not s.strip():
+                out.append(
+                    f"skill {skill.name!r}: distinctive_strings contains an empty entry"
+                )
+            elif len(s.strip()) < 3:
+                out.append(
+                    f"skill {skill.name!r}: distinctive_strings entry {s!r} is too short (minimum 3 characters)"
+                )
     return out
 
 

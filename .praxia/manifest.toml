@@ -23,6 +23,10 @@ path = ".praxia/skills/customizing-tools/SKILL.md"
 name = "writing-skill-triggers"
 path = ".praxia/skills/writing-skill-triggers/SKILL.md"
 
+[[plugin.skills]]
+name = "triage-tool"
+path = ".praxia/skills/triage-tool/SKILL.md"
+
 [[plugin.agents]]
 name = "validate-helper"
 path = ".praxia/agents/validate-helper.md"
@@ -32,3 +36,44 @@ tools = []
 [[plugin.workflows]]
 name = "export-dogfood"
 path = ".praxia/workflows/export-dogfood.toml"
+
+[families]
+bathos_query = ["bathos/run_sql", "bathos/get_run", "bathos/validate_sidecar"]
+contemplex_brainstorm = ["contemplex/brainstorm_start", "contemplex/brainstorm_reply", "contemplex/brainstorm_finalize"]
+myxcel_slurm = ["myxcel/job_status", "myxcel/list_jobs", "myxcel/job_logs"]
+
+[verbs.bathos]
+binary = "bth"
+subcommands = { sql = "bathos/run_sql", show = "bathos/get_run", validate-sidecar = "bathos/validate_sidecar" }
+tool_family = "bathos_query"
+global_flags_with_value = []
+exclude = ["run"]
+
+[verbs.contemplex]
+binary = "ctxp"
+subcommands = { start = "contemplex/brainstorm_start", reply = "contemplex/brainstorm_reply", finalize = "contemplex/brainstorm_finalize" }
+tool_family = "contemplex_brainstorm"
+global_flags_with_value = []
+exclude = []
+
+[verbs.myxcel]
+binary = "myxcel"
+subcommands = { status = "myxcel/job_status", list = "myxcel/list_jobs", logs = "myxcel/job_logs" }
+tool_family = "myxcel_slurm"
+global_flags_with_value = []
+exclude = ["submit", "cancel"]
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "cisternal hook pre-tool-use"
+tier = "essential"
+surfaces = ["claude"]
+
+[[plugin.hook_specs]]
+event = "PostToolUse"
+matcher = "mcp__.*"
+script = "cisternal hook post-tool-use"
+tier = "essential"
+surfaces = ["claude"]
+
