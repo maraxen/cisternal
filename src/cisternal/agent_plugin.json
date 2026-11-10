@@ -32,7 +32,7 @@
         "content": "",
         "event": "PostToolUse",
         "matcher": "mcp__.*",
-        "script": "cisternal hook post-tool-use",
+        "script": "cisternal-hook post-tool-use",
         "surfaces": [
           "claude"
         ],
@@ -42,7 +42,7 @@
         "content": "",
         "event": "PreToolUse",
         "matcher": "Bash",
-        "script": "cisternal hook pre-tool-use",
+        "script": "cisternal-hook pre-tool-use",
         "surfaces": [
           "claude"
         ],

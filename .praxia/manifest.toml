@@ -70,14 +70,14 @@ exclude = ["submit", "cancel"]
 [[plugin.hook_specs]]
 event = "PreToolUse"
 matcher = "Bash"
-script = "cisternal hook pre-tool-use"
+script = "cisternal-hook pre-tool-use"
 tier = "essential"
 surfaces = ["claude"]
 
 [[plugin.hook_specs]]
 event = "PostToolUse"
 matcher = "mcp__.*"
-script = "cisternal hook post-tool-use"
+script = "cisternal-hook post-tool-use"
 tier = "essential"
 surfaces = ["claude"]
 
