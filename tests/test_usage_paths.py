@@ -591,3 +591,14 @@ class TestInstallWritesSessionsConfig:
         env.write_text('sessions_dir = "off"\n', encoding="utf-8")
         _ensure_sessions_config(self._bundle("cisternal-hook pre-tool-use"), dry_run=False)
         assert env.read_text(encoding="utf-8") == 'sessions_dir = "off"\n'
+
+    def test_writes_user_config_even_when_env_or_cwd_pyproject_configure_it(
+        self, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hooks in other projects see neither, so install must still write the user config."""
+        from cisternal.plugin.app import _ensure_sessions_config
+
+        monkeypatch.setenv("CISTERNAL_SESSIONS_DIR", str(tmp_path / "from_env"))
+        (tmp_path / "pyproject.toml").write_text("broken = [", encoding="utf-8")
+        _ensure_sessions_config(self._bundle("cisternal-hook pre-tool-use"), dry_run=False)
+        assert "sessions_dir" in env.read_text(encoding="utf-8")

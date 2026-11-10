@@ -499,20 +499,27 @@ def _ensure_sessions_config(bundle: AssetBundle, *, dry_run: bool) -> None:
     """
     if not _ships_cisternal_hooks(bundle):
         return
+    import tomllib  # noqa: PLC0415
+
     from cisternal.usage.paths import (  # noqa: PLC0415
         SESSIONS_CONFIG_KEY,
         default_sessions_value,
-        resolve_sessions_dir,
         user_config_path,
         write_sessions_config,
     )
 
-    resolved, layer = resolve_sessions_dir()
-    if layer != "unconfigured":
-        return
+    # Only the user config counts: hooks run in other projects and do not see
+    # the installing shell's $CISTERNAL_SESSIONS_DIR or its cwd pyproject.toml.
+    config = user_config_path()
+    if config.is_file():
+        try:
+            if SESSIONS_CONFIG_KEY in tomllib.loads(config.read_text(encoding="utf-8")):
+                return
+        except tomllib.TOMLDecodeError as exc:
+            raise PluginError(f"{config}: invalid TOML: {exc}") from exc
     value = default_sessions_value()
     if dry_run:
-        print(f'would write {SESSIONS_CONFIG_KEY} = "{value}" to {user_config_path()}')
+        print(f'would write {SESSIONS_CONFIG_KEY} = "{value}" to {config}')
         return
     config, written = write_sessions_config(value)
     if written:

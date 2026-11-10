@@ -177,3 +177,35 @@ mod.get_pipeline().shutdown()
         check=False,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+@pytest.mark.skipif(not otlp_sdk_available(), reason="opentelemetry-sdk not installed")
+def test_error_paths_set_error_status() -> None:
+    """mcp.tool_error and a named .end with ok=False mark spans ERROR.
+
+    Guards the function-local opentelemetry.trace imports in those two paths
+    (deferred for hook start-up time): export() swallows exceptions, so a
+    broken import would only show up as a missing ERROR status.
+    """
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+    from opentelemetry.trace import StatusCode
+
+    def rec(name: str, ts: float, **fields: object) -> Record:
+        none = dict.fromkeys(
+            ("run_uuid", "mcp_request_id", "task_id", "request_id", "session_id", "phase")
+        )
+        return Record(name=name, ts=ts, fields=fields, **none)
+
+    memory = InMemorySpanExporter()
+    otlp = OtlpExporter(span_exporter=memory)
+    now = time.time()
+    otlp.export(rec("mcp.tool_error", now, tool="t", error="boom"))
+    otlp.export(rec("job.start", now, span_id="s1"))
+    otlp.export(rec("job.end", now + 0.01, span_id="s1", ok=False))
+    otlp.flush()
+
+    by_name = {s.name: s for s in memory.get_finished_spans()}
+    assert by_name["t"].status.status_code is StatusCode.ERROR
+    assert by_name["job"].status.status_code is StatusCode.ERROR
