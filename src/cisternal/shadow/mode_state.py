@@ -245,15 +245,21 @@ def resolve_enforcer_symbol(
                 return None
             mod = importlib.util.module_from_spec(spec)
             sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
-            return getattr(mod, sym_part, None)
+            try:
+                spec.loader.exec_module(mod)
+            except Exception:
+                sys.modules.pop(mod_name, None)
+                raise
+            fn = getattr(mod, sym_part, None)
+            return fn if callable(fn) else None
         except Exception:
             return None
 
     # Fallback to module import (file does not exist on disk)
     try:
         mod = importlib.import_module(path_part)
-        return getattr(mod, sym_part, None)
+        fn = getattr(mod, sym_part, None)
+        return fn if callable(fn) else None
     except Exception:
         return None
 
@@ -270,7 +276,12 @@ def evaluate_gate(
     """Evaluate promotion readiness of a feature against telemetry records.
 
     Implements non-short-circuiting gate evaluation per spec §3.3.2.
+
+    ``mode_data`` is re-validated here (unknown keys, types, ranges → GateCheckError
+    exit 3), so API callers passing a raw dict get the same checks as
+    ``load_mode_state``.
     """
+    _validate_mode_data(mode_data, "<mode_data passed to evaluate_gate>")
     if confidence <= 0.0 or confidence >= 1.0:
         raise GateCheckError(
             f"Confidence level must be strictly between 0.0 and 1.0, got {confidence}",
@@ -344,10 +355,12 @@ def evaluate_gate(
         for iso in isolation_events
         if iso.get("writes_isolated") is False or bool(iso.get("leaked_paths"))
     )
+    # Clean evidence must come from the configured enforcer, not any isolation event.
     has_clean_evidence = any(
         iso.get("writes_isolated") is True
         and isinstance(iso.get("leaked_paths"), list)
         and len(iso["leaked_paths"]) == 0
+        and (not enforcer_symbol or iso.get("enforced_by") == enforcer_symbol)
         for iso in isolation_events
     )
     if not has_clean_evidence:

@@ -535,3 +535,27 @@ def test_live_actor_exception_restores_root_and_propagates(tmp_path: Path) -> No
 
     assert keep.read_text(encoding="utf-8") == "before"
     assert not (live_dir / "partial.tmp").exists()
+
+
+def test_shadow_log_dir_inside_live_root_survives_restore(tmp_path: Path) -> None:
+    """A shadow log dir nested in a live root is a sanctioned sink: not restored, not a diff."""
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    (live_dir / "out.txt").write_text("base", encoding="utf-8")
+    log_dir = live_dir / "shadow_logs"
+
+    def live() -> int:
+        (live_dir / "out.txt").write_text("result", encoding="utf-8")
+        return 1
+
+    def shadow() -> int:
+        (live_dir / "out.txt").write_text("result", encoding="utf-8")
+        (log_dir / "events.jsonl").write_text('{"x": 1}\n', encoding="utf-8")
+        return 1
+
+    res = prove_isolation(
+        live, shadow, live_roots=[live_dir], shadow_log_dir=log_dir, check_roots=[tmp_path]
+    )
+    assert res.passed, res.leaked_paths
+    assert (log_dir / "events.jsonl").read_text(encoding="utf-8") == '{"x": 1}\n'
+    assert (live_dir / "out.txt").read_text(encoding="utf-8") == "base"

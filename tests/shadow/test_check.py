@@ -659,6 +659,54 @@ threshold_basis = "pre-registered calibration"
     assert res.blocking_reasons == ["no_isolation_evidence"]
 
 
+_RAW_MODE: dict[str, Any] = {
+    "feature": {"name": "raw"},
+    "ladder": {"current_stage": "shadow"},
+    "shadow": {
+        "writes_isolated": True,
+        "writes_isolated_enforced_by": "cisternal.shadow.isolation::prove_isolation",
+    },
+    "promotion": {"target_stage": "advisory", "threshold_basis": "pre-registered"},
+}
+
+
+@pytest.mark.parametrize(
+    "promo_extra",
+    [{"min_verdicts": "5"}, {"min_verdict": 5000}, {"allowed_label_sources": "frozen_gold"}],
+)
+def test_evaluate_gate_revalidates_raw_dict(tmp_path: Path, promo_extra: dict[str, Any]) -> None:
+    """API callers passing a raw dict get the same B6/M2 checks as load_mode_state."""
+    from cisternal.shadow.mode_state import evaluate_gate
+
+    mode = json.loads(json.dumps(_RAW_MODE))
+    mode["promotion"].update(promo_extra)
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", _pair_records("raw", 10))
+    with pytest.raises(GateCheckError) as exc_info:
+        evaluate_gate(mode, records_dir)
+    assert exc_info.value.exit_code == 3
+
+
+def test_isolation_evidence_must_come_from_configured_enforcer(tmp_path: Path) -> None:
+    """A clean shadow.isolation event from a different enforcer is not evidence."""
+    from cisternal.shadow.mode_state import evaluate_gate
+
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    recs = _pair_records("raw", 10)
+    recs.append({"name": "shadow.isolation", "ts": 99.0, "fields": {
+        "feature": "raw", "writes_isolated": True, "leaked_paths": [],
+        "enforced_by": "tests/other.py::unrelated"}})
+    _write_jsonl(records_dir / "events.jsonl", recs)
+    res = evaluate_gate(json.loads(json.dumps(_RAW_MODE)), records_dir)
+    assert "no_isolation_evidence" in res.blocking_reasons
+
+
+def test_non_callable_enforcer_is_unimportable(tmp_path: Path) -> None:
+    assert resolve_enforcer_symbol("cisternal.shadow.scoring::PROVENANCE_RANKS", repo_root=tmp_path) is None
+
+
 def test_typo_and_unknown_keys_fail_exit_3(tmp_path: Path) -> None:
     """B6: unknown keys/tables are a configuration error, never a silent pass."""
     base = """

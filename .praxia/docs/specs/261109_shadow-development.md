@@ -360,6 +360,12 @@ Verification Protocol:
      - Scans filesystem outside `live_roots` and `shadow_log_dir`. Any modification outside these allowed directories is appended to `leaked_paths`.
      - All shadow-arm telemetry and scratch writes must be strictly confined to `shadow_log_dir`.
    - **Result**: `passed = live_output_identical and (len(leaked_paths) == 0)`.
+4. **Backup & Restore Contract**:
+   - Before Phase 1, every live root is mirrored to a temporary backup (symlinks kept as symlinks; modes and mtimes preserved). Entries that cannot be read are recorded and are never modified or deleted on restore.
+   - Live roots are restored in place (only differing entries are rewritten or removed, never a wholesale `rmtree`) after Phase 1, after Phase 2, and on any exception. The call therefore leaves live roots in their pre-call state; shadow-phase writes do not persist. Writes by other processes to the live roots during the call are also reverted.
+   - `shadow_log_dir` is the sanctioned shadow sink: it is never restored or deleted, even when nested inside a live root, and it is excluded from the $\Delta_{live}$ / $\Delta_{shadow}$ comparison.
+   - The backup is deleted only after a successful restore. If a restore fails, `IsolationRestoreError` names the backup directory, which is kept on disk for recovery.
+   - The backup mirrors `.git`, `.venv` and similar directories that the snapshot ignores; prefer narrow live roots over a repository root.
    - Optionally emits a `shadow.isolation` event via `cisternal.emit_event` with the result.
 
 ### 3.5 Agent Skill (`developing-in-shadow`)

@@ -189,7 +189,21 @@ def test_writer_falls_back_with_warning_on_malformed_config(
     (repo / "pyproject.toml").write_text("[tool\n", encoding="utf-8")
     got = resolve_writer_log_dir(repo_root=repo, user_config_file=tmp_path / "nope.toml")
     assert got == Path.home() / ".cisternal" / "logs"
-    assert "malformed" in capsys.readouterr().err
+    assert "Malformed" in capsys.readouterr().err
+
+
+def test_writer_never_raises_on_unexpected_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Any resolver failure (e.g. deleted cwd -> FileNotFoundError) falls back, never raises."""
+    import cisternal.shadow.resolution as res_mod
+
+    def boom(**_: object) -> None:
+        raise FileNotFoundError("cwd was deleted")
+
+    monkeypatch.setattr(res_mod, "resolve_log_dir", boom)
+    assert resolve_writer_log_dir() == Path.home() / ".cisternal" / "logs"
+    assert "cwd was deleted" in capsys.readouterr().err
 
 
 def test_malformed_user_config_exit_3(tmp_path: Path, isolated: dict[str, Path]) -> None:

@@ -261,21 +261,22 @@ def resolve_writer_log_dir(
     """
     import sys
 
-    # Local import: cisternal.shadow imports this module (via shadow.events).
-    from cisternal.shadow.resolution import LogDirOffError, ResolutionError, resolve_log_dir
-
     try:
-        return resolve_log_dir(
-            cli_arg=None,
-            repo_root=repo_root,
-            user_config_file=user_config_file,
-        ).path
-    except LogDirOffError:
-        return _legacy_log_dir()
-    except ResolutionError as exc:
+        # Local import: cisternal.shadow imports this module (via shadow.events).
+        from cisternal.shadow.resolution import LogDirOffError, resolve_log_dir
+
+        try:
+            return resolve_log_dir(
+                cli_arg=None,
+                repo_root=repo_root,
+                user_config_file=user_config_file,
+            ).path
+        except LogDirOffError:
+            return _legacy_log_dir()
+    except Exception as exc:  # never raise in the host process (C4/C5)
         legacy = _legacy_log_dir()
         print(
-            f"[cisternal] Warning: log_dir config is malformed ({exc}); "
+            f"[cisternal] Warning: could not resolve log_dir ({exc}); "
             f"writing telemetry to {legacy}",
             file=sys.stderr,
         )
@@ -349,7 +350,9 @@ def init_pipeline(
     BTH_LOG_DIR > CTXP_LOG_DIR, then pyproject ``[tool.cisternal.telemetry]``,
     then the user config ``[telemetry]``. If nothing is configured, or an env
     var explicitly disables log_dir (empty or "none"), the legacy default
-    ~/.cisternal/logs is used. A malformed config file raises ResolutionError.
+    ~/.cisternal/logs is used. A malformed config file, or any other error while
+    resolving (deleted cwd, unresolvable home, symlink loop), is reported on
+    stderr and also falls back to ~/.cisternal/logs; init never raises here.
 
     Args:
         log_dir: Directory for JSONL logs. If None, resolves via ``resolve_writer_log_dir``.

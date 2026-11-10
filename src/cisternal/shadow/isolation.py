@@ -404,30 +404,36 @@ def _sync_entry(live: Path, bak: Path, rel: Path, protected: list[Path]) -> None
     _copy_meta(bst, live)
 
 
-def _restore_roots(roots: list[Path], backup_dir: Path) -> None:
+def _restore_roots(roots: list[Path], backup_dir: Path, keep: list[Path] | None = None) -> None:
     """Restore each live root in place from backup_dir.
 
     Nothing is deleted wholesale: extra entries created by the run are removed, differing
     entries are rewritten, and the backup stays on disk until the caller discards it.
+    Absolute paths in ``keep`` (the shadow log dir) are never modified or deleted, even
+    when they lie inside a live root, so shadow logs and open telemetry files survive.
     """
     entries = _read_manifest(backup_dir, len(roots))
+    keep = [Path(k).resolve() for k in (keep or [])]
     try:
         for idx, r in enumerate(roots):
             entry = entries[idx]
             r_res = Path(r).resolve()
             if not entry["existed"]:
-                if os.path.lexists(r_res):
+                if os.path.lexists(r_res) and not any(k.is_relative_to(r_res) for k in keep):
                     _remove_path(r_res)
                 continue
             protected = [Path(s) for s in entry["skipped"]]
+            protected += [k.relative_to(r_res) for k in keep if k != r_res and k.is_relative_to(r_res)]
             _sync_entry(r_res, backup_dir / f"root_{idx}", Path("."), protected)
     except OSError as exc:
         raise IsolationRestoreError(f"restore of live root failed ({exc})", backup_dir) from exc
 
 
-def _restore_after_failure(roots: list[Path], backup_dir: Path) -> IsolationRestoreError | None:
+def _restore_after_failure(
+    roots: list[Path], backup_dir: Path, keep: list[Path] | None = None
+) -> IsolationRestoreError | None:
     try:
-        _restore_roots(roots, backup_dir)
+        _restore_roots(roots, backup_dir, keep)
     except IsolationRestoreError as exc:
         logger.error("prove_isolation aborted and live restore failed: %s", exc)
         return exc
@@ -466,6 +472,13 @@ def prove_isolation(
 
     Returns:
         IsolationResult with passed, live_output_identical, and leaked_paths.
+
+    Side effects: live_roots are mirrored to a temporary backup (including ``.git``,
+    ``.venv`` and similar, so prefer narrow roots over a repo root) and restored in place
+    to their pre-call state after each run; shadow-phase writes do not persist.
+    ``shadow_log_dir`` is never restored or deleted, even inside a live root. Writes by
+    other processes to the live roots during the call are also reverted. If a restore
+    fails, IsolationRestoreError names the backup directory, which is kept on disk.
     """
     resolved_live_roots = [Path(r).resolve() for r in live_roots]
     resolved_shadow_log_dir = Path(shadow_log_dir).resolve()
@@ -490,6 +503,7 @@ def prove_isolation(
     # The backup is kept on disk unless every step succeeds, so a failed restore never
     # leaves a live root destroyed with no copy of its contents.
     backup_path = Path(tempfile.mkdtemp(prefix="cisternal_isolation_backup_"))
+    keep = [resolved_shadow_log_dir]
     try:
         # Backup live_roots before baseline live run
         _backup_roots(resolved_live_roots, backup_path)
@@ -501,7 +515,7 @@ def prove_isolation(
         live_delta = _compute_delta(pre_live_snap, post_live_snap)
 
         # Reset live_roots to pre-run state
-        _restore_roots(resolved_live_roots, backup_path)
+        _restore_roots(resolved_live_roots, backup_path, keep)
 
         # Phase 2: Shadow run
         pre_shadow_watched = _snapshot(list(watched_dirs))
@@ -515,14 +529,22 @@ def prove_isolation(
         post_shadow_watched = _snapshot(list(watched_dirs))
         watched_delta = _compute_delta(pre_shadow_watched, post_shadow_watched, track_mtime=True)
     except BaseException as exc:
-        restore_exc = _restore_after_failure(resolved_live_roots, backup_path)
+        restore_exc = _restore_after_failure(resolved_live_roots, backup_path, keep)
         if restore_exc is not None:
             exc.add_note(str(restore_exc))
         raise
 
-    # Shadow-phase writes must not persist in the audited live roots.
-    _restore_roots(resolved_live_roots, backup_path)
+    # Shadow-phase writes must not persist in the audited live roots (except shadow_log_dir).
+    _restore_roots(resolved_live_roots, backup_path, keep)
     _discard_backup(backup_path)
+
+    # shadow_log_dir is the sanctioned shadow sink: drop it from the live/shadow comparison
+    # so a log dir nested inside a live root does not count as a live-output difference.
+    def _outside_log_dir(delta: dict[Path, Any]) -> dict[Path, Any]:
+        return {p: v for p, v in delta.items() if not p.is_relative_to(resolved_shadow_log_dir)}
+
+    live_delta = _outside_log_dir(live_delta)
+    shadow_delta = _outside_log_dir(shadow_delta)
 
     # Verification & Audit
     return_identical = (actor_output == shadow_output)
