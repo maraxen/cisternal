@@ -23,6 +23,7 @@ from cisternal.shadow.mode_state import (
     GateCheckError,
     check_mode_state,
     load_mode_state,
+    resolve_enforcer_symbol,
 )
 from cisternal.shadow.resolution import (
     ResolutionError,
@@ -94,10 +95,12 @@ def test_5_layer_resolution_precedence(tmp_path: Path, monkeypatch: pytest.Monke
     assert res_l2.path == env_dir
     assert "environment variable" in res_l2.provenance
 
-    # Env var empty string or "none" disables Layer 2
+    # Env var "none" (or empty) disables resolution entirely: fail closed, exit 3,
+    # no fall-through to pyproject.toml (spec §3.7)
     monkeypatch.setenv("CISTERNAL_MODE_STATE_DIR", "none")
-    res_l2_none = resolve_mode_state_dir(cli_arg=None, repo_root=worktree, user_config_file=cist_config)
-    assert res_l2_none.path == pyproj_dir
+    with pytest.raises(ResolutionError) as disabled_exc:
+        resolve_mode_state_dir(cli_arg=None, repo_root=worktree, user_config_file=cist_config)
+    assert disabled_exc.value.exit_code == 3
 
     # Layer 1: CLI arg wins over all
     res_l1 = resolve_mode_state_dir(cli_arg=cli_dir, repo_root=worktree, user_config_file=cist_config)
@@ -314,11 +317,8 @@ min_labels = 10
 
 def test_cli_check_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """CLI check --json matches schema §3.3.2."""
-    enforcer_file = tmp_path / "enf.py"
-    enforcer_file.write_text("def audit(): return True\n")
-
     toml_path = tmp_path / "feat.toml"
-    toml_path.write_text(f"""
+    toml_path.write_text("""
 [feature]
 name = "cli_check_feat"
 version = "0.1.0"
@@ -326,7 +326,7 @@ version = "0.1.0"
 current_stage = "shadow"
 [shadow]
 writes_isolated = true
-writes_isolated_enforced_by = "{enforcer_file}::audit"
+writes_isolated_enforced_by = "cisternal.shadow.isolation::prove_isolation"
 [scoring]
 positive_label = true
 [promotion]
@@ -342,6 +342,10 @@ threshold_basis = "pre-registered calibration"
     records_dir.mkdir()
     log_file = records_dir / "events.jsonl"
     recs: list[dict[str, Any]] = []
+    # Passing isolation evidence (B1): fail-closed gate needs a clean shadow.isolation event.
+    recs.append({"name": "shadow.isolation", "ts": 0.5, "fields": {
+        "feature": "cli_check_feat", "writes_isolated": True, "leaked_paths": [],
+        "enforced_by": "cisternal.shadow.isolation::prove_isolation"}})
     # 5 TP cases
     for i in range(5):
         recs.append({"name": "shadow.verdict", "ts": float(i), "fields": {"feature": "cli_check_feat", "subject_key": f"s:{i}", "verdict": True}})
@@ -578,3 +582,260 @@ threshold_basis = "pre-registered calibration"
             "0.99",
         ])
     assert exit_info.value.code == 1
+
+
+_PERMISSIVE_PROMO = """
+[promotion]
+target_stage = "advisory"
+min_verdicts = 1
+min_labels = 1
+allowed_label_sources = ["frozen_gold"]
+threshold_basis = "pre-registered calibration"
+"""
+
+
+def _pair_records(feature: str, n: int, *, source: str = "frozen_gold") -> list[dict[str, Any]]:
+    """n clean pairs where verdict == label (TP/TN only)."""
+    recs: list[dict[str, Any]] = []
+    for i in range(n):
+        val = i % 2 == 0
+        recs.append({"name": "shadow.verdict", "ts": float(i), "fields": {
+            "feature": feature, "subject_key": f"s:{i}", "verdict": val}})
+        recs.append({"name": "shadow.label", "ts": float(i), "fields": {
+            "feature": feature, "subject_key": f"s:{i}", "label": val, "label_source": source}})
+    return recs
+
+
+def test_b1_vacuous_isolation_gate_fails_closed(tmp_path: Path) -> None:
+    """B1: writes_isolated=false, no enforcer, clean pairs -> blocked with all isolation reasons."""
+    toml_path = tmp_path / "vac.toml"
+    toml_path.write_text("""
+[feature]
+name = "vac"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = false
+[promotion]
+target_stage = "advisory"
+min_verdicts = 100
+min_labels = 100
+allowed_label_sources = ["frozen_gold"]
+threshold_basis = "pre-registered calibration"
+""")
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", _pair_records("vac", 120))
+    res = check_mode_state(toml_path, records_dir=records_dir)
+    assert res.promotion_permitted is False
+    assert "writes_isolated_declared_false" in res.blocking_reasons
+    assert "enforcer_missing" in res.blocking_reasons
+    assert "no_isolation_evidence" in res.blocking_reasons
+
+
+def test_b1_isolation_evidence_required_even_with_enforcer(tmp_path: Path) -> None:
+    """B1: declared-isolated with an enforcer but no shadow.isolation event is blocked."""
+    toml_path = tmp_path / "noev.toml"
+    toml_path.write_text("""
+[feature]
+name = "noev"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+writes_isolated_enforced_by = "cisternal.shadow.isolation::prove_isolation"
+[promotion]
+target_stage = "advisory"
+min_verdicts = 1
+min_labels = 1
+allowed_label_sources = ["frozen_gold"]
+threshold_basis = "pre-registered calibration"
+""")
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", _pair_records("noev", 10))
+    res = check_mode_state(toml_path, records_dir=records_dir)
+    assert res.promotion_permitted is False
+    assert res.blocking_reasons == ["no_isolation_evidence"]
+
+
+def test_typo_and_unknown_keys_fail_exit_3(tmp_path: Path) -> None:
+    """B6: unknown keys/tables are a configuration error, never a silent pass."""
+    base = """
+[feature]
+name = "typo"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+threshold_basis = "t"
+"""
+    for extra in ("min_verdict = 5000\n", "min_precison = 0.999\n"):
+        p = tmp_path / "typo.toml"
+        p.write_text(base + extra)
+        with pytest.raises(GateCheckError) as exc_info:
+            load_mode_state(p)
+        assert exc_info.value.exit_code == 3
+    p2 = tmp_path / "table.toml"
+    p2.write_text(base + "\n[surprise]\nx = 1\n")
+    with pytest.raises(GateCheckError) as exc_info2:
+        load_mode_state(p2)
+    assert exc_info2.value.exit_code == 3
+    assert "surprise" in str(exc_info2.value)
+
+
+def test_wrong_numeric_types_fail_exit_3(tmp_path: Path) -> None:
+    """M2: type-checked numerics (string rate, bool count, out-of-range rate, negative count)."""
+    base = """
+[feature]
+name = "types"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+threshold_basis = "t"
+"""
+    for extra in ('min_precision = "0.9"\n', "min_verdicts = true\n", "min_recall = 1.5\n", "min_labels = -1\n"):
+        p = tmp_path / "types.toml"
+        p.write_text(base + extra)
+        with pytest.raises(GateCheckError) as exc_info:
+            load_mode_state(p)
+        assert exc_info.value.exit_code == 3, extra
+
+
+def test_unknown_allowed_label_source_fails_exit_3(tmp_path: Path) -> None:
+    """M2: allowed_label_sources must be a subset of the four known sources."""
+    p = tmp_path / "src.toml"
+    p.write_text("""
+[feature]
+name = "src"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+allowed_label_sources = ["owner_confirmed", "gut_feeling"]
+threshold_basis = "t"
+""")
+    with pytest.raises(GateCheckError) as exc_info:
+        load_mode_state(p)
+    assert exc_info.value.exit_code == 3
+    assert "gut_feeling" in str(exc_info.value)
+
+
+def test_m1_disallowed_source_filtered_before_selection(tmp_path: Path) -> None:
+    """M1: a disallowed frozen_gold label must not displace owner_confirmed when only owner_confirmed is allowed."""
+    toml_path = tmp_path / "m1.toml"
+    toml_path.write_text("""
+[feature]
+name = "m1"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+allowed_label_sources = ["owner_confirmed"]
+threshold_basis = "t"
+""")
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    recs: list[dict[str, Any]] = []
+    for i in range(40):
+        recs.append({"name": "shadow.verdict", "ts": float(i), "fields": {"feature": "m1", "subject_key": f"s:{i}", "verdict": True}})
+        recs.append({"name": "shadow.label", "ts": float(i), "fields": {"feature": "m1", "subject_key": f"s:{i}", "label": True, "label_source": "owner_confirmed"}})
+        recs.append({"name": "shadow.label", "ts": float(i), "fields": {"feature": "m1", "subject_key": f"s:{i}", "label": False, "label_source": "frozen_gold"}})
+    _write_jsonl(records_dir / "events.jsonl", recs)
+    res = check_mode_state(toml_path, records_dir=records_dir)
+    assert res.metrics["labels_total"] == 40
+    assert res.metrics["tp"] == 40
+
+
+def test_m4_enforcer_outside_repo_root_rejected(tmp_path: Path) -> None:
+    """M4: absolute paths outside the repo root and `..` escapes are rejected."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (tmp_path / "outside.py").write_text("def audit(): return True\n")
+    (repo / "inside.py").write_text("def audit(): return True\n")
+
+    assert resolve_enforcer_symbol(f"{tmp_path / 'outside.py'}::audit", repo_root=repo) is None
+    assert resolve_enforcer_symbol("../outside.py::audit", repo_root=repo) is None
+    assert callable(resolve_enforcer_symbol("inside.py::audit", repo_root=repo))
+
+
+def test_m4_module_name_unique_per_path(tmp_path: Path) -> None:
+    """M4: two same-stem files in different directories load as distinct modules."""
+    repo = tmp_path / "repo"
+    (repo / "a").mkdir(parents=True)
+    (repo / "b").mkdir()
+    (repo / "a" / "enf.py").write_text("def f(): return 'a'\n")
+    (repo / "b" / "enf.py").write_text("def f(): return 'b'\n")
+    fa = resolve_enforcer_symbol("a/enf.py::f", repo_root=repo)
+    fb = resolve_enforcer_symbol("b/enf.py::f", repo_root=repo)
+    assert fa is not None and fb is not None
+    assert fa() == "a"
+    assert fb() == "b"
+
+
+def test_feature_version_filters_verdicts(tmp_path: Path) -> None:
+    """[promotion] feature_version: verdicts of another version do not count."""
+    toml_path = tmp_path / "fv.toml"
+    toml_path.write_text("""
+[feature]
+name = "fv"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+[promotion]
+target_stage = "advisory"
+feature_version = "v2"
+threshold_basis = "t"
+""")
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "fv", "subject_key": "s:1", "verdict": True, "feature_version": "v1"}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "fv", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+    with pytest.raises(GateCheckError) as exc_info:
+        check_mode_state(toml_path, records_dir=records_dir)
+    assert exc_info.value.exit_code == 2
+    assert "0 matching verdicts" in str(exc_info.value)
+
+
+def test_check_cli_prints_provenance_once_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """L3: check prints the log_dir provenance line to stderr exactly once."""
+    toml_path = tmp_path / "prov.toml"
+    toml_path.write_text("""
+[feature]
+name = "prov"
+[ladder]
+current_stage = "shadow"
+[shadow]
+writes_isolated = true
+writes_isolated_enforced_by = "cisternal.shadow.isolation::prove_isolation"
+[promotion]
+target_stage = "advisory"
+min_verdicts = 1
+min_labels = 1
+allowed_label_sources = ["frozen_gold"]
+threshold_basis = "pre-registered calibration"
+""")
+    log_dir = tmp_path / "env_logs"
+    log_dir.mkdir()
+    _write_jsonl(log_dir / "events.jsonl", _pair_records("prov", 4) + [
+        {"name": "shadow.isolation", "ts": 0.5, "fields": {"feature": "prov", "writes_isolated": True, "leaked_paths": []}}])
+    monkeypatch.setenv("CISTERNAL_TELEMETRY_LOG_DIR", str(log_dir))
+    with pytest.raises(SystemExit) as exit_info:
+        app(["shadow", "check", str(toml_path)])
+    assert exit_info.value.code in (0, 1)
+    err = capsys.readouterr().err
+    assert err.count("resolved log_dir from") == 1

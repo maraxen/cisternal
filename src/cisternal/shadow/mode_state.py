@@ -1,17 +1,24 @@
 """Mode-state TOML configuration parsing and promotion gate checking (spec §3.3).
 
 Evaluates candidate features against pre-registered stage gates:
-- Strict schema validation failing loudly on malformed TOML (exit code 3).
+- Strict schema validation: unknown tables/keys, wrong types and unknown label sources
+  fail loudly (exit code 3); nothing is silently ignored.
 - Non-short-circuiting gate evaluation accumulating all deficits in blocking_reasons.
-- Dynamic enforcer symbol resolution (<relative_file_path>::<symbol_name>).
+- Fail-closed isolation gate: declared isolation, an enforcer and clean isolation
+  evidence are all required for promotion.
+- Dynamic enforcer symbol resolution (<relative_file_path>::<symbol_name>), restricted
+  to files inside the repository root.
 - Read-only immutability contract (never mutates configuration or git).
+
+The telemetry join is shared with `shadow score` (cisternal.shadow.scoring).
 """
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import importlib
 import importlib.util
-import json
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -24,11 +31,45 @@ from cisternal.shadow.resolution import (
     resolve_mode_state_dir,
 )
 from cisternal.shadow.scoring import (
-    PROVENANCE_RANKS,
-    _extract_prediction,
-    _map_to_binary,
-    _unwrap_record,
-    compute_wilson_interval,
+    KNOWN_LABEL_SOURCES,
+    collect_records,
+    confusion,
+    gather_files,
+    summarize,
+)
+
+VALID_STAGES: tuple[str, ...] = ("off", "shadow", "advisory", "enforce")
+REQUIRED_TABLES: tuple[str, ...] = ("feature", "ladder", "shadow", "promotion")
+DEFAULT_ALLOWED_LABEL_SOURCES: tuple[str, ...] = ("frozen_gold", "owner_confirmed", "at_work")
+
+# Per-table allowed keys (spec §3.3.1). Any other table or key is a configuration error.
+ALLOWED_KEYS: dict[str, frozenset[str]] = {
+    "feature": frozenset({"name", "description", "version"}),
+    "ladder": frozenset({"current_stage"}),
+    "shadow": frozenset({"traffic_fraction", "writes_isolated", "writes_isolated_enforced_by"}),
+    "scoring": frozenset({"positive_label"}),
+    "promotion": frozenset({
+        "target_stage",
+        "min_verdicts",
+        "min_labels",
+        "allowed_label_sources",
+        "min_precision",
+        "min_precision_lower_bound",
+        "min_recall",
+        "min_recall_lower_bound",
+        "max_fp_rate",
+        "isolation_violations_max",
+        "threshold_basis",
+        "feature_version",
+    }),
+}
+_COUNT_KEYS = ("min_verdicts", "min_labels", "isolation_violations_max")
+_RATE_KEYS = (
+    "min_precision",
+    "min_precision_lower_bound",
+    "min_recall",
+    "min_recall_lower_bound",
+    "max_fp_rate",
 )
 
 
@@ -51,6 +92,8 @@ class CheckResult:
     blocking_reasons: list[str]
     metrics: dict[str, Any]
     exit_code: int
+    # Human-readable log_dir resolution provenance (CLI stderr only; not in to_dict).
+    log_dir_provenance: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize evaluation result to dictionary matching spec §3.3.2."""
@@ -64,6 +107,83 @@ class CheckResult:
         }
 
 
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_count(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def _validate_mode_data(data: dict[str, Any], where: str) -> None:
+    """Strict schema validation (spec §3.3.1). Raises GateCheckError(exit 3)."""
+
+    def fail(msg: str) -> GateCheckError:
+        return GateCheckError(f"Mode-state TOML at {where}: {msg}", exit_code=3)
+
+    for table, value in data.items():
+        if table not in ALLOWED_KEYS:
+            raise fail(f"unknown table [{table}]")
+        if not isinstance(value, dict):
+            raise fail(f"[{table}] must be a table")
+        for key in value:
+            if key not in ALLOWED_KEYS[table]:
+                raise fail(f"unknown key [{table}] {key}")
+
+    missing = [sec for sec in REQUIRED_TABLES if sec not in data]
+    if missing:
+        raise fail(f"missing required tables: {', '.join(missing)}")
+
+    feat = data["feature"]
+    if not isinstance(feat.get("name"), str) or not feat.get("name", "").strip():
+        raise fail("missing required non-empty string key: [feature] name")
+    for key in ("description", "version"):
+        if key in feat and not isinstance(feat[key], str):
+            raise fail(f"[feature] {key} must be a string")
+
+    ladder = data["ladder"]
+    if ladder.get("current_stage") not in VALID_STAGES:
+        raise fail(f"missing or invalid required key [ladder] current_stage (must be one of {VALID_STAGES})")
+
+    shadow = data["shadow"]
+    if not isinstance(shadow.get("writes_isolated"), bool):
+        raise fail("missing required boolean key: [shadow] writes_isolated")
+    if "traffic_fraction" in shadow:
+        tf = shadow["traffic_fraction"]
+        if not _is_number(tf) or not 0.0 <= tf <= 1.0:
+            raise fail("[shadow] traffic_fraction must be a number in [0, 1]")
+    if "writes_isolated_enforced_by" in shadow and not isinstance(shadow["writes_isolated_enforced_by"], str):
+        raise fail("[shadow] writes_isolated_enforced_by must be a string")
+
+    if "scoring" in data:
+        pl = data["scoring"].get("positive_label", True)
+        if not isinstance(pl, (bool, int, float, str)):
+            raise fail("[scoring] positive_label must be a bool, number or string")
+
+    promo = data["promotion"]
+    if promo.get("target_stage") not in VALID_STAGES:
+        raise fail(f"missing or invalid required key [promotion] target_stage (must be one of {VALID_STAGES})")
+    for key in _COUNT_KEYS:
+        if key in promo and not _is_count(promo[key]):
+            raise fail(f"[promotion] {key} must be a non-negative integer")
+    for key in _RATE_KEYS:
+        if key in promo and (not _is_number(promo[key]) or not 0.0 <= promo[key] <= 1.0):
+            raise fail(f"[promotion] {key} must be a number in [0, 1]")
+    if "allowed_label_sources" in promo:
+        srcs = promo["allowed_label_sources"]
+        if not isinstance(srcs, list) or not all(isinstance(s, str) for s in srcs):
+            raise fail("[promotion] allowed_label_sources must be a list of strings")
+        unknown = sorted(s for s in srcs if s not in KNOWN_LABEL_SOURCES)
+        if unknown:
+            raise fail(
+                f"[promotion] allowed_label_sources contains unknown source(s) {unknown} "
+                f"(must be a subset of {list(KNOWN_LABEL_SOURCES)})"
+            )
+    for key in ("threshold_basis", "feature_version"):
+        if key in promo and not isinstance(promo[key], str):
+            raise fail(f"[promotion] {key} must be a string")
+
+
 def load_mode_state(path: Path | str) -> dict[str, Any]:
     """Load and validate mode-state TOML file per spec §3.3.1.
 
@@ -74,7 +194,7 @@ def load_mode_state(path: Path | str) -> dict[str, Any]:
         Parsed dictionary.
 
     Raises:
-        GateCheckError: If file is missing or contains invalid TOML syntax (exit 3).
+        GateCheckError: If file is missing, malformed, or fails schema validation (exit 3).
     """
     p = Path(path).resolve()
     if not p.is_file():
@@ -89,44 +209,7 @@ def load_mode_state(path: Path | str) -> dict[str, Any]:
             exit_code=3,
         ) from exc
 
-    required_sections = ("feature", "ladder", "shadow", "promotion")
-    missing = [sec for sec in required_sections if sec not in data]
-    if missing:
-        raise GateCheckError(
-            f"Mode-state TOML at {p} missing required tables: {', '.join(missing)}",
-            exit_code=3,
-        )
-
-    # Required key validation per spec §3.3.1 and REV1-03
-    feat = data.get("feature", {})
-    if not isinstance(feat.get("name"), str) or not feat.get("name", "").strip():
-        raise GateCheckError(
-            f"Mode-state TOML at {p} missing required non-empty string key: [feature] name",
-            exit_code=3,
-        )
-
-    valid_stages = ("off", "shadow", "advisory", "enforce")
-    ladder = data.get("ladder", {})
-    if ladder.get("current_stage") not in valid_stages:
-        raise GateCheckError(
-            f"Mode-state TOML at {p} missing or invalid required key [ladder] current_stage (must be one of {valid_stages})",
-            exit_code=3,
-        )
-
-    shadow = data.get("shadow", {})
-    if not isinstance(shadow.get("writes_isolated"), bool):
-        raise GateCheckError(
-            f"Mode-state TOML at {p} missing required boolean key: [shadow] writes_isolated",
-            exit_code=3,
-        )
-
-    promo = data.get("promotion", {})
-    if promo.get("target_stage") not in valid_stages:
-        raise GateCheckError(
-            f"Mode-state TOML at {p} missing or invalid required key [promotion] target_stage (must be one of {valid_stages})",
-            exit_code=3,
-        )
-
+    _validate_mode_data(data, str(p))
     return data
 
 
@@ -136,32 +219,38 @@ def resolve_enforcer_symbol(
 ) -> Callable[..., Any] | None:
     """Resolve an enforcer test symbol formatted as <file_path>::<symbol_name>.
 
-    Resolves relative to repo_root via importlib.util.spec_from_file_location,
-    falling back to module import.
+    An existing file is loaded via importlib.util.spec_from_file_location, but only when it
+    resolves inside repo_root; paths outside it (absolute or via `..`) are rejected (None).
+    A path that does not exist as a file falls back to module import.
 
     Returns:
-        Callable attribute, or None if unimportable.
+        Callable attribute, or None if unimportable or rejected.
     """
     if "::" not in symbol_str:
         return None
 
     path_part, sym_part = symbol_str.split("::", 1)
-    root = repo_root or find_repo_root() or Path.cwd()
-    file_path = (root / path_part).resolve() if not Path(path_part).is_absolute() else Path(path_part)
+    root = (repo_root or find_repo_root() or Path.cwd()).resolve()
+    candidate = Path(path_part)
+    file_path = (candidate if candidate.is_absolute() else root / candidate).resolve()
 
     if file_path.is_file():
+        if not file_path.is_relative_to(root):
+            return None
         try:
-            mod_name = f"_cisternal_enforcer_{file_path.stem}"
+            digest = hashlib.sha256(str(file_path).encode("utf-8")).hexdigest()[:16]
+            mod_name = f"_cisternal_enforcer_{digest}"
             spec = importlib.util.spec_from_file_location(mod_name, file_path)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = mod
-                spec.loader.exec_module(mod)
-                return getattr(mod, sym_part, None)
+            if spec is None or spec.loader is None:
+                return None
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+            return getattr(mod, sym_part, None)
         except Exception:
             return None
 
-    # Fallback to module import
+    # Fallback to module import (file does not exist on disk)
     try:
         mod = importlib.import_module(path_part)
         return getattr(mod, sym_part, None)
@@ -196,72 +285,23 @@ def evaluate_gate(
     positive_label = scoring_cfg.get("positive_label", True)
     promotion = mode_data.get("promotion", {})
     target_stage = str(promotion.get("target_stage", "advisory"))
+    allowed_sources = set(promotion.get("allowed_label_sources", list(DEFAULT_ALLOWED_LABEL_SOURCES)))
 
-    # Scan telemetry records
-    files_to_read: list[Path] = []
-    if verdicts_file:
-        files_to_read.append(Path(verdicts_file))
-    if labels_file:
-        files_to_read.append(Path(labels_file))
-    if records_dir is not None:
-        p_rec = Path(records_dir)
-        if p_rec.is_dir():
-            for f in sorted(p_rec.iterdir()):
-                if f.is_file() and f.name.endswith(".jsonl"):
-                    if f not in files_to_read:
-                        files_to_read.append(f)
+    # Shared scan. Disallowed label sources are filtered BEFORE provenance selection (M1).
+    files = gather_files(records_dir, verdicts_file=verdicts_file, labels_file=labels_file)
+    coll = collect_records(
+        feature,
+        files,
+        labels_file=labels_file,
+        allowed_label_sources=allowed_sources,
+        feature_version=promotion.get("feature_version"),
+    )
+    verdicts = coll.verdicts
+    labels = coll.labels
 
-    verdicts: dict[str, tuple[float, Any]] = {}
-    labels: dict[str, tuple[int, float, Any, str]] = {}
-    isolation_events: list[dict[str, Any]] = []
-    explicit_labels_file_sources: set[str] = set()
-
-    for fpath in files_to_read:
-        try:
-            with fpath.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record_dict = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    name, ts, fields = _unwrap_record(record_dict)
-                    if fields.get("feature") != feature:
-                        continue
-
-                    if name == "shadow.isolation":
-                        isolation_events.append(fields)
-                        continue
-
-                    s_key = fields.get("subject_key")
-                    if not s_key:
-                        continue
-
-                    if name == "shadow.verdict" or "verdict" in fields:
-                        raw_v = fields.get("verdict")
-                        if s_key not in verdicts or ts > verdicts[s_key][0]:
-                            verdicts[s_key] = (ts, raw_v)
-
-                    if name == "shadow.label" or "label" in fields:
-                        raw_lbl = fields.get("label")
-                        source = str(fields.get("label_source", "at_work"))
-                        rank = PROVENANCE_RANKS.get(source, 0)
-                        if labels_file is not None and fpath.resolve() == Path(labels_file).resolve():
-                            explicit_labels_file_sources.add(source)
-                        if s_key not in labels:
-                            labels[s_key] = (rank, ts, raw_lbl, source)
-                        else:
-                            curr_rank, curr_ts, _, _ = labels[s_key]
-                            if (rank > curr_rank) or (rank == curr_rank and ts > curr_ts):
-                                labels[s_key] = (rank, ts, raw_lbl, source)
-        except OSError:
-            continue
-
-    # Refusal on empty telemetry
-    if not verdicts and not labels:
+    # Refusal on empty telemetry. The label refusal looks at ANY-source label presence;
+    # disallowed-only labels are blocked below (insufficient_labels), not refused.
+    if not verdicts and coll.label_records == 0:
         loc = records_dir or verdicts_file or labels_file
         raise GateCheckError(
             f"REFUSAL: 0 verdicts and 0 labels found for feature '{feature}' in {loc}",
@@ -273,7 +313,7 @@ def evaluate_gate(
             f"REFUSAL: feature '{feature}' has 0 matching verdicts in {loc}. Gate check requires at least 1 verdict record.",
             exit_code=2,
         )
-    if not labels:
+    if coll.label_records == 0:
         raise GateCheckError(
             f"REFUSAL: feature '{feature}' has 0 matching labels. Gate check requires at least 1 labeled subject.",
             exit_code=2,
@@ -286,17 +326,32 @@ def evaluate_gate(
     if not threshold_basis or not str(threshold_basis).strip():
         blocking_reasons.append("missing_threshold_basis")
 
-    # 1. Isolation check
+    # 1. Isolation integrity (fail closed; spec §3.3.2)
+    if shadow_cfg.get("writes_isolated") is not True:
+        blocking_reasons.append("writes_isolated_declared_false")
+
     enforcer_symbol = shadow_cfg.get("writes_isolated_enforced_by")
-    if enforcer_symbol:
-        fn = resolve_enforcer_symbol(enforcer_symbol, repo_root=repo_root)
+    if not enforcer_symbol:
+        blocking_reasons.append("enforcer_missing")
+    else:
+        fn = resolve_enforcer_symbol(str(enforcer_symbol), repo_root=repo_root)
         if fn is None:
             blocking_reasons.append(f"enforcer_unimportable:{enforcer_symbol}")
 
-    isolation_violations_count = 0
-    for iso in isolation_events:
-        if iso.get("writes_isolated") is False or bool(iso.get("leaked_paths")):
-            isolation_violations_count += 1
+    isolation_events = coll.isolation_events
+    isolation_violations_count = sum(
+        1
+        for iso in isolation_events
+        if iso.get("writes_isolated") is False or bool(iso.get("leaked_paths"))
+    )
+    has_clean_evidence = any(
+        iso.get("writes_isolated") is True
+        and isinstance(iso.get("leaked_paths"), list)
+        and len(iso["leaked_paths"]) == 0
+        for iso in isolation_events
+    )
+    if not has_clean_evidence:
+        blocking_reasons.append("no_isolation_evidence")
 
     max_iso_violations = promotion.get("isolation_violations_max", 0)
     if isolation_violations_count > max_iso_violations:
@@ -308,80 +363,25 @@ def evaluate_gate(
     if min_verdicts is not None and verdicts_total < min_verdicts:
         blocking_reasons.append(f"insufficient_verdicts:{verdicts_total}/{min_verdicts}")
 
-    allowed_sources = set(promotion.get("allowed_label_sources", ["frozen_gold", "owner_confirmed", "at_work"]))
     if labels_file is not None:
-        disallowed = sorted({s for s in explicit_labels_file_sources if s not in allowed_sources})
+        disallowed = sorted({s for s in coll.labels_file_sources if s not in allowed_sources})
         if disallowed:
             blocking_reasons.append(f"unpermitted_label_sources_present:{','.join(disallowed)}")
 
-    # Filter labels to allowed sources
-    filtered_labels = {
-        sk: data for sk, data in labels.items()
-        if data[3] in allowed_sources
-    }
-    labels_total = len(filtered_labels)
+    labels_total = len(labels)
     min_labels = promotion.get("min_labels")
     if min_labels is not None and labels_total < min_labels:
         blocking_reasons.append(f"insufficient_labels:{labels_total}/{min_labels}")
 
-    # 3. Join and calculate confusion metrics
-    tp = 0
-    fp = 0
-    fn = 0
-    tn = 0
-    common_keys = set(verdicts.keys()) & set(filtered_labels.keys())
-
-    for sk in common_keys:
-        _, raw_v = verdicts[sk]
-        _, _, raw_l, _ = filtered_labels[sk]
-
-        is_valid_pred, pred_val = _extract_prediction(raw_v)
-        if not is_valid_pred:
-            continue
-        pred_ok, is_pred_pos = _map_to_binary(pred_val, positive_label)
-        lbl_ok, is_lbl_pos = _map_to_binary(raw_l, positive_label)
-        if not pred_ok or not lbl_ok:
-            continue
-
-        if is_pred_pos and is_lbl_pos:
-            tp += 1
-        elif is_pred_pos and not is_lbl_pos:
-            fp += 1
-        elif not is_pred_pos and is_lbl_pos:
-            fn += 1
-        else:
-            tn += 1
-
-    n_labeled = tp + fp + fn + tn
-    base_rate = (tp + fn) / n_labeled if n_labeled > 0 else 0.0
-
-    # Precision & Wilson CI
-    if tp + fp > 0:
-        precision = tp / (tp + fp)
-        p_low, p_high = compute_wilson_interval(tp, tp + fp, confidence)
-        precision_ci_lower: float | None = p_low
-        precision_ci_upper: float | None = p_high
-    else:
-        precision = None
-        precision_ci_lower = None
-        precision_ci_upper = None
-
-    # Recall & Wilson CI
-    if tp + fn > 0:
-        recall = tp / (tp + fn)
-        r_low, r_high = compute_wilson_interval(tp, tp + fn, confidence)
-        recall_ci_lower: float | None = r_low
-        recall_ci_upper: float | None = r_high
-    else:
-        recall = None
-        recall_ci_lower = None
-        recall_ci_upper = None
-
-    # FPR
-    if fp + tn > 0:
-        fp_rate: float | None = fp / (fp + tn)
-    else:
-        fp_rate = None
+    # 3. Shared join and confusion metrics
+    conf = confusion(verdicts, labels, positive_label)
+    s = summarize(conf, confidence)
+    precision = s.precision
+    precision_ci_lower = s.precision_ci_lower
+    recall = s.recall
+    recall_ci_lower = s.recall_ci_lower
+    fp_rate = s.fp_rate
+    base_rate = s.base_rate
 
     # 4. Precision gates
     min_prec = promotion.get("min_precision")
@@ -438,19 +438,21 @@ def evaluate_gate(
     metrics = {
         "verdicts_total": verdicts_total,
         "labels_total": labels_total,
-        "tp": tp,
-        "fp": fp,
-        "tn": tn,
-        "fn": fn,
+        "tp": s.tp,
+        "fp": s.fp,
+        "tn": s.tn,
+        "fn": s.fn,
         "base_rate": base_rate,
         "precision": round(precision, 4) if precision is not None else None,
         "precision_ci_lower": round(precision_ci_lower, 4) if precision_ci_lower is not None else None,
-        "precision_ci_upper": round(precision_ci_upper, 4) if precision_ci_upper is not None else None,
+        "precision_ci_upper": round(s.precision_ci_upper, 4) if s.precision_ci_upper is not None else None,
         "recall": round(recall, 4) if recall is not None else None,
         "recall_ci_lower": round(recall_ci_lower, 4) if recall_ci_lower is not None else None,
-        "recall_ci_upper": round(recall_ci_upper, 4) if recall_ci_upper is not None else None,
+        "recall_ci_upper": round(s.recall_ci_upper, 4) if s.recall_ci_upper is not None else None,
         "fp_rate": round(fp_rate, 4) if fp_rate is not None else None,
         "isolation_violations": isolation_violations_count,
+        "invalid_records": conf.invalid_records + coll.unjoinable,
+        "malformed_lines": coll.malformed_lines,
     }
 
     return CheckResult(
@@ -495,15 +497,18 @@ def check_mode_state(
     mode_data = load_mode_state(toml_path)
 
     # Resolve log_dir via 5-layer hierarchy if records_dir and overrides not explicitly passed
+    provenance: str | None = None
     if records_dir is None and verdicts_file is None and labels_file is None:
         res_log = resolve_log_dir(cli_arg=None, repo_root=root)
         effective_records_dir = res_log.path
+        provenance = res_log.provenance
     elif records_dir is not None:
         effective_records_dir = Path(records_dir).resolve()
+        provenance = f"resolved log_dir from CLI argument ({effective_records_dir})"
     else:
         effective_records_dir = None
 
-    return evaluate_gate(
+    result = evaluate_gate(
         mode_data,
         effective_records_dir,
         verdicts_file=verdicts_file,
@@ -511,3 +516,4 @@ def check_mode_state(
         repo_root=root,
         confidence=confidence,
     )
+    return dataclasses.replace(result, log_dir_provenance=provenance)

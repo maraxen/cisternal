@@ -401,3 +401,120 @@ def test_score_iso8601_timestamps_and_flat_json_records(tmp_path: Path) -> None:
     assert res.tp == 1
     assert res.precision == 1.0
     assert res.recall == 1.0
+
+
+def test_self_labelling_verdict_record_with_label_field_refused(tmp_path: Path) -> None:
+    """B2: a shadow.verdict record carrying a 'label' field is NOT a ground-truth label."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {
+            "feature": "f", "subject_key": "s:1", "verdict": True, "label": True}},
+    ])
+    with pytest.raises(ScoringRefusalError) as exc_info:
+        score_feature("f", records_dir=records_dir)
+    assert exc_info.value.exit_code == 2
+
+
+def test_nameless_flat_record_with_verdict_and_label_is_invalid(tmp_path: Path) -> None:
+    """B2: a flat nameless record with both verdict and label keys is ambiguous -> invalid, not both."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.jsonl", [
+        {"feature": "amb", "subject_key": "s:1", "verdict": True, "label": True, "ts": 1.0},
+        {"name": "shadow.label", "ts": 1.0, "fields": {
+            "feature": "amb", "subject_key": "s:2", "label": True, "label_source": "frozen_gold"}},
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {
+            "feature": "amb", "subject_key": "s:2", "verdict": True}},
+    ])
+    res = score_feature("amb", records_dir=records_dir)
+    assert res.labels_total == 1
+    assert res.verdicts_total == 1
+    assert res.tp == 1
+    assert res.invalid_records == 1
+
+
+def test_rotated_backup_files_are_joined(tmp_path: Path) -> None:
+    """B3: RotatingFileHandler backups (*.jsonl.N) are read alongside *.jsonl."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.h.1.jsonl.1", [
+        {"name": "shadow.label", "ts": 1.0, "fields": {
+            "feature": "rot", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+    _write_jsonl(records_dir / "events.h.1.jsonl", [
+        {"name": "shadow.verdict", "ts": 2.0, "fields": {
+            "feature": "rot", "subject_key": "s:1", "verdict": True}},
+    ])
+    res = score_feature("rot", records_dir=records_dir)
+    assert res.labels_total == 1
+    assert res.tp == 1
+
+
+def test_no_timestamp_later_write_wins(tmp_path: Path) -> None:
+    """L1: without ts, the later line wins (not the first); rotated backups are read oldest-first."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    # Flat records without ts: verdict False then True, both in one file (later line wins).
+    _write_jsonl(records_dir / "events.jsonl", [
+        {"feature": "nots", "subject_key": "s:1", "verdict": False},
+        {"feature": "nots", "subject_key": "s:1", "verdict": True},
+        {"name": "shadow.label", "ts": 1.0, "fields": {
+            "feature": "nots", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+    res = score_feature("nots", records_dir=records_dir)
+    assert res.tp == 1
+    assert res.fp == 0
+
+
+def test_no_timestamp_rotated_backup_is_older(tmp_path: Path) -> None:
+    """L1: the live file is newer than its .1 backup, so its no-ts verdict wins."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    _write_jsonl(records_dir / "events.h.1.jsonl.1", [
+        {"feature": "rotn", "subject_key": "s:1", "verdict": True},
+    ])
+    _write_jsonl(records_dir / "events.h.1.jsonl", [
+        {"feature": "rotn", "subject_key": "s:1", "verdict": False},
+        {"name": "shadow.label", "ts": 1.0, "fields": {
+            "feature": "rotn", "subject_key": "s:1", "label": False, "label_source": "frozen_gold"}},
+    ])
+    res = score_feature("rotn", records_dir=records_dir)
+    assert res.tn == 1
+    assert res.tp == 0
+
+
+def test_malformed_lines_and_non_dict_records_are_counted_not_fatal(tmp_path: Path) -> None:
+    """Crash holes: malformed JSON, non-dict JSON and list subject_key are counted, never raised."""
+    records_dir = tmp_path / "logs"
+    records_dir.mkdir()
+    good = [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "mal", "subject_key": "s:1", "verdict": True}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "mal", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "mal", "subject_key": ["not", "hashable"], "verdict": True}},
+    ]
+    lines = [json.dumps(r) for r in good] + ["{not json", "[1, 2]", "42"]
+    (records_dir / "events.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    res = score_feature("mal", records_dir=records_dir)
+    assert res.tp == 1
+    assert res.malformed_lines == 3
+    assert res.invalid_records == 1
+
+
+def test_cli_score_resolution_provenance_printed_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """L3: resolved log_dir provenance is printed exactly once, not doubled."""
+    log_dir = tmp_path / "env_logs"
+    log_dir.mkdir()
+    _write_jsonl(log_dir / "events.jsonl", [
+        {"name": "shadow.verdict", "ts": 1.0, "fields": {"feature": "pv", "subject_key": "s:1", "verdict": True}},
+        {"name": "shadow.label", "ts": 1.0, "fields": {"feature": "pv", "subject_key": "s:1", "label": True, "label_source": "frozen_gold"}},
+    ])
+    monkeypatch.setenv("CISTERNAL_TELEMETRY_LOG_DIR", str(log_dir))
+    with pytest.raises(SystemExit) as exit_info:
+        app(["shadow", "score", "pv"])
+    assert exit_info.value.code == 0
+    err = capsys.readouterr().err
+    assert err.count("resolved log_dir from") == 1
+    assert "resolved log_dir from resolved" not in err

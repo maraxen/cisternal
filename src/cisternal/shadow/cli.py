@@ -90,11 +90,12 @@ def shadow_score(
     if records_dir is None and verdicts_file is None and labels_file is None:
         try:
             res_log = resolve_log_dir(cli_arg=None)
-            effective_records_dir = res_log.path
-            print(f"resolved log_dir from {res_log.provenance} ({res_log.path})", file=sys.stderr)
         except ResolutionError as exc:
             print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
+            raise SystemExit(exc.exit_code) from exc
+        effective_records_dir = res_log.path
+        # `provenance` already reads "resolved log_dir from ...": print it once.
+        print(res_log.provenance, file=sys.stderr)
     elif records_dir is not None:
         print(f"resolved log_dir from CLI argument ({records_dir})", file=sys.stderr)
 
@@ -134,7 +135,7 @@ def shadow_score(
 
     print(f"Feature: {result.feature}")
     print(f"  Verdicts Total:      {result.verdicts_total} (Unlabelled: {result.unlabelled_verdicts})")
-    print(f"  Labels Total:        {result.labels_total} (Invalid Records: {result.invalid_records})")
+    print(f"  Labels Total:        {result.labels_total} (Invalid Records: {result.invalid_records}, Malformed Lines: {result.malformed_lines})")
     print(f"  Confusion Matrix:    TP={result.tp}, FP={result.fp}, TN={result.tn}, FN={result.fn}")
     print(f"  Base Rate:           {result.base_rate:.4f}")
     print(f"  Precision:           {prec_str}")
@@ -207,6 +208,13 @@ def shadow_check(
     except (GateCheckError, ResolutionError) as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(exc.exit_code) from exc
+    except (TypeError, ValueError) as exc:
+        # Unexpected configuration shape must never surface as a traceback.
+        print(f"Mode-state configuration error: {exc}", file=sys.stderr)
+        raise SystemExit(3) from exc
+
+    if result.log_dir_provenance:
+        print(result.log_dir_provenance, file=sys.stderr)
 
     if json_output:
         print(json.dumps(result.to_dict(), indent=2))
@@ -232,5 +240,6 @@ def shadow_check(
     print(f"    Recall:    {m.get('recall')} [CI: {m.get('recall_ci_lower')} .. {m.get('recall_ci_upper')}]")
     print(f"    FP Rate:   {m.get('fp_rate')}")
     print(f"    Isolation Violations: {m.get('isolation_violations')}")
+    print(f"    Invalid Records: {m.get('invalid_records')} | Malformed Lines: {m.get('malformed_lines')}")
 
     raise SystemExit(result.exit_code)
