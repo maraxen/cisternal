@@ -82,6 +82,9 @@ from cisternal.export.base import Emitter
 from cisternal.export.claude import ClaudeEmitter
 from cisternal.export.write import write_bundle
 
+# Shadow development pattern
+from cisternal import shadow
+
 
 def init(
     log_dir: str | Path | None = None,
@@ -222,4 +225,6 @@ __all__ = [
     "Emitter",
     "ClaudeEmitter",
     "write_bundle",
+    # Shadow development pattern
+    "shadow",
 ]
