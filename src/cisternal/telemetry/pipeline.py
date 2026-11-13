@@ -15,6 +15,7 @@ import logging
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 from .context import _set_git_state
@@ -148,23 +149,47 @@ class EventPipeline:
             self._drop_count += 1
 
     def shutdown(self, timeout: float = 2.0) -> None:
-        """Flush and shutdown the pipeline gracefully.
+        """Drain queued records, then flush and close exporters.
+
+        A True return from an emit helper means the record was enqueued, not
+        written. This method writes that queue out: it puts a sentinel on the
+        queue and joins the listener so every record ahead of the sentinel is
+        exported. Exporters are flushed and then closed, and flush runs only
+        after the drain. ``timeout`` (default 2.0 seconds) bounds the call.
+        If the listener is still alive when that budget is spent, ``stop()``
+        is the fallback and records still queued can be lost.
 
         Args:
-            timeout: Max time to wait for listener thread to drain.
+            timeout: Maximum seconds to wait. Shutdown does not exceed this.
         """
         if self._shutdown:
             return
 
         self._shutdown = True
+        deadline = time.monotonic() + timeout
 
-        # Signal listener to stop after draining
+        def _remaining() -> float:
+            return max(0.0, deadline - time.monotonic())
+
+        # Sentinel ends the listener loop after earlier records are exported.
+        # stop() sets _stop_event, which the loop checks before the next get,
+        # so it must not run until the join has timed out.
         try:
-            self._queue.put(None, timeout=timeout)
+            self._queue.put(None, timeout=_remaining())
         except queue.Full:
             pass
 
-        # Flush exporters
+        try:
+            self._listener.join(timeout=_remaining())
+            if self._listener.is_alive():
+                self._listener.stop()
+                self._listener.join(timeout=_remaining())
+        except Exception as e:
+            print(
+                f"[cisternal] Listener thread shutdown failed: {e}",
+                file=sys.stderr,
+            )
+
         for exporter in self._exporters:
             try:
                 exporter.flush()
@@ -174,17 +199,6 @@ class EventPipeline:
                     file=sys.stderr,
                 )
 
-        # Stop listener thread
-        try:
-            self._listener.stop()
-            self._listener.join(timeout=timeout)
-        except Exception as e:
-            print(
-                f"[cisternal] Listener thread shutdown failed: {e}",
-                file=sys.stderr,
-            )
-
-        # Close exporters
         for exporter in self._exporters:
             try:
                 exporter.close()
