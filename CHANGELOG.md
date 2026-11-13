@@ -7,6 +7,12 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+### Fixed
+
+- `EventPipeline.shutdown()` drains records already on the queue before it
+  stops the listener. A `True` return from `cisternal.shadow.events.emit_*`
+  means the record was enqueued, not that it has been written.
+
 ## 0.1.7 (2026-11-10)
 
 Two new subsystems: the shared shadow-development pattern (`cisternal.shadow`) and tool-surface

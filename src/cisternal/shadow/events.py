@@ -22,9 +22,9 @@ def _emit_shadow_record(name: str, level: int | str | None, fields: dict[str, An
     """Emit a shadow record through the telemetry pipeline.
 
     Returns:
-        True if record was accepted and enqueued by an active pipeline.
-        False if pipeline is uninitialized, shutdown, full, or event is below min_level.
-        Never raises.
+        True means the record was enqueued, not written. False if the
+        pipeline is uninitialized, shut down, full, or the event is below
+        min_level. Never raises.
     """
     try:
         pipeline = get_pipeline()
@@ -78,7 +78,8 @@ def emit_verdict(
         **extra_fields: Additional domain metadata attached to payload fields.
 
     Returns:
-        True if enqueued into active pipeline; False otherwise. Never raises.
+        True means the record was enqueued, not written. False otherwise.
+        Never raises.
     """
     fields: dict[str, Any] = {
         "feature": feature,
@@ -114,7 +115,8 @@ def emit_label(
         **extra_fields: Additional domain metadata attached to payload fields.
 
     Returns:
-        True if enqueued into active pipeline; False otherwise. Never raises.
+        True means the record was enqueued, not written. False otherwise.
+        Never raises.
     """
     fields: dict[str, Any] = {
         "feature": feature,
@@ -147,7 +149,8 @@ def emit_isolation(
         **extra_fields: Additional domain metadata attached to payload fields.
 
     Returns:
-        True if enqueued into active pipeline; False otherwise. Never raises.
+        True means the record was enqueued, not written. False otherwise.
+        Never raises.
     """
     fields: dict[str, Any] = {
         "feature": feature,
