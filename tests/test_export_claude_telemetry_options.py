@@ -144,7 +144,14 @@ def test_other_surfaces_antigravity_plugin_installs_enabled(bundle: AssetBundle,
         target.write_text(content, encoding="utf-8")
     home = tmp_path / "home"
     home.mkdir()
-    env = {**os.environ, "HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")}
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "XDG_DATA_HOME": str(home / ".local" / "share"),
+        "XDG_STATE_HOME": str(home / ".local" / "state"),
+        "XDG_CACHE_HOME": str(home / ".cache"),
+    }
     installed = subprocess.run(
         ["agy", "plugin", "install", str(plugin)], capture_output=True, text=True, timeout=120, check=False, env=env
     )

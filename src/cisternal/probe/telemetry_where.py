@@ -56,12 +56,13 @@ HOW_TO_SET: tuple[tuple[str, str], ...] = (
     ),
     (
         "copilot, cursor, jcode, pi",
-        "no per-user plugin option is documented; export the variables where the shell and the agent share them, "
-        "or use the machine file",
+        "no per-user plugin option is documented; exporting the variables may not reach an MCP server (Copilot's docs "
+        "say only PATH is inherited for servers added with /mcp add), but the machine file always does",
     ),
     (
         "any surface",
-        "edit [telemetry.{consumer}] in ~/.config/cisternal/config.toml (a consumer's own command may write it)",
+        "edit [telemetry.{consumer}] in ~/.config/cisternal/config.toml, or $XDG_CONFIG_HOME/cisternal/config.toml "
+        "when that is set (a consumer's own command may write it)",
     ),
 )
 
