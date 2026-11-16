@@ -161,6 +161,15 @@ def test_where_how_to_set_lists_every_surface_in_text_and_json(world: World) -> 
     assert json.loads(format_where_json(report))["how_to_set"] == report["how_to_set"]
 
 
+def test_where_how_to_set_names_the_asked_consumer_and_nothing_maraxiom_specific(world: World) -> None:
+    report = world.report(consumer="bathos")
+    routes = " ".join(item["route"] for item in report["how_to_set"])
+    assert "[telemetry.bathos]" in routes
+    assert "{consumer}" not in routes and "<consumer>" not in routes
+    assert "mrx" not in routes and "maraxiom" not in routes.lower()
+    assert "apply to every cisternal consumer" in routes
+
+
 def test_where_how_to_set_never_claims_an_unprobed_surface_is_verified(world: World) -> None:
     routes = " ".join(item["route"] for item in world.report()["how_to_set"]).lower()
     assert "verified" not in routes.replace("unverified", "")

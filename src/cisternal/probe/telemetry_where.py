@@ -45,8 +45,9 @@ HOW_TO_SET: tuple[tuple[str, str], ...] = (
     ("claude", "set the plugin's options in /plugin configure; the saved option is read from Claude's settings.json"),
     (
         "antigravity",
-        "export CISTERNAL_TELEMETRY_SPANS / CISTERNAL_TELEMETRY_SHADOW (on or off) in the environment the agent runs in; "
-        "the agy validator says an MCP server inherits it (not probed in a live session)",
+        "export CISTERNAL_TELEMETRY_SPANS / CISTERNAL_TELEMETRY_SHADOW (on or off; they apply to every cisternal "
+        "consumer) in the environment the agent runs in; the agy validator says an MCP server inherits it "
+        "(not probed in a live session)",
     ),
     (
         "opencode",
@@ -60,8 +61,7 @@ HOW_TO_SET: tuple[tuple[str, str], ...] = (
     ),
     (
         "any surface",
-        "edit [telemetry.<consumer>] in ~/.config/cisternal/config.toml; a consumer's own command writes it "
-        "(maraxiom: mrx telemetry enable|disable)",
+        "edit [telemetry.{consumer}] in ~/.config/cisternal/config.toml (a consumer's own command may write it)",
     ),
 )
 
@@ -154,7 +154,7 @@ def build_where_report(
         "behaviours": behaviours,
         "records": {"cisternal_log_dir": log_dir, "consumer_records_dir": own_records},
         "mode_state": mode_state,
-        "how_to_set": [{"surface": surface, "route": route} for surface, route in HOW_TO_SET],
+        "how_to_set": [{"surface": surface, "route": route.format(consumer=consumer)} for surface, route in HOW_TO_SET],
         "errors": errors,
         "malformed": any(d is None for d in decisions.values()) or any("malformed" in e for e in errors),
     }
