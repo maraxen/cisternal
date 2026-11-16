@@ -14,7 +14,8 @@ Resolution order, the same in every process, first hit wins:
 3. the whole-consumer variable ``CISTERNAL_TELEMETRY``;
 4. ``[tool.cisternal.telemetry]`` then ``[tool.cisternal.telemetry.<consumer>]`` in the repository's
    ``pyproject.toml`` (the repository root is found the way :mod:`cisternal.shadow.resolution` finds it);
-5. the user's saved Claude Code plugin option, read from ``settings.json`` (read-only);
+5. the user's saved Claude Code plugin option, read from the user's ``settings.json`` ``pluginConfigs``
+   (read-only; ``enabledPlugins`` only chooses between several marketplaces' entries for one plugin);
 6. ``[telemetry]`` then ``[telemetry.<consumer>]`` in ``${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml``;
 7. the consumer's registered default;
 8. off.
@@ -322,35 +323,50 @@ def _plugin_option(
         return None, error
     if data is None:
         return None, None
-    enabled_plugins = data.get("enabledPlugins", {})
-    if not isinstance(enabled_plugins, dict):
-        return None, f"{settings_path}: 'enabledPlugins' is not an object"
-    prefix = f"{registration.plugin}@"
-    enabled = sorted(k for k, v in enabled_plugins.items() if v is True and k.startswith(prefix))
-    if not enabled:
-        return None, None
-    if len(enabled) > 1:
-        return None, f"{settings_path}: more than one enabled entry for plugin {registration.plugin!r}: {enabled}"
     plugin_configs = data.get("pluginConfigs", {})
     if not isinstance(plugin_configs, dict):
         return None, f"{settings_path}: 'pluginConfigs' is not an object"
-    entry = plugin_configs.get(enabled[0])
+    # Match pluginConfigs keys directly. Claude Code installs have scopes (user, project, local) and records
+    # `enabledPlugins` in the matching settings file, so a project-scope install has no user-level
+    # `enabledPlugins` entry although its saved options live in the user's `pluginConfigs`. `enabledPlugins`
+    # is therefore used only to choose between several marketplaces' entries for the same plugin.
+    prefix = f"{registration.plugin}@"
+    candidates = sorted(k for k in plugin_configs if isinstance(k, str) and k.startswith(prefix))
+    if not candidates:
+        return None, None
+    if len(candidates) == 1:
+        key = candidates[0]
+    else:
+        enabled_plugins = data.get("enabledPlugins", {})
+        if not isinstance(enabled_plugins, dict):
+            return None, (
+                f"{settings_path}: pluginConfigs has entries for {candidates} and 'enabledPlugins' "
+                "is not an object, so the enabled one cannot be chosen"
+            )
+        enabled = [k for k in candidates if enabled_plugins.get(k) is True]
+        if len(enabled) != 1:
+            return None, (
+                f"{settings_path}: pluginConfigs has entries for {candidates} and {len(enabled)} of them "
+                "are enabled, so the one to read is ambiguous"
+            )
+        key = enabled[0]
+    entry = plugin_configs[key]
     if entry is None:
         return None, None
     if not isinstance(entry, dict):
-        return None, f"{settings_path}: pluginConfigs[{enabled[0]!r}] is not an object"
+        return None, f"{settings_path}: pluginConfigs[{key!r}] is not an object"
     options = entry.get("options")
     if options is None:
         return None, None
     if not isinstance(options, dict):
-        return None, f"{settings_path}: pluginConfigs[{enabled[0]!r}].options is not an object"
+        return None, f"{settings_path}: pluginConfigs[{key!r}].options is not an object"
     option_key = registration.option_for(behaviour)
     if option_key not in options:
         return None, None
     raw = options[option_key]
     if not isinstance(raw, str) or raw not in PLUGIN_OPTION_VALUES:
         return None, (
-            f"{settings_path}: pluginConfigs[{enabled[0]!r}].options.{option_key} is {raw!r}; "
+            f"{settings_path}: pluginConfigs[{key!r}].options.{option_key} is {raw!r}; "
             f"expected one of {PLUGIN_OPTION_VALUES}"
         )
     if raw == "inherit":

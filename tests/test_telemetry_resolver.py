@@ -290,14 +290,37 @@ def test_files_and_settings_on_and_off_are_honoured(env: Env, value: str, expect
     assert (d.enabled, d.layer, d.ok) == (expected, "saved plugin option", True)
 
 
-def test_files_and_settings_a_disabled_plugin_entry_is_ignored(env: Env) -> None:
+@pytest.mark.parametrize(
+    "enabled_plugins",
+    [pytest.param(None, id="no-enabledPlugins"), pytest.param({"maraxiom@cisternal-local": False}, id="disabled-here")],
+)
+def test_files_and_settings_a_saved_option_applies_without_a_user_level_enabled_entry(
+    env: Env, enabled_plugins: object
+) -> None:
+    """Claude Code installs have scopes: a project-scope install has no user `enabledPlugins` entry, but its
+    saved options live in the user's `pluginConfigs`. Ignoring them would silently drop a user's opt-out."""
+    data: dict[str, object] = {
+        "pluginConfigs": {"maraxiom@cisternal-local": {"options": {"telemetry_shadow": "off"}}},
+    }
+    if enabled_plugins is not None:
+        data["enabledPlugins"] = enabled_plugins
+    env.settings(data)
+    d = env.get("shadow")
+    assert (d.enabled, d.layer) == (False, "saved plugin option")
+
+
+def test_files_and_settings_several_marketplaces_are_told_apart_by_enabled_plugins(env: Env) -> None:
     env.settings(
         {
-            "enabledPlugins": {"maraxiom@cisternal-local": False},
-            "pluginConfigs": {"maraxiom@cisternal-local": {"options": {"telemetry_shadow": "off"}}},
+            "enabledPlugins": {"maraxiom@a": False, "maraxiom@b": True},
+            "pluginConfigs": {
+                "maraxiom@a": {"options": {"telemetry_shadow": "on"}},
+                "maraxiom@b": {"options": {"telemetry_shadow": "off"}},
+            },
         }
     )
-    assert env.get("shadow").layer == "registered default"
+    d = env.get("shadow")
+    assert (d.enabled, d.layer, d.ok) == (False, "saved plugin option", True)
 
 
 def test_files_and_settings_another_plugins_entry_is_ignored(env: Env) -> None:
@@ -314,15 +337,33 @@ def test_files_and_settings_another_plugins_entry_is_ignored(env: Env) -> None:
         pytest.param(lambda e: e.plugin_option("telemetry_shadow", True), id="wrong-type"),
         pytest.param(
             lambda e: e.settings(
-                {"enabledPlugins": {"maraxiom@a": True, "maraxiom@b": True}, "pluginConfigs": {}}
+                {
+                    "enabledPlugins": {"maraxiom@a": True, "maraxiom@b": True},
+                    "pluginConfigs": {"maraxiom@a": {"options": {}}, "maraxiom@b": {"options": {}}},
+                }
             ),
             id="two-enabled-entries",
+        ),
+        pytest.param(
+            lambda e: e.settings(
+                {
+                    "enabledPlugins": {"maraxiom@a": False},
+                    "pluginConfigs": {"maraxiom@a": {"options": {}}, "maraxiom@b": {"options": {}}},
+                }
+            ),
+            id="two-entries-none-enabled",
         ),
         pytest.param(
             lambda e: e.settings({"enabledPlugins": {"maraxiom@a": True}, "pluginConfigs": {"maraxiom@a": {"options": 7}}}),
             id="options-not-an-object",
         ),
-        pytest.param(lambda e: e.settings({"enabledPlugins": []}), id="enabledPlugins-not-an-object"),
+        pytest.param(
+            lambda e: e.settings(
+                {"enabledPlugins": [], "pluginConfigs": {"maraxiom@a": {"options": {}}, "maraxiom@b": {"options": {}}}}
+            ),
+            id="enabledPlugins-not-an-object-when-it-is-needed",
+        ),
+        pytest.param(lambda e: e.settings({"pluginConfigs": []}), id="pluginConfigs-not-an-object"),
     ],
 )
 def test_files_and_settings_unknowable_intent_fails_closed(env: Env, mutate, capsys: pytest.CaptureFixture[str]) -> None:

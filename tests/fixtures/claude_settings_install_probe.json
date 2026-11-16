@@ -6,7 +6,7 @@
     "tprobe-mkt": {
       "source": {
         "source": "directory",
-        "path": "/home/marielle/scratch/qg-261112-findings/tprobe_marketplace"
+        "path": "/tmp/tprobe_marketplace"
       }
     }
   },

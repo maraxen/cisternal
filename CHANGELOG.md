@@ -17,8 +17,10 @@ that ships them; unreleased work sits under "Unreleased".
   `[telemetry.<consumer>]`) in `~/.config/cisternal/config.toml`; the consumer's registered default;
   off. `TelemetryDecision` says which layer and file decided. A consumer registers its defaults
   through the `cisternal.telemetry_consumers` entry-point group or by passing `registration=`.
-  A saved plugin option that cannot be read (bad JSON, a value outside `inherit|on|off`, two enabled
-  entries) fails closed: the behaviour resolves to off and the decision carries an `error`.
+  The saved option is read from the `pluginConfigs` entries for the plugin, whichever Claude Code scope
+  installed it; `enabledPlugins` only chooses between several marketplaces' entries. A saved plugin
+  option that cannot be read (bad JSON, a value outside `inherit|on|off`, several entries that cannot
+  be told apart) fails closed: the behaviour resolves to off and the decision carries an `error`.
   `set_machine_value` / `set_telemetry_setting` write `[telemetry.<consumer>]` in the machine file
   (table-aware, other lines preserved, validated with `tomllib` before an atomic replace) and report
   when a higher layer overrides the write.
@@ -40,8 +42,9 @@ that ships them; unreleased work sits under "Unreleased".
   "disabled" and now means "no opinion" (lower layers decide); and `off`/`none`/`0`/`false` now
   disables explicitly, overriding every file layer. `CISTERNAL_TELEMETRY` also accepts a
   comma-separated list.
-- `tests/conftest.py` points `XDG_CONFIG_HOME` and `CLAUDE_CONFIG_DIR` at empty temp directories
-  for every test, so a developer's real machine config and Claude Code settings cannot leak in.
+- `tests/conftest.py` gains an opt-in `isolated_user_config_dirs` fixture (empty temp `XDG_CONFIG_HOME`
+  and `CLAUDE_CONFIG_DIR`), used by the four `*_telemetry_cutover.py` tests so a developer's real
+  machine config and Claude Code settings cannot leak into the gate they exercise.
 
 ### Fixed
 

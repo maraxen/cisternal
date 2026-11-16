@@ -15,6 +15,11 @@ from cisternal.telemetry.exporter import ShadowExporter
 from cisternal.telemetry.pipeline import shutdown_pipeline
 
 
+# The gate now also reads the machine config and Claude Code settings (spec 261116_telemetry-config-layers),
+# so these tests must not see a developer's real files.
+pytestmark = pytest.mark.usefixtures("isolated_user_config_dirs")
+
+
 @pytest.fixture(autouse=True)
 def _reset_pipeline() -> None:
     shutdown_pipeline()
