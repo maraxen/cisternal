@@ -5,6 +5,16 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
+## Unreleased
+
+### Fixed
+
+- **`cisternal.telemetry_setting` no longer raises on two odd environments.** A deeply nested
+  `settings.json` raised `RecursionError` out of the resolver; it now fails closed like any unreadable
+  file (the behaviour resolves to off and the decision carries an `error`). A deleted working directory
+  raised `FileNotFoundError` from the repository-root search; it now means no repository root, so the
+  `pyproject.toml` layer is skipped.
+
 ## 0.1.8 (2026-11-16)
 
 ### Added

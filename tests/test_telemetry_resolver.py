@@ -264,6 +264,31 @@ def test_files_and_settings_malformed_pyproject_raises(env: Env) -> None:
         env.get("spans")
 
 
+def test_files_and_settings_deeply_nested_settings_fail_closed_not_raise(env: Env) -> None:
+    depth = 200_000
+    env.settings(None, raw="[" * depth + "]" * depth)
+    d = env.get("shadow")  # must not raise RecursionError
+    assert d.enabled is False
+    assert d.error is not None and "cannot read" in d.error
+
+
+def test_files_and_settings_missing_working_directory_is_no_repository_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()  # the process's working directory no longer exists
+    assert ts._find_repo_root() is None
+    d = telemetry_setting(
+        "maraxiom",
+        "shadow",
+        registration=REG,
+        config_dir=tmp_path / "claude",
+        user_config_file=tmp_path / "machine.toml",
+        environ={},
+    )
+    assert d.layer == "registered default" and d.ok
+
+
 def test_files_and_settings_missing_settings_file_is_no_opinion(env: Env) -> None:
     d = env.get("shadow")
     assert d.layer == "registered default" and d.ok
