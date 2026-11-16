@@ -143,6 +143,30 @@ def test_where_an_invalid_behaviour_variable_exits_3(world: World, monkeypatch: 
     assert any("CISTERNAL_TELEMETRY_SHADOW" in e for e in report["errors"])
 
 
+def test_where_a_placeholder_variable_is_no_opinion_and_exits_0(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CISTERNAL_TELEMETRY_SHADOW", "${CISTERNAL_TELEMETRY_SHADOW:-}")
+    report = world.report()
+    assert where_exit_code(report) == 0 and not report["errors"]
+    assert report["behaviours"]["shadow"]["layer"] == "registered default"
+
+
+def test_where_how_to_set_lists_every_surface_in_text_and_json(world: World) -> None:
+    report = world.report()
+    surfaces = [item["surface"] for item in report["how_to_set"]]
+    assert surfaces == ["claude", "antigravity", "opencode", "copilot, cursor, jcode, pi", "any surface"]
+    text = format_where_report(report)
+    assert "how to set it (the same list on every surface):" in text
+    for item in report["how_to_set"]:
+        assert f"{item['surface']}: {item['route']}" in text
+    assert json.loads(format_where_json(report))["how_to_set"] == report["how_to_set"]
+
+
+def test_where_how_to_set_never_claims_an_unprobed_surface_is_verified(world: World) -> None:
+    routes = " ".join(item["route"] for item in world.report()["how_to_set"]).lower()
+    assert "verified" not in routes.replace("unverified", "")
+    assert "not probed in a live session" in routes and "second-hand" in routes
+
+
 def test_where_registration_source_is_labelled(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
     given = world.report(registration_source="the maraxiom package")
     assert given["registration"] == {"registered": True, "source": "the maraxiom package"}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import replace
@@ -118,6 +119,42 @@ def test_the_rest_of_the_claude_output_is_unchanged_by_the_options(bundle: Asset
 def test_other_surfaces_ignore_the_options(emitter, bundle: AssetBundle) -> None:
     """A placeholder or option must never reach a surface that cannot substitute it."""
     assert emitter().emit(bundle) == emitter().emit(_bare(bundle))
+
+
+@pytest.mark.parametrize(
+    "emitter",
+    [CursorEmitter, CopilotEmitter, AntigravityEmitter, OpenCodeEmitter, PiEmitter, JCodeEmitter],
+)
+def test_other_surfaces_render_no_variables_or_placeholders(emitter, bundle: AssetBundle) -> None:
+    """Spec 261116_cross-surface-plugin-config FR-2: no `variables` key and no `${` that the bare bundle lacks."""
+    files = emitter().emit(bundle)
+    bare = emitter().emit(_bare(bundle))
+    for path, content in files.items():
+        assert content.count("${") == bare.get(path, "").count("${"), path
+        assert '"variables"' not in content, path
+
+
+@pytest.mark.skipif(shutil.which("agy") is None, reason="the agy binary is not installed")
+def test_other_surfaces_antigravity_plugin_installs_enabled(bundle: AssetBundle, tmp_path: Path) -> None:
+    """A declared Antigravity `variables` entry would install the plugin disabled (probe P1); the export must not."""
+    plugin = tmp_path / "plugin"
+    for path, content in AntigravityEmitter().emit(bundle).items():
+        target = plugin / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")}
+    installed = subprocess.run(
+        ["agy", "plugin", "install", str(plugin)], capture_output=True, text=True, timeout=120, check=False, env=env
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert "disabled until its MCP servers are configured" not in installed.stdout + installed.stderr
+    listed = subprocess.run(
+        ["agy", "plugin", "list", "--json"], capture_output=True, text=True, timeout=120, check=False, env=env
+    )
+    plugins = json.loads(listed.stdout)
+    assert plugins and all(p["enabled"] is True for p in plugins), listed.stdout
 
 
 def test_rust_parity_output_is_unchanged(bundle: AssetBundle) -> None:

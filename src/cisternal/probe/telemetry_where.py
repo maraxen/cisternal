@@ -36,7 +36,34 @@ from cisternal.telemetry_setting import (
     telemetry_setting,
 )
 
-__all__ = ["build_where_report", "format_where_json", "format_where_report", "where_exit_code"]
+__all__ = ["HOW_TO_SET", "build_where_report", "format_where_json", "format_where_report", "where_exit_code"]
+
+# How to set the telemetry behaviours on each surface (spec 261116_cross-surface-plugin-config, FR-3). The same list is
+# printed on every surface: ``where`` does not detect which one it runs under. Each line says where its claim comes
+# from; nothing here claims a surface was probed in a live session.
+HOW_TO_SET: tuple[tuple[str, str], ...] = (
+    ("claude", "set the plugin's options in /plugin configure; the saved option is read from Claude's settings.json"),
+    (
+        "antigravity",
+        "export CISTERNAL_TELEMETRY_SPANS / CISTERNAL_TELEMETRY_SHADOW (on or off) in the environment the agent runs in; "
+        "the agy validator says an MCP server inherits it (not probed in a live session)",
+    ),
+    (
+        "opencode",
+        "the same variables; a second-hand reading of its docs says a local MCP server inherits the parent environment "
+        "(unverified)",
+    ),
+    (
+        "copilot, cursor, jcode, pi",
+        "no per-user plugin option is documented; export the variables where the shell and the agent share them, "
+        "or use the machine file",
+    ),
+    (
+        "any surface",
+        "edit [telemetry.<consumer>] in ~/.config/cisternal/config.toml; a consumer's own command writes it "
+        "(maraxiom: mrx telemetry enable|disable)",
+    ),
+)
 
 
 def _dir_report(label: str, resolver: Any, **kwargs: Any) -> dict[str, Any]:
@@ -127,6 +154,7 @@ def build_where_report(
         "behaviours": behaviours,
         "records": {"cisternal_log_dir": log_dir, "consumer_records_dir": own_records},
         "mode_state": mode_state,
+        "how_to_set": [{"surface": surface, "route": route} for surface, route in HOW_TO_SET],
         "errors": errors,
         "malformed": any(d is None for d in decisions.values()) or any("malformed" in e for e in errors),
     }
@@ -160,6 +188,11 @@ def format_where_report(report: Mapping[str, Any]) -> str:
     lines.append(f"  mode-state dir: {mode['path'] or mode.get('error', 'unresolved')}")
     for error in report["errors"]:
         lines.append(f"  ERROR: {error}")
+    routes = report.get("how_to_set", [])
+    if routes:
+        lines.append("  how to set it (the same list on every surface):")
+        for item in routes:
+            lines.append(f"    {item['surface']}: {item['route']}")
     return "\n".join(lines)
 
 

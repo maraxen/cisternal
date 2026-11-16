@@ -65,7 +65,7 @@ Only Claude Code has a typed option with a saved value in a readable local file.
 ## Acceptance
 
 - [FR-1] `pytest tests/test_telemetry_resolver.py -q -k placeholder`
-- [FR-2] `pytest tests/test_export_surfaces_no_telemetry_options.py -q`
+- [FR-2] `pytest tests/test_export_claude_telemetry_options.py -q -k other_surfaces`
 - [FR-3] `pytest tests/test_telemetry_where.py -q -k how_to_set`
 - [FR-4] `test -s .praxia/docs/research/261116_surface-plugin-option-mechanisms.md`
 - [FR-5] `pytest tests/maraxiom/test_agent_plugin.py -q`
