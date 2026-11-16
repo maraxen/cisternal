@@ -178,7 +178,11 @@ def claude_settings_path(config_dir: Path | str | None = None, environ: Mapping[
 
 def _find_repo_root(start: Path | None = None) -> Path | None:
     """Nearest directory holding ``.git`` or ``pyproject.toml`` (same rule as ``shadow.resolution``)."""
-    current = (start or Path.cwd()).resolve()
+    try:
+        current = (start or Path.cwd()).resolve()
+    except OSError:
+        # The working directory was deleted (or is unreadable): there is no repository root to read.
+        return None
     for parent in (current, *current.parents):
         if (parent / ".git").exists() or (parent / "pyproject.toml").exists():
             return parent
@@ -303,7 +307,8 @@ def _read_settings(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return cached
     try:
         parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
+        # RecursionError: json.loads on a pathologically nested file; fail closed like any unreadable file.
         result: tuple[dict[str, Any] | None, str | None] = (None, f"cannot read {path} as JSON: {exc}")
     else:
         if isinstance(parsed, dict):
