@@ -71,7 +71,7 @@ from __future__ import annotations
 
 import json
 
-from cisternal.assets.bundle import AssetBundle, McpAsset
+from cisternal.assets.bundle import AssetBundle, ConfigOptionAsset, McpAsset
 from cisternal.export._hash import bundle_sha256
 from cisternal.export._markdown import format_agent_markdown, format_skill_markdown
 from cisternal.export.base import Emitter
@@ -222,8 +222,30 @@ def _build_manifest(bundle: AssetBundle) -> dict[str, object]:
     instead (``commands/<name>.md``, ``.mcp.json``).
     """
     meta = bundle.metadata
-    return {
+    manifest: dict[str, object] = {
         "name": meta.name,
         "version": meta.version,
         "description": meta.description or "",
     }
+    if bundle.config_options:
+        # Claude Code's `userConfig`: the user is asked for these when the plugin is enabled and the saved
+        # values land in settings.json under pluginConfigs["<plugin>@<marketplace>"].options. Nothing here
+        # substitutes ${user_config.*} anywhere else: other surfaces would receive the placeholder verbatim
+        # and a hook that references an unsaved option does not run.
+        manifest["userConfig"] = {
+            option.key: _user_config_entry(option) for option in bundle.config_options
+        }
+    return manifest
+
+
+def _user_config_entry(option: ConfigOptionAsset) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "type": option.type,
+        "title": option.title or option.key,
+        "description": option.description,
+    }
+    if option.options:
+        entry["options"] = list(option.options)
+    if option.default is not None:
+        entry["default"] = option.default
+    return entry

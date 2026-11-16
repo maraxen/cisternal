@@ -57,6 +57,19 @@ def spy_adapter() -> SpyAdapter:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture()
+def isolated_user_config_dirs(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt-in: point the per-machine config dirs at empty temp dirs so a developer's real files cannot leak in.
+
+    ``XDG_CONFIG_HOME`` holds cisternal's machine config and ``CLAUDE_CONFIG_DIR`` holds Claude Code's
+    ``settings.json``; the telemetry resolver reads both. Tests that need either set it themselves after
+    this fixture runs, which overrides these values.
+    """
+    base = tmp_path_factory.mktemp("isolated-config")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(base / "xdg"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(base / "claude"))
+
+
 @pytest.fixture(autouse=True)
 def _clear_cli_subapp_caches() -> Any:
     """Clear the module-level CLI sub-app caches before and after each test.

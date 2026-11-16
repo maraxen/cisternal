@@ -21,10 +21,12 @@ from cisternal.assets.bundle import (
     AssetBundle,
     BundleMetadata,
     CommandAsset,
+    ConfigOptionAsset,
     HookSpecAsset,
     MarketplaceAsset,
     McpAsset,
     SkillAsset,
+    TelemetryAsset,
 )
 from cisternal.assets.inspect_json import _serialize_bundle
 
@@ -42,6 +44,9 @@ _SKILL_LATE_DEFAULTS = {
 _BUNDLE_LATE_DEFAULTS = {
     "families": {},
     "verbs": {},
+    # Added with the telemetry/config-option fields (spec 261116_telemetry-config-layers).
+    "telemetry": None,
+    "config_options": [],
 }
 
 
@@ -158,6 +163,20 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
                 for k, v in data.get("families", {}).items()
             },
             verbs=dict(data.get("verbs", {})),
+            telemetry=(
+                TelemetryAsset(**data["telemetry"]) if data.get("telemetry") else None
+            ),
+            config_options=tuple(
+                ConfigOptionAsset(
+                    key=o["key"],
+                    type=o.get("type", "string"),
+                    title=o.get("title", ""),
+                    description=o.get("description", ""),
+                    options=tuple(o.get("options", ())),
+                    default=o.get("default"),
+                )
+                for o in data.get("config_options", ())
+            ),
         )
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         msg = f"malformed bundle snapshot: {exc!r}"

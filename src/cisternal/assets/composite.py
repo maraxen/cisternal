@@ -91,6 +91,8 @@ def merge_registry(
         marketplace=manifest_report.bundle.marketplace,
         families=merged_families,
         verbs=merged_verbs,
+        telemetry=manifest_report.bundle.telemetry,
+        config_options=manifest_report.bundle.config_options,
     )
     return LoadReport(
         bundle=resolve_mcp_launch(bundle),
