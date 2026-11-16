@@ -1,0 +1,45 @@
+---
+title: Per-surface plugin option mechanisms (cross-surface plugin config spike)
+description: 'Docs-sourced answers, per agent surface, to: can a manifest declare user options, where a saved value persists, which processes read it, and whether it can be set non-interactively. Each row is tagged verified-from-docs (with URL) or not-found.'
+status: draft
+task_id: 261117_cross-surface-plugin-config
+date: '261116'
+confidence: medium
+sources: 'official docs per surface, URLs in each row; fetched 2026-11-16'
+---
+# Per-surface plugin option mechanisms (cross-surface plugin config spike)
+
+Question per surface: **Q1** can the plugin manifest declare user options (types, choice list, default)? **Q2** where does a saved value persist? **Q3** which processes can read it (MCP server, hooks, agent shell)? **Q4** can it be set non-interactively?
+
+Baseline (Claude Code, verified by probe, `maraxiom` spec `261116_telemetry-config-layers` RESULTS rows 1-24): typed `userConfig` with `options`/`default`; saved in the user's `settings.json` under `pluginConfigs["<plugin>@<marketplace>"].options`; MCP gets `${user_config.KEY}`, hook processes get `CLAUDE_PLUGIN_OPTION_<KEY>` (saved only), the Bash tool gets none; `claude plugin configure --values-stdin` sets it.
+
+**Evidence quality.** Rows marked *verbatim* quote a page fetched in full by a fetch agent (the quote is the page's text). Rows marked *agent report* come from a research agent that filed no structured record and, for opencode and pi, read pages through a summarising fetch: treat those as claims to re-check, not facts. Nothing here was probed against a running surface: probing needs each product's credentials, which this work does not copy. Everything is therefore **docs-only**.
+
+| Surface | Q1 declare options | Q2 saved value | Q3 readers | Q4 non-interactive set | Evidence |
+|---|---|---|---|---|---|
+| **claude** | Yes: typed `userConfig`, `options`, `default` | user `settings.json` `pluginConfigs` | MCP substitution; hooks (saved only); not the Bash tool | `claude plugin configure --values-stdin` | probed (baseline) |
+| **cursor** | Yes, `variables`: a JSON Schema (`type`, `title`, `description`, `default`, `enum`, `const`, `properties`, `required`, `items`, length/numeric constraints) | the Cursor dashboard, set by **team admins** ("Team admins set the actual values in the dashboard under **Plugins** (at install time, or later via **Configure** on the plugin).") No local file documented | MCP config: "include only `${VAR}` placeholders that match property names in the schema"; "`${POSTGRES_URL}` is a plugin variable placeholder (not shell `${env:...}`)". Hooks and agent shell: not found | not found (dashboard only) | verbatim, https://cursor.com/docs/reference/plugins |
+| **antigravity** | Partly, MCP-scoped: `mcpServers.<server>.variables` (`name`, `title`, `description`, `link`); no type, default or choices field found | not found | MCP server via interpolation: "`${VARIABLE_NAME}` ... (expanded in `command`, `args`, `env`, `url`, `headers`, and `oauth`)". Not stated as exported env vars. Hooks, shell: not found | none documented; install is interactive ("prompt users for API keys in a setup dialog before enabling the plugin") | verbatim, https://antigravity.google/docs/build-plugins/ |
+| **copilot** (CLI and VS Code) | No plugin-level declaration found. VS Code editor-managed `inputs` (promptString/pickString) exist but only in the legacy local harness, not in portable or CLI use | not applicable; "Provide variables in the environment of the host that runs or connects to the server." | MCP stdio: `${NAME}` or `${NAME:-default}` in `command`, `args`, `env`; HTTP headers. CLI `/mcp add`: "The `PATH` variable is automatically inherited from your environment. All other environment variables must be configured here." Hooks: `env` map in VS Code hooks format (agent report) | `copilot mcp add --env KEY=VALUE`, `copilot config` for settings (agent report); none for plugin options | verbatim, https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers and https://code.visualstudio.com/docs/agents/reference/mcp-configuration |
+| **jcode** | No plugin system documented; extension points are skills, MCP servers, hooks in `config.toml` | `~/.jcode/config.toml`; MCP in `~/.jcode/mcp.json` or `.jcode/mcp.json` | hooks get `JCODE_HOOK_*` variables; MCP gets `command`, `args`, `env` only | edit `config.toml` or `/config` | agent report, https://jcode.sh/docs , https://github.com/1jehuang/jcode/blob/master/docs/HOOKS.md |
+| **opencode** | No typed declaration; plugin entry `{package, options:{...}}` is free-form | `opencode.json` (global, project, managed); no secret store | local MCP `environment`; `{env:VAR}` / `{file:path}` substitution (unset becomes empty); plugin process: not found | edit the JSON file | agent report (summarised fetch), https://opencode.ai/docs/config/ , https://opencode.ai/docs/mcp-servers/ |
+| **pi** | No manifest-level declaration; extensions may use `pi.registerFlag`, `pi.getSettings()` and UI dialogs | `~/.pi/agent/settings.json` / `.pi/settings.json` (after project trust) | MCP stdio `env` with `${VAR}`; extensions run in-process | edit settings file; `pi config` is interactive only | agent report (summarised fetch), https://docs.pi.dev/latest/packages , https://docs.pi.dev/latest/mcp |
+
+## Probes (offline, scratch HOME, no credentials; real `~/.gemini` plugin directory checksummed unchanged)
+
+**P1 (antigravity, `agy` 1.5.9, script `scripts/spikes/261117_cross_surface/probe_agy_variables.sh`).** An Antigravity plugin whose `mcp_config.json` declares `mcpServers.<s>.variables` installs **disabled**: `agy plugin install` printed "It is disabled until its MCP servers are configured: open /plugin and turn it on to fill them in", `agy plugin list --json` showed `enabled: false` (the same plugin without `variables` showed `enabled: true`), and `agy plugin enable` refused: "plugin "plugvars" cannot be enabled here: its MCP servers need configuring first; open /plugin in the interactive CLI and turn it on there to fill them in". `agy plugin validate --json` says: "server "srv" declares variables, so the plugin is off until the user fills them in; if config.json turns it on first, the server starts with the placeholders as written". Consequences: (a) declaring an Antigravity `variables` entry for an **optional** setting forces a setup step before the plugin works at all, which breaks the low-friction goal; (b) an unfilled placeholder reaches the server **literally** (`${NAME}`), so the resolver must treat an unexpanded placeholder as no opinion; (c) the variable cannot be marked optional (the documented fields are `name`, `title`, `description`, `link`).
+
+## What this changes for the design
+
+1. Only Claude Code has a typed, locally readable saved value. A per-surface "saved-option reader" has nothing local to read for cursor (dashboard), antigravity (location undocumented) or copilot, jcode, opencode and pi (no declaration at all).
+2. The one channel every surface with MCP shares is **the MCP server's environment**, filled from a placeholder: Cursor `${VAR}` from a dashboard variable, Antigravity `${VARIABLE_NAME}` from a prompted variable, Copilot `${NAME:-default}` from the host environment, opencode `{env:VAR}`, pi `${VAR}`. Claude fills it from `${user_config.KEY}`.
+3. Copilot's CLI states that only `PATH` is inherited into an MCP server started from `/mcp add`, so a user's `CISTERNAL_TELEMETRY_SHADOW` may not reach the server there; the pass-through must be rendered explicitly into the server's `env` (to verify per surface, not assumed).
+4. A value that arrives as `CISTERNAL_TELEMETRY_*` becomes the environment layer, which outranks `pyproject.toml`, Claude's saved option and the machine file. A value typed by a Cursor team admin must not beat the user's own `mrx telemetry disable`; a separate variable read at the plugin-option position (spec 261116 decision D2) avoids that.
+
+## Exporter side findings (check against docs; file as debt)
+
+- opencode: the exporter writes the flat `mcp.<name>` form; the schema page marks it legacy in favour of `mcp.servers`.
+- pi: `.pi/mcp.json` inside a package may not be loaded on `pi install` (documented MCP locations are `~/.pi/agent/mcp.json` and the project's `.pi/mcp.json`, after trust).
+- copilot: `command` is emitted as an array; not yet checked against the docs.
+- jcode: a `plugin.json` / `marketplace.json` that no documented loader reads.
+- antigravity: the exporter's own docstring flags its MCP `env` passthrough as unconfirmed; docs disagree on the install path.
