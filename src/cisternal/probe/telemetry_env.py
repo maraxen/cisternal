@@ -1,23 +1,31 @@
-"""Telemetry consumer enablement via environment (M5.1b)."""
+"""Telemetry consumer enablement, answered by the resolver (M5.1b; spec 261116_telemetry-config-layers).
+
+``consumer_telemetry_enabled`` used to read ``CISTERNAL_TELEMETRY`` and nothing else. It now asks
+:func:`cisternal.telemetry_setting.telemetry_setting` for the consumer's span-timing behaviour, so the
+environment, ``pyproject.toml``, a saved Claude Code plugin option, the machine config file and the
+consumer's registered default all take part, in that order of precedence.
+
+Behaviour that is the same as before: unset means disabled for a consumer that registered no default;
+``all``/``1``/``true``/``yes`` or the consumer's own name enables it.
+
+Behaviour that changed (stated in the changelog): an empty ``CISTERNAL_TELEMETRY``, or one naming another
+consumer, used to mean "disabled" and now means "no opinion", so lower layers decide; for a consumer with
+no registered default and no configuration that is still disabled. ``off``/``none``/``0``/``false`` now
+disables explicitly, overriding every file layer.
+"""
 
 from __future__ import annotations
 
-import os
-
-_ENABLED_VALUES = frozenset({"1", "true", "yes", "all"})
+from cisternal.telemetry_setting import TelemetrySettingError, telemetry_setting
 
 
 def consumer_telemetry_enabled(consumer: str) -> bool:
-    """Return whether cisternal telemetry is enabled for *consumer*.
+    """Return whether span-timing telemetry is enabled for *consumer*.
 
-    Reads ``CISTERNAL_TELEMETRY``:
-    - unset / empty → disabled for all consumers
-    - ``all`` / ``1`` / ``true`` / ``yes`` → enabled for all known consumers
-    - otherwise → enabled only when value equals *consumer* (case-insensitive)
+    A malformed cisternal configuration file or behaviour variable counts as disabled here, so a
+    diagnostic that calls this never raises; ``cisternal telemetry where`` reports such an error loudly.
     """
-    raw = os.environ.get("CISTERNAL_TELEMETRY", "").strip().lower()
-    if not raw:
+    try:
+        return telemetry_setting(consumer, "spans").enabled
+    except TelemetrySettingError:
         return False
-    if raw in _ENABLED_VALUES:
-        return True
-    return raw == consumer.strip().lower()

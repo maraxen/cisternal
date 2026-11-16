@@ -11,11 +11,13 @@ from cisternal.assets.bundle import (
     AgentAsset,
     AssetBundle,
     BundleMetadata,
+    ConfigOptionAsset,
     HookSpecAsset,
     LoadReport,
     MarketplaceAsset,
     McpAsset,
     SkillAsset,
+    TelemetryAsset,
 )
 from cisternal.assets.manifest_extensions import validate_extension_sections
 from cisternal.assets.skill_schema import (
@@ -71,6 +73,8 @@ class ManifestAssetSource:
         warnings.extend(validate_extension_sections(plugin, self._root))
         families = _load_families(raw, plugin, name, warnings)
         verbs = _load_verbs(raw, plugin)
+        config_options = _load_config_options(plugin, warnings)
+        telemetry = _load_telemetry(plugin, config_options, warnings)
 
         bundle = AssetBundle(
             metadata=metadata,
@@ -82,6 +86,8 @@ class ManifestAssetSource:
             marketplace=marketplace,
             families=families,
             verbs=verbs,
+            telemetry=telemetry,
+            config_options=config_options,
         )
         return LoadReport(bundle=bundle, warnings=tuple(warnings))
 
@@ -348,6 +354,111 @@ def _load_mcp(
         McpAsset(
             name=plugin_name or "mcp", command=argv, launch=launch, uvx_from=uvx_from
         ),
+    )
+
+
+_CONFIG_OPTION_TYPES = ("string", "number", "boolean", "directory", "file")
+
+
+def _load_config_options(
+    plugin: dict[str, object], warnings: list[str]
+) -> tuple[ConfigOptionAsset, ...]:
+    """Read ``[plugin.config.<key>]`` tables into user-configurable plugin options.
+
+    Invalid entries are skipped with a warning (never-raise load). Claude Code requires ``type``,
+    ``title`` and ``description``; a missing ``title`` falls back to the key and a missing
+    ``description`` is a warning. ``options`` needs a ``string`` type and holds strings; a string
+    ``default`` must be one of the ``options`` when there are any.
+    """
+    table = plugin.get("config")
+    if table is None:
+        return ()
+    if not isinstance(table, dict):
+        warnings.append("plugin.config must be a table of option tables")
+        return ()
+    found: list[ConfigOptionAsset] = []
+    for key, raw in table.items():
+        where = f"plugin.config.{key}"
+        if not isinstance(raw, dict):
+            warnings.append(f"{where} must be a table")
+            continue
+        opt_type = str(raw.get("type") or "")
+        if opt_type not in _CONFIG_OPTION_TYPES:
+            warnings.append(
+                f"{where}.type {opt_type!r} is not one of {_CONFIG_OPTION_TYPES}; option skipped"
+            )
+            continue
+        description = str(raw.get("description") or "")
+        if not description:
+            warnings.append(f"{where}.description is empty (Claude Code requires one)")
+        raw_options = raw.get("options", ())
+        if not isinstance(raw_options, (list, tuple)) or not all(
+            isinstance(o, str) for o in raw_options
+        ):
+            warnings.append(f"{where}.options must be a list of strings; option skipped")
+            continue
+        options = tuple(str(o) for o in raw_options)
+        if options and opt_type != "string":
+            warnings.append(f"{where}.options is only valid on a string option; option skipped")
+            continue
+        default = raw.get("default")
+        if default is not None and not isinstance(default, (str, bool, int, float)):
+            warnings.append(f"{where}.default must be a string, number or boolean; option skipped")
+            continue
+        if isinstance(default, str) and options and default not in options:
+            warnings.append(f"{where}.default {default!r} is not one of options {options!r}")
+        found.append(
+            ConfigOptionAsset(
+                key=str(key),
+                type=opt_type,
+                title=str(raw.get("title") or key),
+                description=description,
+                options=options,
+                default=default,
+            )
+        )
+    return tuple(found)
+
+
+def _load_telemetry(
+    plugin: dict[str, object],
+    config_options: tuple[ConfigOptionAsset, ...],
+    warnings: list[str],
+) -> TelemetryAsset | None:
+    """Read ``[plugin.telemetry]`` and check it against the declared options."""
+    table = plugin.get("telemetry")
+    if table is None:
+        return None
+    if not isinstance(table, dict):
+        warnings.append("plugin.telemetry must be a table")
+        return None
+    names = {}
+    for key in ("consumer", "plugin", "spans_option", "shadow_option"):
+        value = table.get(key)
+        if not isinstance(value, str) or not value.strip():
+            warnings.append(f"plugin.telemetry.{key} must be a non-empty string; telemetry table skipped")
+            return None
+        names[key] = value.strip()
+    defaults: dict[str, bool] = {}
+    for key in ("spans_default", "shadow_default"):
+        value = table.get(key, False)
+        if not isinstance(value, bool):
+            warnings.append(f"plugin.telemetry.{key} must be true or false; using false")
+            value = False
+        defaults[key] = value
+    declared = {o.key for o in config_options}
+    for key in ("spans_option", "shadow_option"):
+        if names[key] not in declared:
+            warnings.append(
+                f"plugin.telemetry.{key} {names[key]!r} has no [plugin.config.{names[key]}] declaration"
+            )
+    return TelemetryAsset(
+        consumer=names["consumer"],
+        plugin=names["plugin"],
+        spans_option=names["spans_option"],
+        shadow_option=names["shadow_option"],
+        spans_default=defaults["spans_default"],
+        shadow_default=defaults["shadow_default"],
     )
 
 

@@ -7,6 +7,42 @@ that ships them; unreleased work sits under "Unreleased".
 
 ## Unreleased
 
+### Added
+
+- **`cisternal.telemetry_setting`**: one resolver for whether a consumer's telemetry behaviour is on,
+  for two behaviours, `spans` (span timing) and `shadow` (shadow-ladder records). Order, first hit
+  wins: explicit argument; `CISTERNAL_TELEMETRY_SPANS`/`_SHADOW`; `CISTERNAL_TELEMETRY`;
+  `[tool.cisternal.telemetry]` (then `.<consumer>`) in the repository's `pyproject.toml`; the user's
+  saved Claude Code plugin option, read from `settings.json` (read-only); `[telemetry]` (then
+  `[telemetry.<consumer>]`) in `~/.config/cisternal/config.toml`; the consumer's registered default;
+  off. `TelemetryDecision` says which layer and file decided. A consumer registers its defaults
+  through the `cisternal.telemetry_consumers` entry-point group or by passing `registration=`.
+  A saved plugin option that cannot be read (bad JSON, a value outside `inherit|on|off`, two enabled
+  entries) fails closed: the behaviour resolves to off and the decision carries an `error`.
+  `set_machine_value` / `set_telemetry_setting` write `[telemetry.<consumer>]` in the machine file
+  (table-aware, other lines preserved, validated with `tomllib` before an atomic replace) and report
+  when a higher layer overrides the write.
+- **`cisternal telemetry where --consumer NAME [--json]`**: read-only report of the deciding layer
+  and file for each behaviour, the records and mode-state directories, and whether shadow is "on but
+  inert". Exit 0 ok, 1 a saved plugin option failed closed, 3 a configuration is malformed.
+- **Manifest `[plugin.telemetry]` and `[plugin.config.<key>]`**, loaded into `AssetBundle.telemetry`
+  and `AssetBundle.config_options` (new `TelemetryAsset` and `ConfigOptionAsset`). The Claude export
+  renders `[plugin.config.*]` as `plugin.json` `userConfig` and nothing else: no `${user_config.*}`
+  placeholder reaches `.mcp.json`, hook commands or any other surface. Snapshots omit the new fields
+  when unused, so committed snapshots do not go stale under `assets snapshot --check`.
+
+### Changed
+
+- `cisternal.probe.telemetry_env.consumer_telemetry_enabled` (and so `telemetry doctor`) now asks the
+  resolver for the consumer's `spans` behaviour. Unset is still disabled for a consumer with no
+  registered default, and `all`/`1`/`true`/`yes` or the consumer's name still enables it. Two edge
+  cases change: an empty `CISTERNAL_TELEMETRY`, or one naming a different consumer, used to mean
+  "disabled" and now means "no opinion" (lower layers decide); and `off`/`none`/`0`/`false` now
+  disables explicitly, overriding every file layer. `CISTERNAL_TELEMETRY` also accepts a
+  comma-separated list.
+- `tests/conftest.py` points `XDG_CONFIG_HOME` and `CLAUDE_CONFIG_DIR` at empty temp directories
+  for every test, so a developer's real machine config and Claude Code settings cannot leak in.
+
 ### Fixed
 
 - `EventPipeline.shutdown()` drains records already on the queue before it

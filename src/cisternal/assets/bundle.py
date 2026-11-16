@@ -223,6 +223,42 @@ class MarketplaceAsset:
 
 
 @dataclass(frozen=True, slots=True)
+class TelemetryAsset:
+    """How a consumer's telemetry is controlled (``[plugin.telemetry]``; spec 261116_telemetry-config-layers).
+
+    Names the consumer, the plugin it ships as, the two user options that control it (``spans_option``
+    and ``shadow_option``, declared in ``config_options``) and the shipped defaults. The defaults are
+    documentation here: the resolver reads them from the consumer's registration, not from this record.
+    """
+
+    consumer: str
+    plugin: str
+    spans_option: str
+    shadow_option: str
+    spans_default: bool = False
+    shadow_default: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigOptionAsset:
+    """One user-configurable plugin option (``[plugin.config.<key>]``).
+
+    Rendered by ``ClaudeEmitter`` as an entry of ``plugin.json`` ``userConfig``. ``options`` is the
+    picker's allowed values for a ``string`` option (Claude Code 2.1.271 or newer); ``default`` is
+    omitted from the render when None. A declared default is saved or substituted as if the user had
+    chosen it, so options that must mean "no opinion" use a ``string`` picker whose default is
+    ``inherit`` rather than a boolean.
+    """
+
+    key: str
+    type: str = "string"
+    title: str = ""
+    description: str = ""
+    options: tuple[str, ...] = ()
+    default: str | bool | int | float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AssetBundle:
     """Complete asset bundle with canonical sort invariants at construction.
 
@@ -240,8 +276,15 @@ class AssetBundle:
     marketplace: MarketplaceAsset | None = None
     families: dict[str, tuple[str, ...]] = field(default_factory=dict, hash=False)
     verbs: dict[str, Any] = field(default_factory=dict, hash=False)
+    telemetry: TelemetryAsset | None = None
+    config_options: tuple[ConfigOptionAsset, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "config_options",
+            tuple(sorted(self.config_options, key=lambda o: o.key)),
+        )
         object.__setattr__(
             self,
             "commands",

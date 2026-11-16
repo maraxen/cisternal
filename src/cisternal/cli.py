@@ -176,6 +176,46 @@ def telemetry_doctor(
     raise SystemExit(compute_doctor_exit_code(report, strict=strict_mode))
 
 
+@telemetry_app.command(name="where")
+def telemetry_where(
+    *,
+    consumer: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--consumer"],
+            help=(
+                "Consumer to report on (for example maraxiom). Its registered default is found through "
+                "the cisternal.telemetry_consumers entry point, so a consumer that is not installed in "
+                "this environment shows as unregistered."
+            ),
+        ),
+    ],
+    json_output: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--json"],
+            help="Emit the machine-readable report to stdout.",
+        ),
+    ] = False,
+) -> None:
+    """Show which layer decides each telemetry behaviour for a consumer (read-only).
+
+    Behaviours are ``spans`` (span timing) and ``shadow`` (shadow-ladder records). Exit codes: 0 ok;
+    1 a saved Claude Code plugin option could not be read, so the behaviour failed closed (off);
+    3 a cisternal configuration file or a behaviour variable is malformed.
+    """
+    from cisternal.probe.telemetry_where import (  # noqa: PLC0415
+        build_where_report,
+        format_where_json,
+        format_where_report,
+        where_exit_code,
+    )
+
+    report = build_where_report(consumer)
+    print(format_where_json(report) if json_output else format_where_report(report))
+    raise SystemExit(where_exit_code(report))
+
+
 # ---------------------------------------------------------------------------
 # cisternal assets export
 # ---------------------------------------------------------------------------
