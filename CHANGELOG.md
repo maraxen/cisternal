@@ -5,6 +5,16 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
+## Unreleased
+
+### Fixed
+
+- **The Copilot export writes MCP servers in the shape the Copilot CLI validates.** `command` was written as a list and
+  `args` was missing; the Copilot CLI's own schema (read from its installed package) wants `command` as a string and `args` as
+  a required string list, and its plugin docs show the same. The program is now `command` and the rest of the command line is
+  `args`, in both `plugin.json` and `.mcp.json`. Rust-parity output is unchanged. Runtime behaviour of the installed CLI on the
+  old shape was not probed (plugin servers are not visible to `copilot mcp list` offline). Debt 3413.
+
 ## 0.1.10 (2026-11-16)
 
 ### Added
