@@ -5,7 +5,7 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
-## Unreleased
+## 0.1.10 (2026-11-16)
 
 ### Added
 
