@@ -1,11 +1,11 @@
 ---
 title: 'Cross-surface plugin configuration: what each surface can carry and the explicit fallback'
 description: Which surfaces can carry a plugin's telemetry setting (spans, shadow), what cisternal renders (nothing beyond Claude Code), and what it says and does everywhere else.
-status: draft
+status: shipped
 task_id: 261117_cross-surface-plugin-config
 date: '261116'
 backlog_ids: ''
-adversarial_review: 'round 1 done (Sonnet, 6 blockers addressed in this revision); round 2 pending'
+adversarial_review: 'round 1 (Sonnet, 6 blockers) addressed; round 2 (Sonnet) found no code blockers and one maraxiom doc blocker, fixed; shipped in cisternal 0.1.10 (#80)'
 ---
 # Cross-surface plugin configuration: what each surface can carry and the explicit fallback
 
