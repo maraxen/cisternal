@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import tomllib
@@ -208,10 +209,25 @@ def _notice(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+# A value that is entirely a placeholder some surface or shell failed to expand (spec 261116_cross-surface-plugin-config,
+# FR-1): ${NAME}, ${NAME:-text}, {env:NAME}, $NAME or %NAME%.
+_UNEXPANDED_PLACEHOLDER = re.compile(
+    rf"^(?:\$\{{{_NAME}(?::-[^}}]*)?\}}|\{{env:{_NAME}\}}|\${_NAME}|%{_NAME}%)$"
+)
+
+
 def _parse_switch(raw: str, where: str) -> bool | None:
-    """Parse a behaviour variable: ``None`` for unset/empty, a bool, or raise naming ``where``."""
+    """Parse a behaviour variable: ``None`` for unset/empty, a bool, or raise naming ``where``.
+
+    A value that is wholly an unexpanded placeholder (a surface that passes it "as written") means no opinion,
+    with a one-time stderr notice; it is not an invalid value that fails the setting closed.
+    """
     token = raw.strip().lower()
     if not token:
+        return None
+    if _UNEXPANDED_PLACEHOLDER.match(raw.strip()):
+        _notice(f"ignored unexpanded placeholder in {where}")
         return None
     if token in _BOOL_ON:
         return True

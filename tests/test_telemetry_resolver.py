@@ -264,6 +264,60 @@ def test_files_and_settings_malformed_pyproject_raises(env: Env) -> None:
         env.get("spans")
 
 
+PLACEHOLDERS = [
+    "${CISTERNAL_TELEMETRY_SHADOW}",
+    "${CISTERNAL_TELEMETRY_SHADOW:-}",
+    "${X:-off}",
+    "{env:CISTERNAL_TELEMETRY_SHADOW}",
+    "$CISTERNAL_TELEMETRY_SHADOW",
+    "%CISTERNAL_TELEMETRY_SHADOW%",
+    "  ${X}  ",
+]
+
+
+@pytest.mark.parametrize("value", PLACEHOLDERS)
+def test_placeholder_forms_are_no_opinion(env: Env, value: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """A surface that passes a placeholder 'as written' must not turn a setting off (spec FR-1)."""
+    env.environ["CISTERNAL_TELEMETRY_SHADOW"] = value
+    d = env.get("shadow")  # must not raise
+    assert d.layer == "registered default" and d.enabled is True and d.ok
+    err = capsys.readouterr().err
+    assert "ignored unexpanded placeholder in environment variable CISTERNAL_TELEMETRY_SHADOW" in err
+
+
+def test_placeholder_lets_the_next_layer_decide(env: Env) -> None:
+    env.environ["CISTERNAL_TELEMETRY_SHADOW"] = "${CISTERNAL_TELEMETRY_SHADOW:-}"
+    env.machine_file("[telemetry.maraxiom]\nshadow = false\n")
+    d = env.get("shadow")
+    assert d.enabled is False and d.layer.startswith("machine file")
+
+
+def test_placeholder_notice_is_printed_once_per_process(env: Env, capsys: pytest.CaptureFixture[str]) -> None:
+    env.environ["CISTERNAL_TELEMETRY_SHADOW"] = "${X}"
+    env.get("shadow")
+    env.get("shadow")
+    assert capsys.readouterr().err.count("ignored unexpanded placeholder") == 1
+
+
+def test_placeholder_applies_to_the_spans_variable_too(env: Env) -> None:
+    env.environ["CISTERNAL_TELEMETRY_SPANS"] = "${CISTERNAL_TELEMETRY_SPANS}"
+    d = env.get("spans")
+    assert d.layer == "registered default" and d.enabled is False
+
+
+@pytest.mark.parametrize("value", ["maybe", "${1X}", "$", "${A B}", "prefix${X}", "${X}suffix", "%X", "${X", "$1"])
+def test_placeholder_rule_does_not_swallow_other_invalid_values(env: Env, value: str) -> None:
+    env.environ["CISTERNAL_TELEMETRY_SHADOW"] = value
+    with pytest.raises(TelemetrySettingError, match="invalid value"):
+        env.get("shadow")
+
+
+def test_placeholder_legitimate_values_are_unchanged(env: Env) -> None:
+    for raw, expected in (("on", True), ("off", False), ("1", True), ("0", False), (" TRUE ", True)):
+        env.environ["CISTERNAL_TELEMETRY_SHADOW"] = raw
+        assert env.get("shadow").enabled is expected
+
+
 def test_files_and_settings_deeply_nested_settings_fail_closed_not_raise(env: Env) -> None:
     depth = 200_000
     env.settings(None, raw="[" * depth + "]" * depth)

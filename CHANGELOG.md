@@ -5,6 +5,24 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
+## Unreleased
+
+### Added
+
+- **`cisternal telemetry where` lists how to set telemetry on each surface.** A "how to set it" section
+  (text, and `how_to_set` in the JSON report) names the route for Claude Code, Antigravity, opencode,
+  Copilot, Cursor, jcode and pi, and the machine file. The same list prints on every surface: `where` does
+  not detect which one it runs under, and each line says what its claim rests on (a validator message,
+  second-hand docs, "not documented"). Spec `261116_cross-surface-plugin-config`.
+
+### Changed
+
+- **An unexpanded placeholder in a telemetry behaviour variable means no opinion.** A value that is
+  wholly `${NAME}`, `${NAME:-text}`, `{env:NAME}`, `$NAME` or `%NAME%` in `CISTERNAL_TELEMETRY_SPANS` or
+  `_SHADOW` (a surface that passes a placeholder "as written", as Antigravity's validator says it does) is
+  now ignored with a one-time stderr notice, so it can no longer fail a setting closed (`where` exiting 3,
+  the consumer resolving the behaviour off). Any other unrecognised value still raises.
+
 ## 0.1.9 (2026-11-16)
 
 ### Fixed

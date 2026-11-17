@@ -1,5 +1,4 @@
-# 261106-agy-spec-cycles Internal Docs
-Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_reviser (cycle 5 audit entry), cycle5_rereviewer (cycle 5 re-review, superseded notes), challenger_c6 / defender_c6 (cycle 6 audit entry), challenger_c7 / defender_c7 (cycle 7 audit entry), challenger_c8 / defender_c8 (cycle 8 audit entry), worker_m6 (implemented status update), worker_remediation (independent audit entry)
+# 261117-xs-config Internal Docs
 
 ## Daily
 
@@ -10,7 +9,9 @@ Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_revi
 ## Plans
 
 ## Specs
-- [261106_tool-surface-triage](specs/261106_tool-surface-triage.md) — Specification for cisternal tooling that measures MCP/skill use and coverage, prunes dead surface, checks short-description accuracy, and nudges CLI-to-MCP at the moment of the wrong action. (implemented)
+- [261116_cross-surface-plugin-config](specs/261116_cross-surface-plugin-config.md) — Which surfaces can carry a plugin's telemetry setting (spans, shadow), what cisternal renders (nothing beyond Claude Code), and what it says and does everywhere else.
+- [261109_shadow-development](specs/261109_shadow-development.md) — Shared shadow-development pattern providing telemetry events, scoring, stage-gated promotion checks, actor isolation verification, and adoption skill in cisternal.
+- [261106_tool-surface-triage](specs/261106_tool-surface-triage.md) — Specification for cisternal tooling that measures MCP/skill use and coverage, prunes dead surface, checks short-description accuracy, and nudges CLI-to-MCP at the moment of the wrong action.
 - [261001_wire-cli-contract](specs/261001_wire-cli-contract.md) — Declarative CLI contract with exception mapping, rich formatters, and group interop for cisternal #30
 - [260929_sidecar-tree-manifest-verification](specs/260929_sidecar-tree-manifest-verification.md) — Stop the provenance reader from presenting an unverified sidecar/env git sha as authoritative; add one shared tree-manifest writer+verifier for no-.git hosts
 - [260827_git-provenance-telemetry](specs/260827_git-provenance-telemetry.md) — Adds git SHA/branch/dirty-state capture as a first-class cisternal telemetry field, consumed consistently by bathos and myxcel
@@ -62,18 +63,19 @@ Claimed by: defender_c4 (Docs Index Alignment), worker_docs_indexer, cycle5_revi
 ## Actuation Surfaces
 
 ## Audits
-- [261110_independent_swarm_audit](audits/261110_independent_swarm_audit.md) — Independent swarm forensic audit and zero-trust verification of tool-surface triage implementation: Tracks A–D, adversarial probes, anti-facade checks, and completed remediations.
+- [261110_independent_swarm_audit](audits/261110_independent_swarm_audit.md) — Zero-trust forensic audit of the Cycles 1-9 tool-surface triage implementation in cisternal across Tracks A-D, adversarial probes, hermeticity verification, and completed remediations.
 - [261106_cycle1_audit](audits/261106_cycle1_audit.md) — Sequential adversarial audit of tool-surface triage spec: 13 gaps conceded by defender and resolved with architectural specifications.
 - [261106_cycle2_audit](audits/261106_cycle2_audit.md) — Sequential adversarial audit of tool-surface triage spec cycle 2: 6 operational gaps resolved, achieving structural coherence.
 - [261106_cycle3_audit](audits/261106_cycle3_audit.md) — Sequential adversarial audit of tool-surface triage spec cycle 3: resolution of dependency ordering, A8 client hook consistency, and sandbox boundary clarity.
-- [261106_cycle4_audit](audits/261106_cycle4_audit.md) — Sequential adversarial audit of tool-surface triage spec cycle 4: final verification of structural coherence yielding zero open genuine gaps. *Superseded by cycle 5: the probes were argued, not tested, and the zero-gap and termination claims are withdrawn.*
-- [261106_cycle5_audit](audits/261106_cycle5_audit.md) — Cycle 5: spec revised per revision brief A1-A16 and decisions R1-R5, status back to draft; challenger/defender pass plus second-agent re-review found 12 new genuine gaps (GAP-23..34; 3 fixed in spec, 9 open) and 2 unverified risks.
+- [261106_cycle4_audit](audits/261106_cycle4_audit.md) — Sequential adversarial audit of tool-surface triage spec cycle 4: final verification of structural coherence yielding zero open genuine gaps.
+- [261106_cycle5_audit](audits/261106_cycle5_audit.md) — Cycle 5: spec revised per revision brief A1-A16 and decisions R1-R5, status back to draft; challenger/defender pass plus second-agent re-review found 12 new genuine gaps (GAP-23..34; 3 fixed, 9 open) and 2 unverified risks.
 - [261106_cycle6_audit](audits/261106_cycle6_audit.md) — Cycle 6: resolves open Cycle 5 gaps (GAP-23..27, 29, 30, 33, 34) and risks (RISK-01, RISK-02); sequential challenger/defender pass against cisternal source identifies and resolves 4 codebase-integration gaps (GAP-35..38).
 - [261106_cycle7_audit](audits/261106_cycle7_audit.md) — Cycle 7: sequential challenger/defender pass on the post-Cycle-6 draft spec against plugin/config.py, export/claude.py, and shipped .praxia/skills/; identifies and resolves 3 codebase-integration gaps (GAP-39..41).
 - [261106_cycle8_audit](audits/261106_cycle8_audit.md) — Cycle 8: sequential challenger/defender verification pass on the post-Cycle-7 draft spec; all Cycle 5, Cycle 6, and Cycle 7 gaps (GAP-23..41) verified resolved in spec text and aligned with cisternal source code, yielding no new genuine spec gaps while remaining in draft status pending implementation tests.
-- [261106_final_report](audits/261106_final_report.md) — Executive summary and synthesis of 3-phase spec drive: recon, research, 4 adversarial audit cycles, final verdict, open gaps, and unverified elements. *Superseded by cycle 5: its acceptance and zero-gap verdict are withdrawn.*
+- [261106_final_report](audits/261106_final_report.md) — Executive summary and synthesis of 3-phase spec drive: recon, research, 4 adversarial audit cycles, final verdict, open gaps, and unverified elements.
 
 ## Research
+- [261116_surface-plugin-option-mechanisms](research/261116_surface-plugin-option-mechanisms.md) — Docs-sourced answers, per agent surface, to: can a manifest declare user options, where a saved value persists, which processes read it, and whether it can be set non-interactively. Each row is tagged verified-from-docs (with URL) or not-found.
 - [261106_recon_findings](research/261106_recon_findings.md) — Static code audits of assumptions A1-A9 and survey of existing precursors C0-C6 across cisternal, praxia, and bathos.
 - [261106_research_findings](research/261106_research_findings.md) — Prior art and literature foundations for agent tool/skill usage tracking, MCP discoverability, progressive disclosure budgets, and hook-based nudging.
 - [261017_skill-frontmatter-schema](research/261017_skill-frontmatter-schema.md) — What Claude Code reads from SKILL.md frontmatter, why triggers is inert, the listing budget, and what cisternal export now carries
