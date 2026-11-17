@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from cisternal.assets.bundle import AssetBundle, HookSpecAsset
+from cisternal.assets.bundle import AssetBundle, HookSpecAsset, McpAsset
 from cisternal.export._markdown import format_agent_markdown, format_skill_markdown
 from cisternal.export.copilot_rust import emit_copilot_rust_parity
 from cisternal.export.base import Emitter
@@ -46,13 +46,7 @@ class CopilotEmitter(Emitter):
             plugin_obj["hooks"] = _build_copilot_hooks(hook_specs)
 
         if bundle.mcp_servers:
-            plugin_obj["mcpServers"] = {
-                srv.name: {
-                    "command": list(srv.command),
-                    "env": dict(srv.env),
-                }
-                for srv in bundle.mcp_servers
-            }
+            plugin_obj["mcpServers"] = {srv.name: _mcp_server_entry(srv) for srv in bundle.mcp_servers}
 
         files[_PLUGIN_JSON_PATH] = json.dumps(plugin_obj, sort_keys=True, indent=2)
 
@@ -63,18 +57,22 @@ class CopilotEmitter(Emitter):
             files[f"skills/{skill.name}/SKILL.md"] = format_skill_markdown(skill)
 
         if bundle.mcp_servers:
-            mcp_obj = {
-                "mcpServers": {
-                    srv.name: {
-                        "command": list(srv.command),
-                        "env": dict(srv.env),
-                    }
-                    for srv in bundle.mcp_servers
-                }
-            }
+            mcp_obj = {"mcpServers": {srv.name: _mcp_server_entry(srv) for srv in bundle.mcp_servers}}
             files[_MCP_JSON_PATH] = json.dumps(mcp_obj, sort_keys=True, indent=2)
 
         return files
+
+
+def _mcp_server_entry(srv: McpAsset) -> dict[str, object]:
+    """One stdio MCP server in the shape Copilot CLI validates: ``command`` a string, ``args`` a string list, ``env`` a map.
+
+    The Copilot CLI's own schema (read from the installed package's app.js, debt 3413) is
+    ``{type?: "local"|"stdio", command: string, args: string[] (required), cwd?: string, env?: {string: string}}`` and its plugin
+    docs show ``command`` as a string with a separate ``args`` array, never a list. The bundle keeps the command line as one tuple
+    (program first), so the program becomes ``command`` and the rest ``args``.
+    """
+    argv = tuple(srv.command)
+    return {"command": argv[0] if argv else "", "args": list(argv[1:]), "env": dict(srv.env)}
 
 
 def _copilot_event_name(canonical: str) -> str:
