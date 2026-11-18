@@ -1213,3 +1213,322 @@ def test_non_utf8_name_from_ls_files_is_recorded_as_skipped(tmp_path):
     assert manifest is not None
     assert any(s.startswith("non-utf8:") for s in manifest.skipped)
     assert verify_tree(repo, manifest).verified is False
+
+
+# --- Pushed submodule content (debt #3483) ----------------------------------------------------
+
+_SUB = "vendor/sub"
+_IDENT = ["-c", "user.email=test@example.com", "-c", "user.name=Test User"]
+
+
+def _g(cwd: Path, *args: str) -> str:
+    from cisternal.provenance.capture import clean_git_env
+
+    proc = subprocess.run(
+        ["git", *_IDENT, "-c", "protocol.file.allow=always", *args],
+        cwd=cwd, capture_output=True, check=True, env=clean_git_env(),
+    )
+    return proc.stdout.decode().strip()
+
+
+def _superproject_with_submodule(tmp_path: Path) -> tuple[Path, str]:
+    """A superproject with one initialised submodule holding two files; returns (path, HEAD)."""
+    origin = tmp_path / "sub_origin"
+    origin.mkdir()
+    _g(origin, "init", "-q")
+    (origin / "LICENSE").write_text("MIT\n")
+    (origin / "pkg").mkdir()
+    (origin / "pkg" / "mod.py").write_text("x = 1\n")
+    _g(origin, "add", "-A")
+    _g(origin, "commit", "-q", "-m", "sub")
+    sup = tmp_path / "super"
+    sup.mkdir()
+    _g(sup, "init", "-q")
+    (sup / "main.py").write_text("print(1)\n")
+    _g(sup, "add", "-A")
+    _g(sup, "submodule", "add", "-q", str(origin), _SUB)
+    _g(sup, "commit", "-q", "-m", "super")
+    return sup, _g(sup, "rev-parse", "HEAD")
+
+
+def _push_copy(src: Path, dst: Path) -> Path:
+    """What `myxcel push` does to a submodule: rsync every file, .git excluded, so the directory is populated."""
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".git"))
+    return dst
+
+
+class TestPushedSubmoduleContent:
+    def test_populated_gitlink_dir_without_git_verifies_by_content(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None and manifest.skipped == ()
+        assert set(manifest.submodules[_SUB][1]) == {"LICENSE", "pkg/mod.py"}
+        # The recorded subtree is the pinned commit's own tree.
+        assert manifest.submodules[_SUB][0] == _g(sup / _SUB, "rev-parse", "HEAD^{tree}")
+
+        remote = _push_copy(sup, tmp_path / "remote")
+        assert not (remote / _SUB / ".git").exists()
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is True, v
+        assert v.verified_submodules == (_SUB,)
+        assert (v.mismatched, v.missing, v.extra_untracked_under_declared_dirs) == ((), (), ())
+        assert v.n_files == v.n_match == 5  # main.py, .gitmodules, the gitlink entry, two submodule files
+        assert v.tree_id == manifest.tree_id == _g(sup, "rev-parse", "HEAD^{tree}")
+
+    def test_tampered_submodule_file_is_mismatched(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        remote = _push_copy(sup, tmp_path / "remote")
+        (remote / _SUB / "pkg" / "mod.py").write_text("x = 2  # tampered\n")
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False
+        assert v.mismatched == (f"{_SUB}/pkg/mod.py",)
+        assert v.verified_submodules == ()
+
+    def test_missing_submodule_file_fails(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        remote = _push_copy(sup, tmp_path / "remote")
+        (remote / _SUB / "LICENSE").unlink()
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False and v.missing == (f"{_SUB}/LICENSE",)
+
+    def test_unexpected_file_under_a_verified_submodule_is_an_extra(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        remote = _push_copy(sup, tmp_path / "remote")
+        (remote / _SUB / "evil.py").write_text("print('unhashed')\n")
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False
+        assert f"{_SUB}/evil.py" in v.extra_untracked_under_declared_dirs
+        assert v.mismatched == ()
+
+    def test_populated_gitlink_with_no_declaration_still_fails_and_hides_no_extras(self, tmp_path):
+        from dataclasses import replace
+
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        undeclared = replace(manifest, submodules={})  # pin only, as an older writer produced
+        remote = _push_copy(sup, tmp_path / "remote")
+
+        v = verify_tree(remote, undeclared)
+
+        assert v.verified is False
+        assert _SUB in v.mismatched
+        assert {f"{_SUB}/LICENSE", f"{_SUB}/pkg/mod.py"} <= set(v.extra_untracked_under_declared_dirs)
+
+    def test_absent_or_empty_gitlink_dir_still_passes_with_submodule_files_recorded(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        remote = _push_copy(sup, tmp_path / "remote")
+        shutil.rmtree(remote / _SUB)
+        assert verify_tree(remote, manifest).verified is True
+        (remote / _SUB).mkdir()
+        assert verify_tree(remote, manifest).verified is True
+
+    def test_symlinked_gitlink_dir_is_not_followed(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        remote = _push_copy(sup, tmp_path / "remote")
+        shutil.rmtree(remote / _SUB)
+        (remote / _SUB).symlink_to(sup / _SUB)  # genuine content, reached through a link
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False and _SUB in v.mismatched
+
+    def test_dirty_submodule_worktree_fails_closed_at_build(self, tmp_path):
+        sup, head = _superproject_with_submodule(tmp_path)
+        (sup / _SUB / "pkg" / "mod.py").write_text("x = 99\n")
+
+        manifest = build_tree_manifest(sup, commit=head)
+
+        assert manifest is not None
+        assert f"gitlink-dirty:{_SUB}" in manifest.skipped
+        assert _SUB not in manifest.submodules
+        assert verify_tree(_push_copy(sup, tmp_path / "remote"), manifest).verified is False
+
+    def test_round_trip_and_validation(self, tmp_path):
+        import copy
+
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        again = TreeManifest.from_dict(manifest.to_dict())
+        assert again == manifest and again.submodules == manifest.submodules
+
+        d = manifest.to_dict()
+        for mutate in (
+            lambda x: x["submodules"].update({"main.py": x["submodules"][_SUB]}),  # not a gitlink entry
+            lambda x: x["submodules"][_SUB]["files"].update({"../escape": ["100644", "a" * 40]}),
+            lambda x: x["submodules"][_SUB]["files"].update({"nested": ["160000", "a" * 40]}),
+            lambda x: x["submodules"][_SUB].update({"tree": "xyz"}),
+        ):
+            bad_d = copy.deepcopy(d)
+            mutate(bad_d)
+            assert TreeManifest.from_dict(bad_d) is None
+
+    def test_submodule_files_inconsistent_with_recorded_tree_is_not_manifest_ok(self, tmp_path):
+        from dataclasses import replace
+
+        sup, head = _superproject_with_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        tree, sub_files = manifest.submodules[_SUB]
+        forged = dict(sub_files)
+        forged["LICENSE"] = ("100644", blob_id(b"forged\n"))
+        bad = replace(manifest, submodules={_SUB: (tree, forged)})
+        remote = _push_copy(sup, tmp_path / "remote")
+        (remote / _SUB / "LICENSE").write_text("forged\n")
+
+        v = verify_tree(remote, bad)
+
+        assert v.manifest_ok is False and v.verified is False
+
+
+# --- Configurable time budget (debt #3483) -----------------------------------------------------
+
+
+@pytest.fixture
+def clean_budget_env(monkeypatch, tmp_path):
+    """No env var, and an XDG_CONFIG_HOME that holds no config unless a test writes one."""
+    from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR
+
+    monkeypatch.delenv(MAX_SECONDS_ENV_VAR, raising=False)
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    return xdg
+
+
+def _write_user_config(xdg: Path, text: str) -> Path:
+    cfg = xdg / "cisternal" / "config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(text)
+    return cfg
+
+
+class TestBudgetResolution:
+    def test_default_scales_with_file_count_within_floor_and_cap(self, tmp_path, clean_budget_env):
+        from cisternal.provenance.tree_manifest import resolve_max_seconds
+
+        assert resolve_max_seconds(tmp_path, 10)[0] == 60.0
+        assert resolve_max_seconds(tmp_path, 782)[0] == 391.0
+        assert resolve_max_seconds(tmp_path, 10**6)[0] == 900.0
+        assert resolve_max_seconds(tmp_path, 782)[1].startswith("default (scaled: 782 files")
+
+    def test_explicit_argument_beats_every_layer(self, tmp_path, monkeypatch, clean_budget_env):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR, resolve_max_seconds
+
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, "111")
+        (tmp_path / "pyproject.toml").write_text("[tool.cisternal.provenance]\nmax_seconds = 222\n")
+        assert resolve_max_seconds(tmp_path, 5, 7.5) == (7.5, "arg")
+
+    def test_env_beats_pyproject_beats_user_config_beats_default(self, tmp_path, monkeypatch, clean_budget_env):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR, resolve_max_seconds
+
+        proj = tmp_path / "proj"
+        (proj / "deep" / "er").mkdir(parents=True)
+        (proj / "pyproject.toml").write_text("[tool.cisternal.provenance]\nmax_seconds = 222\n")
+        cfg = _write_user_config(clean_budget_env, "[provenance]\nmax_seconds = 333\n")
+        start = proj / "deep" / "er"  # the NEAREST pyproject above the root is used
+
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, "111")
+        assert resolve_max_seconds(start, 5) == (111.0, f"env:{MAX_SECONDS_ENV_VAR}")
+        monkeypatch.delenv(MAX_SECONDS_ENV_VAR)
+        assert resolve_max_seconds(start, 5) == (222.0, f"pyproject:{(proj / 'pyproject.toml').resolve()}")
+        (proj / "pyproject.toml").write_text("[tool.other]\nx = 1\n")  # nearest file lacks the key
+        assert resolve_max_seconds(start, 5) == (333.0, f"user-config:{cfg}")
+        cfg.unlink()
+        assert resolve_max_seconds(start, 5)[0] == 60.0
+
+    @pytest.mark.parametrize("raw", ["", "   ", "none", "NONE"])
+    def test_env_empty_or_none_means_default_and_skips_lower_layers(self, tmp_path, monkeypatch, clean_budget_env, raw):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR, resolve_max_seconds
+
+        (tmp_path / "pyproject.toml").write_text("[tool.cisternal.provenance]\nmax_seconds = 222\n")
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, raw)
+        seconds, source = resolve_max_seconds(tmp_path, 782)
+        assert seconds == 391.0 and "disabled -> default" in source
+
+    def test_configured_value_is_used_exactly_not_scaled_or_capped(self, tmp_path, monkeypatch, clean_budget_env):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR, resolve_max_seconds
+
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, "5000")
+        assert resolve_max_seconds(tmp_path, 10**6)[0] == 5000.0
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, "2")
+        assert resolve_max_seconds(tmp_path, 10**6)[0] == 2.0
+
+    @pytest.mark.parametrize("bad", ["abc", "-1", "0", "nan", "inf"])
+    def test_malformed_env_raises(self, tmp_path, monkeypatch, clean_budget_env, bad):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR, BudgetConfigError, resolve_max_seconds
+
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, bad)
+        with pytest.raises(BudgetConfigError, match=MAX_SECONDS_ENV_VAR):
+            resolve_max_seconds(tmp_path, 5)
+
+    @pytest.mark.parametrize("body", [
+        "[tool.cisternal.provenance]\nmax_seconds = 'soon'\n",
+        "[tool.cisternal.provenance]\nmax_seconds = true\n",
+        "[tool.cisternal.provenance]\nmax_seconds = -3\n",
+        "[tool.cisternal]\nprovenance = 5\n",
+        "this is = not [toml\n",
+    ])
+    def test_malformed_pyproject_raises(self, tmp_path, clean_budget_env, body):
+        from cisternal.provenance.tree_manifest import BudgetConfigError, resolve_max_seconds
+
+        (tmp_path / "pyproject.toml").write_text(body)
+        with pytest.raises(BudgetConfigError, match="pyproject.toml"):
+            resolve_max_seconds(tmp_path, 5)
+
+    @pytest.mark.parametrize("body", ["[provenance]\nmax_seconds = 'x'\n", "provenance = 3\n", "[[[bad\n"])
+    def test_malformed_user_config_raises(self, tmp_path, clean_budget_env, body):
+        from cisternal.provenance.tree_manifest import BudgetConfigError, resolve_max_seconds
+
+        _write_user_config(clean_budget_env, body)
+        with pytest.raises(BudgetConfigError, match="user config"):
+            resolve_max_seconds(tmp_path, 5)
+
+    def test_verify_tree_reports_the_deciding_layer(self, tmp_path, monkeypatch, clean_budget_env):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR
+
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+
+        v = verify_tree(copy, manifest)
+        assert v.verified is True and v.budget_seconds == 60.0 and v.budget_source.startswith("default")
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, "123")
+        v = verify_tree(copy, manifest)
+        assert (v.budget_seconds, v.budget_source) == (123.0, f"env:{MAX_SECONDS_ENV_VAR}")
+        v = verify_tree(copy, manifest, max_seconds=9.0)
+        assert (v.budget_seconds, v.budget_source) == (9.0, "arg")
+
+    def test_verify_tree_with_malformed_budget_fails_loudly_not_to_default(self, tmp_path, monkeypatch, clean_budget_env):
+        from cisternal.provenance.tree_manifest import MAX_SECONDS_ENV_VAR
+
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+        copy = tmp_path / "copy"
+        _copy_no_git(repo, copy)
+        monkeypatch.setenv(MAX_SECONDS_ENV_VAR, "ten minutes")
+
+        v = verify_tree(copy, manifest)
+
+        assert v.verified is False
+        assert v.error is not None and "malformed provenance budget" in v.error and MAX_SECONDS_ENV_VAR in v.error
