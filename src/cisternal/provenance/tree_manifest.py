@@ -49,7 +49,13 @@ directory by content against those entries: tampered files are ``mismatched``, a
 ``missing``, anything else under it an extra. A populated gitlink with no ``submodules``
 entry, and an absent or empty one, behave as before. Verified submodules are listed in
 ``TreeVerification.verified_submodules``. ``manifest_ok`` also requires each recorded
-``files`` set to hash to its recorded ``tree``.
+``files`` set to hash to its recorded ``tree``. Trust boundary: a reader without the
+submodule's object database cannot turn the pin (a commit sha) into a tree sha, so
+``submodules`` is trusted exactly as far as the sidecar that carries it, like every other
+manifest entry; ``tree_id`` anchors only the pin. Every recorded submodule directory is scanned
+for extras with no ignore rules (a ``.gitignore`` shipped in the submodule cannot hide files),
+even when its path is top-level or absent from ``declared_dirs``. An empty recorded file list
+vouches for nothing, so a populated directory with one is not accepted.
 
 Verification budget. ``verify_tree(max_seconds=None)`` resolves the time budget by
 ``resolve_max_seconds``: explicit argument > ``CISTERNAL_PROVENANCE_MAX_SECONDS`` (empty or
@@ -315,7 +321,7 @@ def _safe_relpath(rel: object) -> bool:
     """True for a non-empty POSIX relative path with no empty, ``.`` or ``..`` component."""
     if not isinstance(rel, str) or not rel or "\0" in rel:
         return False
-    return all(part not in ("", ".", "..") for part in rel.split("/"))
+    return all(part not in ("", ".", "..", ".git") for part in rel.split("/"))
 
 
 def _parse_submodules(
@@ -693,6 +699,9 @@ def build_tree_manifest(
             declared_dirs_list = sorted(declared_set)
         else:
             declared_dirs_list = sorted(set(declared_dirs))
+        # A recorded submodule directory is always scanned for extras, even a top-level one
+        # (whose path has no "/" and so contributes no default declared dir) or one the caller omitted.
+        declared_dirs_list = sorted({*declared_dirs_list, *submodules})
 
         # Determine extra_excludes (default: from git config)
         extra_excludes_list: list[str] = []
@@ -806,7 +815,7 @@ def _parse_budget(raw: object, where: str, *, allow_zero: bool = False) -> float
         raise BudgetConfigError(f"{where}: max_seconds must be a number, got {raw!r}")
     try:
         value = float(raw.strip()) if isinstance(raw, str) else float(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise BudgetConfigError(f"{where}: max_seconds must be a number of seconds, got {raw!r}") from None
     if not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
         raise BudgetConfigError(f"{where}: max_seconds must be a positive finite number, got {raw!r}")
@@ -820,10 +829,12 @@ def _budget_from_toml(path: Path, tables: tuple[str, ...], label: str) -> float 
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise BudgetConfigError(f"malformed {label} {path}: {exc}") from exc
     node = data
-    for key in tables:
+    for i, key in enumerate(tables):
         node = node.get(key) if isinstance(node, dict) else None
         if node is None:
             return None
+        if not isinstance(node, dict):
+            raise BudgetConfigError(f"malformed {label} {path}: [{'.'.join(tables[: i + 1])}] must be a table")
     if not isinstance(node, dict):
         raise BudgetConfigError(f"malformed {label} {path}: [{'.'.join(tables)}] must be a table")
     if "max_seconds" not in node:
@@ -895,15 +906,17 @@ def verify_tree(
     ``budget_source``. A malformed budget setting returns ``verified=False`` with an explicit
     ``error`` and no verification attempt. Never raises.
     """
-    n_files = len(manifest.files) + sum(len(f) for _, f in manifest.submodules.values())
     try:
+        n_files = len(manifest.files) + sum(len(f) for _, f in manifest.submodules.values())
         seconds, source = resolve_max_seconds(Path(root), n_files, max_seconds)
-    except (BudgetConfigError, OSError, RuntimeError) as exc:
+    except Exception as exc:  # noqa: BLE001 - verify_tree never raises; BudgetConfigError is the expected case
+        n_seen = len(manifest.files) if isinstance(manifest, TreeManifest) else 0
+        kind = "malformed provenance budget" if isinstance(exc, BudgetConfigError) else type(exc).__name__
         return TreeVerification(
-            verified=False, n_files=len(manifest.files), n_match=0, mismatched=(), missing=(),
+            verified=False, n_files=n_seen, n_match=0, mismatched=(), missing=(),
             extra_untracked_under_declared_dirs=(), mode_changed=(), manifest_ok=False,
             extras_ignore_aware=False, tree_id=None, dirty_content_id_consistent=None,
-            error=f"malformed provenance budget: {exc}",
+            error=f"{kind}: {exc}",
         )
     result = _verify_tree_impl(
         root, manifest, cwd=cwd, dirty_content_id=dirty_content_id, max_bytes=max_bytes, max_seconds=seconds
@@ -982,6 +995,7 @@ def _verify_tree_impl(
             sub_dir = root / entry_path
             if (
                 declared is not None
+                and declared[1]  # an empty recorded file list vouches for nothing: treat as undeclared
                 and not _gitlink_path_is_empty(sub_dir)
                 and os.path.isdir(sub_dir)
                 and not os.path.islink(sub_dir)
@@ -1179,7 +1193,7 @@ def _verify_tree_impl(
         root_resolved = root.resolve()
         cwd_resolved = Path(cwd).resolve() if cwd is not None else None
 
-        scan_dirs_list: list[str] = list(manifest.declared_dirs)
+        scan_dirs_list: list[str] = sorted({*manifest.declared_dirs, *expanded})
         cwd_dir_to_scan: str | None = None
 
         if cwd_resolved is not None:
@@ -1329,6 +1343,49 @@ def _verify_tree_impl(
                                 )
                         else:
                             extras_ignore_aware = True
+
+                        # Strict pass over every submodule directory verified by content: NO ignore
+                        # rules, so a .gitignore the submodule itself ships (e.g. `*.so`, `*.pyc`)
+                        # cannot hide unhashed files. Only interpreter bytecode under __pycache__
+                        # (the BUILTIN exemption) and bathos run-lock manifests are exempt.
+                        if expanded:
+                            result_strict = subprocess.run(
+                                [
+                                    "git",
+                                    "-c", "safe.directory=*",
+                                    f"--git-dir={tmp_git_dir}",
+                                    f"--work-tree={root_resolved}",
+                                    "ls-files", "-z", "-o",
+                                    "--", *expanded,
+                                ],
+                                capture_output=True,
+                                env=env,
+                                timeout=_remaining(),
+                            )
+                            if result_strict.returncode != 0:
+                                first_line = result_strict.stderr.decode("utf-8", errors="replace").strip().split("\n")[0][:100]
+                                return TreeVerification(
+                                    verified=False,
+                                    n_files=n_files,
+                                    n_match=n_match,
+                                    mismatched=tuple(mismatched),
+                                    missing=tuple(missing),
+                                    extra_untracked_under_declared_dirs=tuple(extras),
+                                    mode_changed=tuple(mode_changed),
+                                    manifest_ok=manifest_ok,
+                                    extras_ignore_aware=False,
+                                    tree_id=tree_id(recomputed_tree_dict) if not missing else None,
+                                    dirty_content_id_consistent=None,
+                                    error=f"git ls-files failed (submodule scan): {first_line}",
+                                )
+                            for f in result_strict.stdout.decode("utf-8", errors="replace").split("\0"):
+                                if (
+                                    f
+                                    and f not in known_paths
+                                    and f not in extras
+                                    and "__pycache__" not in f.split("/")
+                                ):
+                                    _record_extra(f)
 
                         # Scan cwd dir non-recursively
                         if cwd_dir_to_scan is not None:

@@ -1532,3 +1532,112 @@ class TestBudgetResolution:
 
         assert v.verified is False
         assert v.error is not None and "malformed provenance budget" in v.error and MAX_SECONDS_ENV_VAR in v.error
+
+
+# --- Review fixes (PR #84 review + audit) -------------------------------------------------------
+
+
+def _superproject_with_toplevel_submodule(tmp_path: Path, sub_gitignore: str | None = None) -> tuple[Path, str]:
+    """Like _superproject_with_submodule but the submodule is a TOP-LEVEL path ("extern")."""
+    origin = tmp_path / "sub_origin"
+    origin.mkdir()
+    _g(origin, "init", "-q")
+    (origin / "LICENSE").write_text("MIT\n")
+    if sub_gitignore is not None:
+        (origin / ".gitignore").write_text(sub_gitignore)
+    _g(origin, "add", "-A")
+    _g(origin, "commit", "-q", "-m", "sub")
+    sup = tmp_path / "super"
+    sup.mkdir()
+    _g(sup, "init", "-q")
+    (sup / "main.py").write_text("print(1)\n")
+    _g(sup, "add", "-A")
+    _g(sup, "submodule", "add", "-q", str(origin), "extern")
+    _g(sup, "commit", "-q", "-m", "super")
+    return sup, _g(sup, "rev-parse", "HEAD")
+
+
+class TestSubmoduleReviewFixes:
+    def test_toplevel_submodule_is_scanned_for_extras(self, tmp_path):
+        sup, head = _superproject_with_toplevel_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None and "extern" in manifest.declared_dirs
+        remote = _push_copy(sup, tmp_path / "remote")
+        assert verify_tree(remote, manifest).verified is True
+        (remote / "extern" / "evil.py").write_text("print('unhashed')\n")
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False and "extern/evil.py" in v.extra_untracked_under_declared_dirs
+
+    def test_reader_scans_expanded_gitlink_even_if_manifest_declared_dirs_omits_it(self, tmp_path):
+        from dataclasses import replace
+
+        sup, head = _superproject_with_toplevel_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        manifest = replace(manifest, declared_dirs=())  # e.g. a manifest from a buggy/older writer
+        remote = _push_copy(sup, tmp_path / "remote")
+        (remote / "extern" / "evil.py").write_text("print('unhashed')\n")
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False and "extern/evil.py" in v.extra_untracked_under_declared_dirs
+
+    def test_explicit_declared_dirs_still_include_submodule_paths(self, tmp_path):
+        sup, head = _superproject_with_toplevel_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head, declared_dirs=[])
+        assert manifest is not None and "extern" in manifest.declared_dirs
+
+    def test_submodule_gitignore_cannot_hide_unhashed_files(self, tmp_path):
+        sup, head = _superproject_with_toplevel_submodule(tmp_path, sub_gitignore="*.so\n*.pyc\n")
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        remote = _push_copy(sup, tmp_path / "remote")
+        assert verify_tree(remote, manifest).verified is True
+        (remote / "extern" / "hidden.so").write_bytes(b"\x7fELF")
+
+        v = verify_tree(remote, manifest)
+
+        assert v.verified is False and "extern/hidden.so" in v.extra_untracked_under_declared_dirs
+
+    def test_populated_gitlink_with_empty_recorded_file_list_is_not_verified(self, tmp_path):
+        from dataclasses import replace
+
+        sup, head = _superproject_with_toplevel_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        empty_tree = tree_id({})
+        bad = replace(manifest, submodules={"extern": (empty_tree, {})})
+        remote = _push_copy(sup, tmp_path / "remote")
+
+        v = verify_tree(remote, bad)
+
+        assert v.verified is False and v.verified_submodules == ()
+
+    def test_dot_git_component_in_submodule_files_is_rejected(self, tmp_path):
+        sup, head = _superproject_with_toplevel_submodule(tmp_path)
+        manifest = build_tree_manifest(sup, commit=head)
+        assert manifest is not None
+        d = manifest.to_dict()
+        d["submodules"]["extern"]["files"][".git/config"] = ["100644", "a" * 40]
+        assert TreeManifest.from_dict(d) is None
+
+    def test_verify_tree_never_raises_on_hostile_budget_or_manifest(self, tmp_path, monkeypatch, clean_budget_env):
+        repo = _init_test_repo(tmp_path / "repo")
+        manifest = build_tree_manifest(repo, commit=None)
+        assert manifest is not None
+        (tmp_path / "pyproject.toml").write_text(f"[tool.cisternal.provenance]\nmax_seconds = {10**400}\n")
+        v = verify_tree(tmp_path, manifest)
+        assert v.verified is False and "malformed provenance budget" in (v.error or "")
+        v = verify_tree(repo, manifest, max_seconds=10**400)  # type: ignore[arg-type]
+        assert v.verified is False and "malformed provenance budget" in (v.error or "")
+        v = verify_tree(repo, None)  # type: ignore[arg-type]
+        assert v.verified is False and v.error
+
+    def test_non_table_cisternal_config_is_loud(self, tmp_path, clean_budget_env):
+        from cisternal.provenance.tree_manifest import BudgetConfigError, resolve_max_seconds
+
+        (tmp_path / "pyproject.toml").write_text('[tool]\ncisternal = "x"\n')
+        with pytest.raises(BudgetConfigError, match="pyproject.toml"):
+            resolve_max_seconds(tmp_path, 5)
