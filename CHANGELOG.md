@@ -5,10 +5,26 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
-## Unreleased
+## 0.1.11 (2026-11-19)
 
 ### Fixed
 
+- **A pushed submodule no longer withholds the git sha.** `myxcel push` copies a submodule's files, so
+  `vendor/cimist` is populated but has no `.git`, and the pin-only gitlink check reported it as mismatched and listed
+  its files as extras (bathos recorded `git_hash="unknown"`). The writer now also records
+  `submodules[<path>] = (tree, files)` from the pinned commit's tree, and the reader verifies a populated gitlink
+  directory by content: tampered files are `mismatched`, absent ones `missing`, anything else under it an extra (a
+  `.gitignore` inside the submodule cannot hide files). A submodule that is dirty, nested or unreadable still fails
+  closed. `manifest_version` is unchanged, and older readers ignore the new key and fail closed as before. The new
+  `submodules` field is trusted as far as the manifest itself, since the pushed copy has no `.git` to resolve the pin.
+  `TreeVerification.verified_submodules` lists what was verified. Debt 3483, PR #84.
+- **The verify budget is configurable and scales with manifest size.** `DEFAULT_MAX_SECONDS = 60` was hard-coded.
+  `verify_tree(max_seconds=None)` now resolves argument > `CISTERNAL_PROVENANCE_MAX_SECONDS` (`none` or empty means
+  default) > `[tool.cisternal.provenance] max_seconds` in the nearest `pyproject.toml` >
+  `[provenance] max_seconds` in `${XDG_CONFIG_HOME:-~/.config}/cisternal/config.toml` > default. The default is
+  `clamp(0.5 s x files, 60 s, 900 s)`; configured values are used exactly. `TreeVerification.budget_seconds` and
+  `budget_source` say which layer decided, and a malformed value fails verification loudly (`malformed provenance
+  budget: ...`) instead of falling back. A local `DEFAULT_MAX_SECONDS` hand-patch is undone by this release.
 - **The Copilot export writes MCP servers in the shape the Copilot CLI validates.** `command` was written as a list and
   `args` was missing; the Copilot CLI's own schema (read from its installed package) wants `command` as a string and `args` as
   a required string list, and its plugin docs show the same. The program is now `command` and the rest of the command line is
