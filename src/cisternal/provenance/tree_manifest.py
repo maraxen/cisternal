@@ -223,7 +223,7 @@ class TreeManifest:
 
     def to_dict(self) -> dict:
         """Return JSON-ready dict (lists not tuples, files as {path: [mode, blob]})."""
-        out = {
+        out: dict[str, Any] = {
             "manifest_version": self.manifest_version,
             "hash_algo": self.hash_algo,
             "commit": self.commit,
@@ -340,7 +340,8 @@ def _parse_submodules(
             return None
         if not isinstance(body, dict):
             return None
-        tree, sub_raw = body.get("tree"), body.get("files")
+        body_d = cast(dict[str, Any], body)
+        tree, sub_raw = body_d.get("tree"), body_d.get("files")
         if not isinstance(tree, str) or not _is_valid_hex(tree, 40) or not isinstance(sub_raw, dict):
             return None
         sub_files: dict[str, tuple[str, str]] = {}
@@ -352,7 +353,7 @@ def _parse_submodules(
                 return None
             if not isinstance(blob_hex, str) or not _is_valid_hex(blob_hex, 40):
                 return None
-            sub_files[rel] = (mode, blob_hex)
+            sub_files[cast(str, rel)] = (cast(str, mode), blob_hex)
         out[path] = (tree, sub_files)
     return out
 
@@ -814,7 +815,7 @@ def _parse_budget(raw: object, where: str, *, allow_zero: bool = False) -> float
     if isinstance(raw, bool):
         raise BudgetConfigError(f"{where}: max_seconds must be a number, got {raw!r}")
     try:
-        value = float(raw.strip()) if isinstance(raw, str) else float(raw)  # type: ignore[arg-type]
+        value = float(raw.strip()) if isinstance(raw, str) else float(cast(Any, raw))
     except (TypeError, ValueError, OverflowError):
         raise BudgetConfigError(f"{where}: max_seconds must be a number of seconds, got {raw!r}") from None
     if not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
