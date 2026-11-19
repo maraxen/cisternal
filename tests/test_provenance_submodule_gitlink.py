@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from cisternal.provenance.capture import clean_git_env
@@ -163,6 +164,8 @@ def test_reader_rejects_a_pinned_path_that_holds_content(tmp_path):
     sup, head, _pin = _make_superproject(tmp_path)
     manifest = build_tree_manifest(sup, commit=head)
     assert manifest is not None
+    # Pin-only manifest (no submodule files recorded, e.g. built by an older writer).
+    manifest = replace(manifest, submodules={})
     remote = _remote_copy(manifest, sup, tmp_path / "remote")
     (remote / SUB / "evil.py").write_text("print('not in the manifest')\n")
 
