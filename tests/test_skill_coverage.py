@@ -17,10 +17,10 @@ from cisternal.usage.coverage import (
 
 
 def test_load_monitored_skills_workspace() -> None:
-    """load_monitored_skills discovers all 6 monitored skills in .praxia/manifest.toml."""
+    """load_monitored_skills discovers all 7 monitored skills in .praxia/manifest.toml."""
     manifest_path = Path(".praxia/manifest.toml")
     monitored, unmonitored = load_monitored_skills(manifest_paths=[manifest_path])
-    assert len(monitored) == 6
+    assert len(monitored) == 7
     for expected in (
         "export-trust",
         "run-cisternal",
@@ -28,6 +28,7 @@ def test_load_monitored_skills_workspace() -> None:
         "writing-skill-triggers",
         "triage-tool",
         "developing-in-shadow",
+        "closing-session",
     ):
         assert expected in monitored
         skill = monitored[expected]
