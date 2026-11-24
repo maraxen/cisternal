@@ -2,24 +2,37 @@
 
 Provides:
 - shadow score <feature>: Join and score verdicts against labels with Wilson CI.
+- shadow packet: Write a ruling packet of open items from one shadow store.
+- shadow page / shadow sheet: Render a ruling packet as an Artifact page or offline HTML sheet.
 """
 
 from __future__ import annotations
 
 import json
+import socket
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import cyclopts
 
 from cisternal.shadow.mode_state import GateCheckError, check_mode_state
 from cisternal.shadow.resolution import ResolutionError, resolve_log_dir
+from cisternal.shadow.ruling.adapters import load_adapter
+from cisternal.shadow.ruling.importer import ImportUsageError, import_labels, report_dict
+from cisternal.shadow.ruling.packet import (
+    DEFAULT_CAP,
+    Origin,
+    PacketError,
+    build_packet,
+    load_packet,
+)
+from cisternal.shadow.ruling.render import render
 from cisternal.shadow.scoring import ScoringRefusalError, score_feature
 
 shadow_app = cyclopts.App(
     name="shadow",
-    help="Shadow-development lifecycle commands (score, check).",
+    help="Shadow-development lifecycle commands (score, check, packet).",
     version_flags=[],
 )
 
@@ -243,3 +256,202 @@ def shadow_check(
     print(f"    Invalid Records: {m.get('invalid_records')} | Malformed Lines: {m.get('malformed_lines')}")
 
     raise SystemExit(result.exit_code)
+
+
+@shadow_app.command(name="packet")
+def shadow_packet(
+    *,
+    adapter: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--adapter"],
+            help="Ruling adapter name (cisternal.ruling_adapters entry point).",
+        ),
+    ],
+    store: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--store"],
+            help="Shadow store the adapter reads open items from.",
+        ),
+    ],
+    limit: Annotated[
+        int,
+        cyclopts.Parameter(
+            name=["--limit"],
+            help="Maximum items to consider for one packet (default: 40).",
+        ),
+    ] = DEFAULT_CAP,
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--out"],
+            help="Path to write the packet JSON (default: ruling_packet.json).",
+        ),
+    ] = Path("ruling_packet.json"),
+    session_id: Annotated[
+        str,
+        cyclopts.Parameter(name=["--session-id"], help="Session that built the packet."),
+    ],
+    task_id: Annotated[
+        str,
+        cyclopts.Parameter(name=["--task-id"], help="Task id (YYMMDD_slug)."),
+    ],
+) -> None:
+    """Write a ruling packet of open items from one shadow store."""
+    try:
+        ruling_adapter = load_adapter(adapter)
+    except KeyError as exc:
+        print(str(exc.args[0]) if exc.args else str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    store_path = store.resolve()
+    raw_items = ruling_adapter.open_items(store_path, limit)
+    if not raw_items:
+        print(json.dumps({"packet": None, "message": "nothing to rule"}, indent=2))
+        return
+
+    origin = Origin(
+        host=socket.gethostname(),
+        store_kind=ruling_adapter.store_kind,
+        store_path=str(store_path),
+        session_id=session_id,
+        task_id=task_id,
+    )
+    packet = build_packet(raw_items, origin, cap=limit)
+    out_path = out.resolve()
+    out_path.write_text(packet.to_json() + "\n", encoding="utf-8")
+
+    summary = {
+        "packet": str(out_path),
+        "items": len(packet.items),
+        "probes": sum(1 for it in packet.items if it.is_probe),
+        "sheet_only": len(packet.sheet_only),
+    }
+    print(json.dumps(summary, indent=2))
+
+
+def _write_ruling_html(packet_path: Path, out: Path, mode: Literal["page", "sheet"]) -> None:
+    try:
+        packet = load_packet(packet_path)
+    except PacketError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    out_path = out.resolve()
+    out_path.write_text(render(packet, mode), encoding="utf-8")
+    summary = {
+        "mode": mode,
+        "html": str(out_path),
+        "items": len(packet.items),
+        "sheet_only": len(packet.sheet_only),
+    }
+    print(json.dumps(summary, indent=2))
+
+
+@shadow_app.command(name="page")
+def shadow_page(
+    *,
+    packet: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--packet"], help="Ruling packet JSON written by `shadow packet`."),
+    ],
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--out"], help="Path to write the ruling page HTML (default: ruling_page.html)."),
+    ] = Path("ruling_page.html"),
+) -> None:
+    """Write the owner ruling page (Path A) for a packet, to publish as an Artifact."""
+    _write_ruling_html(packet, out, "page")
+
+
+@shadow_app.command(name="sheet")
+def shadow_sheet(
+    *,
+    packet: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--packet"], help="Ruling packet JSON written by `shadow packet`."),
+    ],
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--out"], help="Path to write the offline sheet HTML (default: ruling_sheet.html)."),
+    ] = Path("ruling_sheet.html"),
+) -> None:
+    """Write the offline ruling sheet (Path B) for a packet; no capabilities."""
+    _write_ruling_html(packet, out, "sheet")
+
+
+@shadow_app.command(name="import-labels")
+def shadow_import_labels(
+    source: Path,
+    *,
+    packet: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--packet"], help="Ruling packet JSON the rulings answer."),
+    ],
+    confirm_owner: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--confirm-owner"],
+            help="Required for a sheet (labels.json) source: the owner confirms the import.",
+        ),
+    ] = False,
+    labels_out: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--labels-out"],
+            help="Write a standalone labels JSONL instead of writing into the store.",
+        ),
+    ] = None,
+    records_dir: Annotated[
+        Path | None,
+        cyclopts.Parameter(name=["--records-dir"], help="Records directory to write into."),
+    ] = None,
+    page_url: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--page-url"],
+            help="Published ruling page URL. Required for a page directory; refused for a sheet.",
+        ),
+    ] = None,
+) -> None:
+    """Import owner rulings from a page export directory or a sheet labels file."""
+    try:
+        packet_obj = load_packet(packet)
+    except PacketError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    effective_records_dir = records_dir
+    # Only a records-kind packet writes into the records directory (R23); other
+    # stores are read from the packet's own origin path, so no log_dir is needed.
+    if labels_out is None and packet_obj.origin.store_kind == "cisternal_records":
+        try:
+            if records_dir is None:
+                res_log = resolve_log_dir(cli_arg=None)
+                effective_records_dir = res_log.path
+                print(res_log.provenance, file=sys.stderr)
+            else:
+                print(f"resolved log_dir from CLI argument ({records_dir})", file=sys.stderr)
+        except ResolutionError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(exc.exit_code) from exc
+
+    try:
+        report = import_labels(
+            source,
+            packet_obj,
+            confirm_owner=confirm_owner,
+            labels_out=labels_out,
+            records_dir=effective_records_dir,
+            page_url=page_url,
+        )
+    except ImportUsageError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+    except ResolutionError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(exc.exit_code) from exc
+
+    print(json.dumps(report_dict(report), indent=2))
+    raise SystemExit(1 if report.refused or report.not_written else 0)

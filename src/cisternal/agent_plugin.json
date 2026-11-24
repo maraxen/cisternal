@@ -41,6 +41,16 @@
       {
         "content": "",
         "event": "PreToolUse",
+        "matcher": "ArtifactData",
+        "script": "cisternal-hook pre-tool-use",
+        "surfaces": [
+          "claude"
+        ],
+        "tier": "essential"
+      },
+      {
+        "content": "",
+        "event": "PreToolUse",
         "matcher": "Bash",
         "script": "cisternal-hook pre-tool-use",
         "surfaces": [
@@ -54,9 +64,38 @@
     "metadata": {
       "description": "Agent-asset export CLI — dogfood manifest for M4 Export Trust",
       "name": "cisternal",
-      "version": "0.1.11"
+      "version": "0.1.12"
     },
     "skills": [
+      {
+        "agent": "",
+        "allowed_tools": [],
+        "argument_hint": "",
+        "arguments": [],
+        "body": "# closing-session\n\nHands the owner a ruling page for shadow items this session touched, so the owner can rule on them from any device at close-out. Rulings come back at the next pickup and are imported into the shadow records.\n\n## When to Use\n\nUse at session close-out (the handoff step, see praxia `handoff`) when this session ran or touched a shadow adapter, or when a pickup has ruling-page URLs waiting in the handoff's `open_questions`. For running and scoring shadow features themselves, use `developing-in-shadow`.\n\n## Close-out steps\n\n1. **Build a packet per adapter the session touched.** Run once per adapter:\n\n   ```bash\n   cisternal shadow packet --adapter NAME --store PATH [--limit 40] [--out ruling_packet.json] --session-id S --task-id T\n   ```\n\n   Adapters:\n   - `maraxiom.prose`: `--store` is the maraxiom rubric store root.\n   - `maraxiom.fig`: `--store` is the cisternal records dir.\n   - `cisternal.records`: import only, not a packet source.\n\n   The output is JSON `{packet, items, probes, sheet_only}`. If it is `{\"packet\": null, \"message\": \"nothing to rule\"}`, the adapter has no open items: skip the rest for that adapter.\n\n2. **If there are items, build and publish the page.**\n   - `cisternal shadow page --packet P --out page.html`\n   - Publish `page.html` as a **private** Artifact with exactly these capabilities:\n     `{\"db\": {\"rules\": [{\"path\": \"cisternal_rulings\", \"write\": \"admin\"}]}, \"user\": {}}`\n   - Give the owner the link.\n   - Record the page URL in the handoff `open_questions` until the rulings are imported.\n\n3. **Never show the owner a verdict.** Do not show the owner the agent's or the judge's verdict on any item. The owner rules blind.\n\n4. **Never write to `cisternal_rulings`.** The page is the only writer. The ArtifactData guard that denies these writes is active only once the cisternal 0.1.12 plugin is installed (`cisternal plugin update`, or the project's documented install). Until then, the rule is yours to keep.\n\n## Pickup: import the rulings\n\nRun at the next pickup in an **interactive** Claude Code session. Publish and import need page tools, which are disabled in headless `claude -p`. Cluster and batch jobs can produce records and packets only.\n\n1. Pull the owner's rulings:\n   `ArtifactData list` on collection `cisternal_rulings` with `out_dir=<dir>`.\n2. Import them, on the machine whose records the packet came from:\n   `cisternal shadow import-labels <dir> --packet ruling_packet.json --page-url <artifact url>`\n3. Relay the report to the owner: imported, skipped, refused (with reasons), not_written, still_open.\n   Exit 1 means something was refused or not written. Say so; do not treat it as success.\n4. Once imported, remove the page URL from the handoff `open_questions`.\n\n**Import refuses `origin_mismatch`** when run on a machine other than the packet's origin host and store. Records never move. Either run the import on the origin machine, or write a standalone labels file with `--labels-out FILE` and carry that file to the origin. `--labels-out` writes a standalone `shadow.label` JSONL for scoring binary items only; tags and prose items are refused there and stay open.\n\n## Different organization\n\nIf `ArtifactData` cannot find the page, it belongs to another claude.ai organization. Do not retry or work around it. Tell the owner: \"This page belongs to another claude.ai organization. Sign in to that organization with `/login`, then run the pickup again.\"\n\n## Offline fallback\n\nWhen the owner cannot open a page, send the sheet instead:\n\n- `cisternal shadow sheet --packet P --out sheet.html`, and send `sheet.html` to the owner.\n- The owner imports the returned labels with their own line:\n  `! cisternal shadow import-labels labels.json --packet ruling_packet.json --confirm-owner`\n\nThe agent never runs `--confirm-owner` itself. Only the owner's own line confirms owner rulings.\n",
+        "compatibility": "",
+        "context": "",
+        "description": "Use at session close-out when shadow items were touched: build a ruling packet, publish the owner's ruling page, and record its URL in the handoff. At pickup, import the rulings. Not for scoring or gate checks (use developing-in-shadow).",
+        "disable_model_invocation": false,
+        "disallowed_tools": [],
+        "distinctive_strings": [
+          "closing-session",
+          "cisternal shadow packet",
+          "cisternal shadow page",
+          "cisternal shadow import-labels",
+          "cisternal_rulings"
+        ],
+        "effort": "",
+        "license": "",
+        "model": "",
+        "name": "closing-session",
+        "paths": [],
+        "resources": [],
+        "shell": "",
+        "triggers": [],
+        "user_invocable": true,
+        "when_to_use": ""
+      },
       {
         "agent": "",
         "allowed_tools": [],

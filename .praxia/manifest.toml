@@ -3,7 +3,7 @@
 # skip praxia's legacy copy into ~/.claude/skills, which duplicated every listing.
 skills_delivered_by_plugin = true
 name = "cisternal"
-version = "0.1.11"  # keep equal to pyproject [project].version (tests/test_self_manifest_version.py)
+version = "0.1.12"  # keep equal to pyproject [project].version (tests/test_self_manifest_version.py)
 description = "Agent-asset export CLI — dogfood manifest for M4 Export Trust"
 requires_praxia = "0.0.0"
 
@@ -30,6 +30,10 @@ path = ".praxia/skills/triage-tool/SKILL.md"
 [[plugin.skills]]
 name = "developing-in-shadow"
 path = ".praxia/skills/developing-in-shadow/SKILL.md"
+
+[[plugin.skills]]
+name = "closing-session"
+path = ".praxia/skills/closing-session/SKILL.md"
 
 [[plugin.agents]]
 name = "validate-helper"
@@ -66,6 +70,13 @@ subcommands = { status = "myxcel/job_status", list = "myxcel/list_jobs", logs = 
 tool_family = "myxcel_slurm"
 global_flags_with_value = []
 exclude = ["submit", "cancel"]
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "ArtifactData"
+script = "cisternal-hook pre-tool-use"
+tier = "essential"
+surfaces = ["claude"]
 
 [[plugin.hook_specs]]
 event = "PreToolUse"

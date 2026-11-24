@@ -32,6 +32,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(payload, dict):
         return 0
 
+    if subcommand in ("pre-tool-use", "pre_tool_use"):
+        # Ruling guard runs first and outside the fail-open try below: a broken
+        # usage handler must never let a ruling write through. The guard itself
+        # fails closed: an exception inside it denies the call.
+        try:
+            from cisternal.usage.ruling_guard import guard_denial
+
+            denial = guard_denial(payload.get("tool_name"), payload.get("tool_input"))
+        except Exception as exc:
+            denial = (
+                "ruling guard could not run "
+                f"({type(exc).__name__}), so this call is denied (fail closed)"
+            )
+        if denial is not None:
+            deny = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": denial,
+                }
+            }
+            sys.stdout.write(json.dumps(deny) + "\n")
+            sys.stdout.flush()
+            return 0
+
     try:
         if subcommand in ("pre-tool-use", "pre_tool_use"):
             from cisternal.usage.hooks import handle_pre_tool_use

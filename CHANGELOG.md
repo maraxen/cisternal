@@ -5,6 +5,37 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
+## 0.1.12 (2026-11-24)
+
+### Added
+
+- **Shadow ruling flow: owners rule on a claude.ai page, agents read the answers back.** `cisternal shadow packet`
+  builds a ruling packet for the items a session touched, `cisternal shadow page` renders it as a private ruling page
+  (answers are saved to the reserved `cisternal_rulings` collection), and `cisternal shadow sheet` renders the same
+  items as an offline `labels.json` sheet. `cisternal shadow import-labels` folds the owner's rulings into the store
+  the packet came from, or writes a standalone `shadow.label` JSONL with `--labels-out` (binary items only). A
+  `labels.json` sheet import needs `--confirm-owner`, which only the owner's own `!` line may pass. The
+  `closing-session` skill describes the close-out and pickup steps.
+- **Agents cannot write rulings.** A PreToolUse guard denies `ArtifactData` writes to `cisternal_rulings` (including
+  batches that touch it) and denies a Bash call that runs `cisternal shadow import-labels --confirm-owner`, whether
+  invoked as `cisternal`, `uv run cisternal`, `python -m cisternal` or by path. It fails closed: a call whose target
+  cannot be read, or a guard that raises, is denied. The guard is active only once the 0.1.12 plugin is installed
+  (`cisternal plugin update`).
+
+### Changed
+
+- **Ruling documents are versioned by `rev`.** The page writes an integer `rev` on each saved answer (the previous
+  saved rev for that item, or 0, plus one). The importer uses a document-level integer `version` when present, else
+  `rev`, so a lower version arriving after a newer import is skipped and a higher one supersedes it.
+- **Tag answers need a severity.** On the page, Save is disabled until at least one severity is chosen, and tapping a
+  chosen severity again clears it. "Fine" remains a separate explicit answer.
+- **The "too large for this page" list shows the item text,** or "(no text)", and never the internal item id.
+
+### Fixed
+
+- **`import-labels` on a directory without `cisternal_rulings/` is a usage error (exit 2)** with a message naming the
+  missing directory. It used to import nothing and exit 0.
+
 ## 0.1.11 (2026-11-19)
 
 ### Fixed
