@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cisternal.shadow.resolution import resolve_log_dir
-from cisternal.shadow.ruling.adapters import ImportReport, OwnerRuling
+from cisternal.shadow.ruling.adapters import ImportReport, OwnerRuling, RulingAdapter, load_adapter
 from cisternal.shadow.ruling.packet import RulingPacket
 from cisternal.shadow.ruling.records_adapter import (
+    ADAPTER_NAME as RECORDS_ADAPTER_NAME,
     LABEL_SOURCE,
     RecordsAdapter,
     binary_label,
@@ -31,6 +32,27 @@ PAGE_COLLECTION = "cisternal_rulings"
 
 class ImportUsageError(ValueError):
     """Bad source, malformed document, or a missing required flag (exit 2)."""
+
+
+def _adapter_for(name: str, store: Path) -> RulingAdapter:
+    """Adapter for an item's `adapter` name, bound to the packet's store.
+
+    Adapters are constructed with no arguments, except the records adapter,
+    which must be told the records directory it writes into.
+
+    Raises:
+        KeyError: No adapter registered under `name`.
+    """
+    if name == RECORDS_ADAPTER_NAME:
+        return RecordsAdapter(records_dir=store)
+    return load_adapter(name)
+
+
+def _merge_into(report: ImportReport, sub: ImportReport) -> None:
+    report.imported.extend(sub.imported)
+    report.skipped.extend(sub.skipped)
+    report.refused.update(sub.refused)
+    report.not_written.extend(sub.not_written)
 
 
 def _version_of(raw: dict[str, Any], data: dict[str, Any]) -> int | None:
@@ -241,12 +263,32 @@ def import_labels(
         ]
         return report
 
-    sub = RecordsAdapter(records_dir=store).import_rulings(rulings, packet, page_url=page_url)
-    report.imported.extend(sub.imported)
-    report.skipped.extend(sub.skipped)
-    report.refused.update(sub.refused)
-    report.not_written.extend(sub.not_written)
-    report.still_open = sub.still_open
+    # Route each ruling to the adapter named by its item.
+    index = item_index(packet)
+    groups: dict[str, list[OwnerRuling]] = {}
+    for ruling in rulings:
+        item = index.get(ruling.item_id)
+        if item is None:
+            report.refused[ruling.item_id] = "unknown_item"
+            continue
+        groups.setdefault(item.adapter, []).append(ruling)
+
+    routed: set[str] = set()
+    for adapter_name, group in groups.items():
+        try:
+            adapter = _adapter_for(adapter_name, store)
+        except KeyError:
+            for ruling in group:
+                report.refused[ruling.item_id] = "unknown_adapter"
+            continue
+        routed.update(ruling.item_id for ruling in group)
+        _merge_into(report, adapter.import_rulings(group, packet, page_url=page_url))
+
+    report.still_open = [
+        item.item_id
+        for item in [*packet.items, *packet.sheet_items]
+        if item.item_id not in routed
+    ]
     return report
 
 

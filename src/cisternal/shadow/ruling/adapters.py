@@ -61,9 +61,16 @@ class RulingAdapter(Protocol):
         ...
 
     def import_rulings(
-        self, rulings: list[OwnerRuling], packet: RulingPacket
+        self,
+        rulings: list[OwnerRuling],
+        packet: RulingPacket,
+        *,
+        page_url: str | None = None,
     ) -> ImportReport:
-        """Record `rulings` against the items of `packet` and report the outcome."""
+        """Record `rulings` against the items of `packet` and report the outcome.
+
+        `page_url` is the published ruling page, or None for a sheet import.
+        """
         ...
 
 

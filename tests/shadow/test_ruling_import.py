@@ -475,3 +475,146 @@ def test_records_adapter_registered_under_entry_point_name(monkeypatch: pytest.M
     assert isinstance(adapter, RecordsAdapter)
     assert adapter.name == "cisternal.records"
     assert adapter.store_kind == "cisternal_records"
+
+
+def _tag_item(key: str = "t1", *, adapter: str = "fake.tags") -> RulingItem:
+    return RulingItem(
+        item_id=f"tagfeat|{key}",
+        feature="tagfeat",
+        subject_key=key,
+        is_probe=False,
+        inputs_sha256=ZERO,
+        answer={"kind": "tags", "tags": ["jargon"]},
+        show={"text": f"text {key}"},
+        adapter=adapter,
+    )
+
+
+def _write_tag_doc(source: Path, doc_id: str, item_id: str) -> None:
+    target = source / "cisternal_rulings"
+    target.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "item_id": item_id,
+        "answer": {"tags": {"jargon": "mild"}},
+        "rewrite": None,
+        "viewer_id": "viewer-1",
+        "ruled_at": "2026-11-24T10:00:00+00:00",
+        "packet_id": PACKET_ID,
+        "version": 1,
+    }
+    (target / f"{doc_id}.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _register_fake_tags(monkeypatch: pytest.MonkeyPatch, calls: list) -> None:
+    """Register a fake `fake.tags` adapter that records each import call."""
+
+    class _FakeTags:
+        name = "fake.tags"
+        store_kind = "fake_store"
+
+        def open_items(self, store: Path, limit: int) -> list:
+            return []
+
+        def import_rulings(self, rulings: list, packet: RulingPacket, *, page_url: str | None = None):
+            calls.append((list(rulings), packet, page_url))
+            return adapters_mod.ImportReport(imported=[r.item_id for r in rulings])
+
+    class _EP:
+        name = "fake.tags"
+
+        def load(self) -> type:
+            return _FakeTags
+
+    monkeypatch.setattr(
+        adapters_mod,
+        "entry_points",
+        lambda group: [_EP()] if group == adapters_mod.ADAPTER_GROUP else [],
+    )
+
+
+def test_rulings_route_to_item_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records, items=[_item(), _tag_item()])
+    source = tmp_path / "page"
+    _write_page_doc(source, "doc1", version=1)
+    _write_tag_doc(source, "doc2", "tagfeat|t1")
+    calls: list = []
+    _register_fake_tags(monkeypatch, calls)
+
+    report = import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=records,
+        page_url=PAGE_URL,
+    )
+
+    assert report.refused == {}
+    assert sorted(report.imported) == ["feat|k1", "tagfeat|t1"]
+    assert report.still_open == []
+    labels = _labels(records)
+    assert [lab["feature"] for lab in labels] == ["feat"]
+    assert labels[0]["label"] is True
+    assert len(calls) == 1
+    rulings, got_packet, got_url = calls[0]
+    assert [r.item_id for r in rulings] == ["tagfeat|t1"]
+    assert rulings[0].answer == {"tags": {"jargon": "mild"}}
+    assert got_packet is packet
+    assert got_url == PAGE_URL
+
+
+def test_item_with_unregistered_adapter_refused_unknown_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records, items=[_item(), _tag_item(adapter="no.such.adapter")])
+    source = tmp_path / "page"
+    _write_page_doc(source, "doc1", version=1)
+    _write_tag_doc(source, "doc2", "tagfeat|t1")
+    _register_fake_tags(monkeypatch, [])
+
+    report = import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=records,
+        page_url=PAGE_URL,
+    )
+
+    assert report.refused == {"tagfeat|t1": "unknown_adapter"}
+    assert report.imported == ["feat|k1"]
+    assert report.still_open == ["tagfeat|t1"]
+
+
+def test_merged_report_counts_across_adapters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(
+        records,
+        items=[
+            _item(),
+            _tag_item("t1"),
+            _tag_item("u1", adapter="no.such.adapter"),
+            _tag_item("o1"),
+        ],
+    )
+    source = tmp_path / "page"
+    _write_page_doc(source, "doc1", version=1)
+    _write_tag_doc(source, "doc2", "tagfeat|t1")
+    _write_tag_doc(source, "doc3", "tagfeat|u1")
+    _write_page_doc(source, "doc4", item_id="feat|ghost", version=1)
+    calls: list = []
+    _register_fake_tags(monkeypatch, calls)
+
+    report = import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=records,
+        page_url=PAGE_URL,
+    )
+
+    assert sorted(report.imported) == ["feat|k1", "tagfeat|t1"]
+    assert report.skipped == []
+    assert report.not_written == []
+    assert report.refused == {
+        "tagfeat|u1": "unknown_adapter",
+        "feat|ghost": "unknown_item",
+    }
+    assert report.still_open == ["tagfeat|u1", "tagfeat|o1"]
+    assert len(calls) == 1
