@@ -2,11 +2,13 @@
 
 Provides:
 - shadow score <feature>: Join and score verdicts against labels with Wilson CI.
+- shadow packet: Write a ruling packet of open items from one shadow store.
 """
 
 from __future__ import annotations
 
 import json
+import socket
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -15,11 +17,13 @@ import cyclopts
 
 from cisternal.shadow.mode_state import GateCheckError, check_mode_state
 from cisternal.shadow.resolution import ResolutionError, resolve_log_dir
+from cisternal.shadow.ruling.adapters import load_adapter
+from cisternal.shadow.ruling.packet import DEFAULT_CAP, Origin, build_packet
 from cisternal.shadow.scoring import ScoringRefusalError, score_feature
 
 shadow_app = cyclopts.App(
     name="shadow",
-    help="Shadow-development lifecycle commands (score, check).",
+    help="Shadow-development lifecycle commands (score, check, packet).",
     version_flags=[],
 )
 
@@ -243,3 +247,76 @@ def shadow_check(
     print(f"    Invalid Records: {m.get('invalid_records')} | Malformed Lines: {m.get('malformed_lines')}")
 
     raise SystemExit(result.exit_code)
+
+
+@shadow_app.command(name="packet")
+def shadow_packet(
+    *,
+    adapter: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--adapter"],
+            help="Ruling adapter name (cisternal.ruling_adapters entry point).",
+        ),
+    ],
+    store: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--store"],
+            help="Shadow store the adapter reads open items from.",
+        ),
+    ],
+    limit: Annotated[
+        int,
+        cyclopts.Parameter(
+            name=["--limit"],
+            help="Maximum items to consider for one packet (default: 40).",
+        ),
+    ] = DEFAULT_CAP,
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(
+            name=["--out"],
+            help="Path to write the packet JSON (default: ruling_packet.json).",
+        ),
+    ] = Path("ruling_packet.json"),
+    session_id: Annotated[
+        str,
+        cyclopts.Parameter(name=["--session-id"], help="Session that built the packet."),
+    ],
+    task_id: Annotated[
+        str,
+        cyclopts.Parameter(name=["--task-id"], help="Task id (YYMMDD_slug)."),
+    ],
+) -> None:
+    """Write a ruling packet of open items from one shadow store."""
+    try:
+        ruling_adapter = load_adapter(adapter)
+    except KeyError as exc:
+        print(str(exc.args[0]) if exc.args else str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    store_path = store.resolve()
+    raw_items = ruling_adapter.open_items(store_path, limit)
+    if not raw_items:
+        print(json.dumps({"packet": None, "message": "nothing to rule"}, indent=2))
+        return
+
+    origin = Origin(
+        host=socket.gethostname(),
+        store_kind="dir" if store_path.is_dir() else "file",
+        store_path=str(store_path),
+        session_id=session_id,
+        task_id=task_id,
+    )
+    packet = build_packet(raw_items, origin, cap=limit)
+    out_path = out.resolve()
+    out_path.write_text(packet.to_json() + "\n", encoding="utf-8")
+
+    summary = {
+        "packet": str(out_path),
+        "items": len(packet.items),
+        "probes": sum(1 for it in packet.items if it.is_probe),
+        "sheet_only": len(packet.sheet_only),
+    }
+    print(json.dumps(summary, indent=2))
