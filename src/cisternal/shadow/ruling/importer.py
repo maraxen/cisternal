@@ -63,11 +63,25 @@ def _merge_into(report: ImportReport, sub: ImportReport) -> None:
     report.not_written.extend(sub.not_written)
 
 
-def _version_of(raw: dict[str, Any], data: dict[str, Any]) -> int | None:
-    version = raw.get("version", data.get("version"))
-    if isinstance(version, bool) or not isinstance(version, int):
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return version
+    return value
+
+
+def _version_of(raw: dict[str, Any], data: dict[str, Any]) -> int | None:
+    """The document version: a doc-level integer `version`, else integer `rev`.
+
+    The page writes `rev` (the item's previous saved rev + 1); the store keeps
+    `ruling_doc_version`, so a lower rev arriving after a newer import is skipped.
+    """
+    for key in ("version", "rev"):
+        found = _int_or_none(raw.get(key))
+        if found is None:
+            found = _int_or_none(data.get(key))
+        if found is not None:
+            return found
+    return None
 
 
 def _ruling_from_fields(
@@ -94,7 +108,10 @@ def _ruling_from_fields(
 def _read_page(source: Path) -> list[tuple[str | None, OwnerRuling]]:
     docs_dir = source / PAGE_COLLECTION
     if not docs_dir.is_dir():
-        return []
+        raise ImportUsageError(
+            f"page export {source} has no {PAGE_COLLECTION}/ directory; "
+            "pass the directory ArtifactData exported for the ruling page"
+        )
     entries: list[tuple[str | None, OwnerRuling]] = []
     for path in sorted(docs_dir.glob("*.json")):
         try:

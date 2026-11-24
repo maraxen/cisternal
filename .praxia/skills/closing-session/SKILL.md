@@ -42,7 +42,7 @@ Use at session close-out (the handoff step, see praxia `handoff`) when this sess
 
 3. **Never show the owner a verdict.** Do not show the owner the agent's or the judge's verdict on any item. The owner rules blind.
 
-4. **Never write to `cisternal_rulings`.** A hook denies writes to it. The page is the only writer.
+4. **Never write to `cisternal_rulings`.** The page is the only writer. The ArtifactData guard that denies these writes is active only once the cisternal 0.1.12 plugin is installed (`cisternal plugin update`, or the project's documented install). Until then, the rule is yours to keep.
 
 ## Pickup: import the rulings
 
@@ -56,7 +56,7 @@ Run at the next pickup in an **interactive** Claude Code session. Publish and im
    Exit 1 means something was refused or not written. Say so; do not treat it as success.
 4. Once imported, remove the page URL from the handoff `open_questions`.
 
-**Import refuses `origin_mismatch`** when run on a machine other than the packet's origin host and store. Records never move. Either run the import on the origin machine, or write a standalone labels file with `--labels-out FILE` and carry that file to the origin.
+**Import refuses `origin_mismatch`** when run on a machine other than the packet's origin host and store. Records never move. Either run the import on the origin machine, or write a standalone labels file with `--labels-out FILE` and carry that file to the origin. `--labels-out` writes a standalone `shadow.label` JSONL for scoring binary items only; tags and prose items are refused there and stay open.
 
 ## Different organization
 

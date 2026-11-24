@@ -264,3 +264,109 @@ def test_plugin_manifest_declares_artifactdata_matcher() -> None:
         "surfaces": ["claude"],
         "tier": "essential",
     } in specs
+
+
+# ---------------------------------------------------------------------------
+# Bash: owner-only `cisternal shadow import-labels --confirm-owner`
+# ---------------------------------------------------------------------------
+
+from cisternal.usage.ruling_guard import guard_denial, owner_import_denial  # noqa: E402
+
+OWNER_CMD = "shadow import-labels labels.json --packet p.json --confirm-owner"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"cisternal {OWNER_CMD}",
+        f"uv run cisternal {OWNER_CMD}",
+        f"uv run --no-sync cisternal {OWNER_CMD}",
+        f"python -m cisternal {OWNER_CMD}",
+        f"/home/owner/.venv/bin/cisternal {OWNER_CMD}",
+        f"./.venv/bin/cisternal {OWNER_CMD}",
+        f"cd /tmp && cisternal {OWNER_CMD}",
+        f"true; cisternal {OWNER_CMD}",
+        f"sh -c 'cisternal {OWNER_CMD}'",
+        f"echo ok && uv run cisternal {OWNER_CMD} 2>&1 | tail",
+    ],
+)
+def test_bash_owner_import_with_confirm_is_denied(command: str) -> None:
+    reason = owner_import_denial("Bash", {"command": command})
+    assert reason is not None
+    assert "owner-only" in reason
+    assert "`!`" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cisternal shadow import-labels page/ --packet p.json --page-url https://x",
+        "uv run cisternal shadow import-labels page/ --packet p.json",
+        "python -m cisternal shadow import-labels labels.json --packet p.json",
+        "/x/bin/cisternal shadow import-labels labels.json --packet p.json",
+    ],
+)
+def test_bash_owner_import_without_confirm_is_allowed(command: str) -> None:
+    assert owner_import_denial("Bash", {"command": command}) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cisternal shadow score --confirm-owner",
+        "cisternal shadow check --confirm-owner",
+        "echo 'shadow import-labels --confirm-owner'",
+        "uv run pytest tests/shadow -q",
+        "git status --short",
+        "cisternal assets snapshot --out x",
+        "cat import-labels.md --confirm-owner",
+    ],
+)
+def test_other_bash_commands_are_unaffected(command: str) -> None:
+    assert owner_import_denial("Bash", {"command": command}) is None
+
+
+@pytest.mark.parametrize("tool_input", [None, "cisternal shadow import-labels", {}, {"command": 3}])
+def test_bash_without_readable_command_is_denied(tool_input: Any) -> None:
+    assert owner_import_denial("Bash", tool_input) is not None
+
+
+def test_owner_import_check_ignores_other_tools() -> None:
+    assert (
+        owner_import_denial(
+            "ArtifactData", {"command": f"cisternal {OWNER_CMD}", "action": "get"}
+        )
+        is None
+    )
+
+
+def test_guard_denial_combines_both_checks() -> None:
+    assert guard_denial("ArtifactData", {"action": "set", "collection": RULINGS}) is not None
+    assert guard_denial("Bash", {"command": f"cisternal {OWNER_CMD}"}) is not None
+    assert guard_denial("Bash", {"command": "ls -la"}) is None
+
+
+def test_hook_cli_denies_owner_import_bash(monkeypatch: pytest.MonkeyPatch) -> None:
+    ret, out = _run_hook(
+        monkeypatch,
+        {"session_id": "s", "tool_name": "Bash", "tool_input": {"command": f"uv run cisternal {OWNER_CMD}"}},
+    )
+    assert ret == 0
+    _assert_deny(out)
+
+
+def test_hook_cli_denies_when_guard_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An exception inside the guard must emit the deny JSON, not exit 1.
+    import cisternal.usage.ruling_guard as guard
+
+    def _boom(tool_name: Any, tool_input: Any) -> None:
+        raise RuntimeError("guard broke")
+
+    monkeypatch.setattr(guard, "guard_denial", _boom)
+    ret, out = _run_hook(
+        monkeypatch,
+        {"session_id": "s", "tool_name": "Bash", "tool_input": {"command": "ls"}},
+    )
+    assert ret == 0
+    _assert_deny(out)
+    assert "RuntimeError" in json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]

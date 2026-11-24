@@ -288,3 +288,30 @@ def test_cli_page_and_sheet_write_html(tmp_path: Path, capsys: pytest.CaptureFix
     assert exit_info.value.code in (0, None)
     assert "claude.use" not in sheet_out.read_text(encoding="utf-8")
     assert load_packet(packet_file).items[0].item_id == "feat|k3"
+
+
+def test_tags_save_is_disabled_until_a_severity_is_chosen(packet):
+    html = render(packet, "page")
+    assert "save.disabled = Object.keys(draft.tags).length === 0" in html
+    # Fine stays a separate explicit action, not the Save path.
+    assert 'el("button", { type: "button" }, "Fine")' in html
+
+
+def test_tapping_the_chosen_chip_again_deselects_it(packet):
+    html = render(packet, "page")
+    assert "if (draft.tags[tag] === severity) delete draft.tags[tag];" in html
+
+
+def test_page_writes_integer_rev_from_previous_snapshot(packet):
+    html = render(packet, "page")
+    assert "const previous = state.rulings[item.item_id];" in html
+    assert (
+        "record.rev = (previous && Number.isInteger(previous.rev) ? previous.rev : 0) + 1;"
+        in html
+    )
+
+
+def test_sheet_only_list_never_renders_item_id(packet):
+    html = render(packet, "page")
+    assert 'el("li", {}, show.text || "(no text)")' in html
+    assert "show.text || item.item_id" not in html

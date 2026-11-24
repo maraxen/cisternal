@@ -86,6 +86,7 @@ def _write_page_doc(
     version: int | None = 1,
     packet_id: str = PACKET_ID,
     nested: bool = False,
+    rev: int | None = None,
 ) -> None:
     target = source / "cisternal_rulings"
     target.mkdir(parents=True, exist_ok=True)
@@ -106,6 +107,8 @@ def _write_page_doc(
         payload = {**doc}
         if version is not None:
             payload["version"] = version
+    if rev is not None:
+        payload["rev"] = rev
     (target / f"{doc_id}.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -506,6 +509,83 @@ def _write_tag_doc(source: Path, doc_id: str, item_id: str) -> None:
         "version": 1,
     }
     (target / f"{doc_id}.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _import_page(source: Path, records: Path, packet: RulingPacket) -> Any:
+    return import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=records,
+        page_url=PAGE_URL,
+    )
+
+
+def test_rev_is_used_as_doc_version(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records)
+    source = tmp_path / "page"
+    _write_page_doc(source, "doc1", version=None, rev=4)
+
+    report = _import_page(source, records, packet)
+
+    assert report.imported == ["feat|k1"]
+    assert [lab["ruling_doc_version"] for lab in _labels(records)] == [4]
+
+
+def test_lower_rev_after_newer_import_is_skipped(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records)
+    newer = tmp_path / "newer"
+    _write_page_doc(newer, "doc1", version=None, rev=5)
+    _import_page(newer, records, packet)
+
+    older = tmp_path / "older"
+    _write_page_doc(older, "doc1", version=None, rev=3, value="absent")
+    report = _import_page(older, records, packet)
+
+    assert report.skipped == ["feat|k1"]
+    assert report.imported == []
+    assert [lab["ruling_doc_version"] for lab in _labels(records)] == [5]
+
+
+def test_higher_rev_supersedes(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records)
+    first = tmp_path / "first"
+    _write_page_doc(first, "doc1", version=None, rev=2)
+    _import_page(first, records, packet)
+
+    second = tmp_path / "second"
+    _write_page_doc(second, "doc1", version=None, rev=3, value="absent")
+    report = _import_page(second, records, packet)
+
+    assert report.imported == ["feat|k1"]
+    assert {lab["ruling_doc_version"] for lab in _labels(records)} == {2, 3}
+
+
+def test_doc_level_version_wins_over_rev(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records)
+    source = tmp_path / "page"
+    _write_page_doc(source, "doc1", version=7, rev=2)
+
+    _import_page(source, records, packet)
+
+    assert [lab["ruling_doc_version"] for lab in _labels(records)] == [7]
+
+
+def test_page_without_rulings_directory_is_usage_error(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records)
+    empty = tmp_path / "export"
+    empty.mkdir()
+
+    with pytest.raises(importer_mod.ImportUsageError, match="cisternal_rulings"):
+        _import_page(empty, records, packet)
+    assert _labels(records) == []
 
 
 def _register_fake_tags(monkeypatch: pytest.MonkeyPatch, calls: list) -> None:

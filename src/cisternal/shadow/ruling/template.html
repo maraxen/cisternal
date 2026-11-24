@@ -208,7 +208,9 @@ function controlsFor(item) {
         const chip = el("button", { type: "button" }, severity);
         chip.setAttribute("aria-pressed", String(draft.tags[tag] === severity));
         chip.addEventListener("click", () => {
-          draft.tags[tag] = severity;
+          // Tapping the chosen severity again deselects it.
+          if (draft.tags[tag] === severity) delete draft.tags[tag];
+          else draft.tags[tag] = severity;
           renderItem();
         });
         group.append(chip);
@@ -220,7 +222,12 @@ function controlsFor(item) {
     const fine = el("button", { type: "button" }, "Fine");
     fine.addEventListener("click", () => answerTags(item, {}));
     const save = el("button", { type: "button", class: "primary" }, "Save");
-    save.addEventListener("click", () => answerTags(item, Object.assign({}, draft.tags)));
+    // Save needs at least one chosen severity; "Fine" is the explicit no-tag answer.
+    save.disabled = Object.keys(draft.tags).length === 0;
+    save.addEventListener("click", () => {
+      if (Object.keys(draft.tags).length === 0) return;
+      answerTags(item, Object.assign({}, draft.tags));
+    });
     row.append(fine, save);
     box.append(row);
   } else {
@@ -296,6 +303,9 @@ async function submit(item, answer) {
   const draft = drafts[item.item_id];
   const rewrite = draft && draft.rewrite ? draft.rewrite.trim() : "";
   const record = recordFor(item, answer, rewrite);
+  // rev: the item's previously saved rev (from the snapshot) plus one, or 1 for a first answer.
+  const previous = state.rulings[item.item_id];
+  record.rev = (previous && Number.isInteger(previous.rev) ? previous.rev : 0) + 1;
   state.busy = true;
   state.rulings[item.item_id] = record;
   try {
@@ -339,7 +349,7 @@ function renderSheetOnly() {
   const list = document.getElementById("sheet-only-ids");
   for (const item of SHEET_ITEMS) {
     const show = item.show || {};
-    const entry = el("li", {}, show.text || item.item_id);
+    const entry = el("li", {}, show.text || "(no text)");
     entry.append(el("span", { class: "muted" }, " rule this one in the offline sheet"));
     list.append(entry);
   }
