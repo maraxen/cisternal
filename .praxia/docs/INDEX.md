@@ -9,6 +9,7 @@ Superseded and archived docs: [HISTORY.md](HISTORY.md).
 - [260616_cisterna-m1-foundation-handoff](handoffs/260616_cisterna-m1-foundation-handoff.md) — Cisterna M1 — Session Handoff (Sprint 1 / Foundation complete)
 
 ## Plans
+- [261124_shadow-ruling-ui](plans/261124_shadow-ruling-ui.md) — Task plan for the shadow ruling page + offline sheet: S1 hook gate, ruling packet, page/sheet renderer, ArtifactData guard, import-labels, maraxiom adapters, close-out skill.
 
 ## Specs
 - [261124_shadow-ruling-ui](specs/261124_shadow-ruling-ui.md) — Design for owner rulings on cisternal shadow records via a claude.ai page handed out at session close-out, with an offline HTML sheet fallback; remote-robust.
