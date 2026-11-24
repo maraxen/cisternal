@@ -1,0 +1,444 @@
+<title>Shadow rulings</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf7;
+  --fg: #1c1b19;
+  --muted: #5f5b53;
+  --card: #ffffff;
+  --line: #d6d1c6;
+  --accent: #2456a6;
+  --accent-fg: #ffffff;
+  --chip: #ffffff;
+  --chip-on: #2456a6;
+  --chip-on-fg: #ffffff;
+  --notice: #f3ead2;
+  --notice-fg: #4a3500;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16151a;
+    --fg: #ece9e2;
+    --muted: #aaa597;
+    --card: #201f25;
+    --line: #3d3b44;
+    --accent: #8fb4ff;
+    --accent-fg: #10141f;
+    --chip: #2a2930;
+    --chip-on: #8fb4ff;
+    --chip-on-fg: #10141f;
+    --notice: #3a3320;
+    --notice-fg: #f3e2b0;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #16151a;
+  --fg: #ece9e2;
+  --muted: #aaa597;
+  --card: #201f25;
+  --line: #3d3b44;
+  --accent: #8fb4ff;
+  --accent-fg: #10141f;
+  --chip: #2a2930;
+  --chip-on: #8fb4ff;
+  --chip-on-fg: #10141f;
+  --notice: #3a3320;
+  --notice-fg: #f3e2b0;
+}
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+.wrap { max-width: 40rem; margin: 0 auto; padding: 16px; box-sizing: border-box; }
+h1 { font-size: 22px; margin: 8px 0 4px; }
+h2 { font-size: 18px; margin: 20px 0 8px; }
+.muted { color: var(--muted); font-size: 16px; margin: 4px 0; }
+.notice {
+  background: var(--notice); color: var(--notice-fg);
+  border-radius: 10px; padding: 10px 12px; font-size: 16px; margin: 12px 0;
+}
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; margin: 12px 0; box-sizing: border-box;
+}
+.item-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; margin: 8px 0; }
+img {
+  display: block; max-width: 100%; height: auto; margin: 12px 0;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+}
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.controls { margin-top: 12px; }
+button {
+  font: inherit; font-size: 17px; min-height: 48px; padding: 10px 16px;
+  border-radius: 10px; border: 1px solid var(--line);
+  background: var(--chip); color: var(--fg); cursor: pointer;
+}
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+button[aria-pressed="true"] { background: var(--chip-on); color: var(--chip-on-fg); border-color: transparent; }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+textarea {
+  display: block; width: 100%; box-sizing: border-box; min-height: 96px; margin-top: 8px;
+  font: inherit; font-size: 17px; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--chip); color: var(--fg);
+}
+.tag-line {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.tag-name { font-weight: 600; overflow-wrap: anywhere; }
+.nav { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin-top: 8px; }
+.ids { font-family: ui-monospace, monospace; font-size: 16px; overflow-wrap: anywhere; padding-left: 20px; }
+.hidden { display: none !important; }
+</style>
+<div class="wrap">
+  <h1>Shadow rulings</h1>
+  <p class="muted" id="progress"></p>
+  <p class="notice" id="access" hidden></p>
+  <main id="stage" aria-live="polite"></main>
+  <nav class="nav" aria-label="Item navigation">
+    <button type="button" id="back">Back</button>
+    <button type="button" id="skip">Skip</button>
+  </nav>
+  <section id="sheet-only" class="hidden">
+    <h2>Not on this page</h2>
+    <p class="muted">These items have no answer control here. Their ids are listed so none is lost.</p>
+    <ul class="ids" id="sheet-only-ids"></ul>
+  </section>
+  <section id="sheet-tools" class="hidden">
+    <h2>Save your answers</h2>
+    <p class="notice">Answers live in this page until you download them. Keep the page open until then.</p>
+    <div class="row"><button type="button" class="primary" id="download">Download labels.json</button></div>
+    <p class="muted">Put the saved labels.json next to your packet file, then in the terminal run
+      <code>cisternal shadow import-labels labels.json --packet &lt;packet file&gt; --confirm-owner</code>.</p>
+  </section>
+</div>
+<script type="application/json" id="packet">__PACKET__</script>
+<script>
+const MODE = "__MODE__";
+const PACKET = JSON.parse(document.getElementById("packet").textContent);
+const ITEMS = Array.isArray(PACKET.items) ? PACKET.items : [];
+const SHEET_ONLY = Array.isArray(PACKET.sheet_only) ? PACKET.sheet_only : [];
+const COLLECTION = "cisternal_rulings";
+const state = { index: 0, rulings: {}, canRule: false, viewerId: null, busy: false };
+const drafts = {};
+
+function el(tag, attrs, text) {
+  const node = document.createElement(tag);
+  if (attrs) { for (const key of Object.keys(attrs)) node.setAttribute(key, attrs[key]); }
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function svgDataUrl(svg) {
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+
+function summaryOf(answer) {
+  if (!answer) return "";
+  if (answer.value !== undefined) return String(answer.value);
+  const tags = answer.tags || {};
+  const keys = Object.keys(tags);
+  if (keys.length === 0) return "fine";
+  return keys.map(k => k + ": " + tags[k]).join(", ");
+}
+
+function draftFor(item) {
+  if (!drafts[item.item_id]) {
+    const existing = state.rulings[item.item_id];
+    const tags = existing && existing.answer && existing.answer.tags ? existing.answer.tags : {};
+    drafts[item.item_id] = { tags: Object.assign({}, tags), rewrite: existing && existing.rewrite ? existing.rewrite : "" };
+  }
+  return drafts[item.item_id];
+}
+
+function isRuled(item) {
+  return Object.prototype.hasOwnProperty.call(state.rulings, item.item_id);
+}
+
+function updateProgress() {
+  const ruled = ITEMS.filter(isRuled).length;
+  let text = ruled + " of " + ITEMS.length + " ruled";
+  if (SHEET_ONLY.length) text += " · " + SHEET_ONLY.length + " not on this page";
+  document.getElementById("progress").textContent = text;
+  document.getElementById("back").disabled = state.index <= 0;
+  document.getElementById("skip").disabled = state.index >= ITEMS.length - 1;
+}
+
+function setAccess(message) {
+  const node = document.getElementById("access");
+  if (message) { node.textContent = message; node.classList.remove("hidden"); node.hidden = false; }
+  else { node.textContent = ""; node.hidden = true; }
+}
+
+function controlsFor(item) {
+  const box = el("div", { class: "controls" });
+  const answer = item.answer || {};
+  const existing = state.rulings[item.item_id];
+  if (existing) box.append(el("p", { class: "muted" }, "Ruled: " + summaryOf(existing.answer)));
+  if (!state.canRule) {
+    box.append(el("p", { class: "muted" }, state.accessNote || "Read-only."));
+    return box;
+  }
+  const draft = draftFor(item);
+
+  if (answer.kind === "binary") {
+    const row = el("div", { class: "row" });
+    const current = existing && existing.answer ? existing.answer.value : null;
+    for (const label of [answer.positive, answer.negative]) {
+      const button = el("button", { type: "button", class: "primary" }, label);
+      button.setAttribute("aria-pressed", String(current === label));
+      button.addEventListener("click", () => answerBinary(item, label));
+      row.append(button);
+    }
+    box.append(row);
+  } else if (answer.kind === "tags") {
+    const severities = Array.isArray(answer.severities) ? answer.severities : ["clear", "mild"];
+    for (const tag of answer.tags || []) {
+      const line = el("div", { class: "tag-line" });
+      line.append(el("span", { class: "tag-name" }, tag));
+      const group = el("div", { class: "row" });
+      for (const severity of severities) {
+        const chip = el("button", { type: "button" }, severity);
+        chip.setAttribute("aria-pressed", String(draft.tags[tag] === severity));
+        chip.addEventListener("click", () => {
+          draft.tags[tag] = severity;
+          renderItem();
+        });
+        group.append(chip);
+      }
+      line.append(group);
+      box.append(line);
+    }
+    const row = el("div", { class: "row" });
+    const fine = el("button", { type: "button" }, "Fine");
+    fine.addEventListener("click", () => answerTags(item, {}));
+    const save = el("button", { type: "button", class: "primary" }, "Save");
+    save.addEventListener("click", () => answerTags(item, Object.assign({}, draft.tags)));
+    row.append(fine, save);
+    box.append(row);
+  } else {
+    box.append(el("p", { class: "muted" }, "Unknown answer kind; skip this item."));
+  }
+
+  if (answer.kind === "tags" && answer.allow_rewrite) {
+    const label = el("label", { class: "muted", for: "rewrite" }, "Rewrite (optional)");
+    const area = el("textarea", { id: "rewrite" });
+    area.value = draft.rewrite;
+    area.addEventListener("input", () => { draft.rewrite = area.value; });
+    box.append(label, area);
+  }
+  return box;
+}
+
+function renderItem() {
+  const stage = document.getElementById("stage");
+  stage.replaceChildren();
+  const item = ITEMS[state.index];
+  if (!item) {
+    stage.append(el("p", { class: "muted" }, ITEMS.length ? "Every item has an answer or was skipped." : "Nothing to rule in this packet."));
+    updateProgress();
+    return;
+  }
+  const show = item.show || {};
+  const card = el("section", { class: "card" });
+  const label = (item.is_probe ? "Known-answer check · " : "") + (show.surface || item.feature || "");
+  card.append(el("p", { class: "muted" }, label));
+  card.append(el("p", { class: "item-text" }, show.text || ""));
+  if (show.context) card.append(el("p", { class: "muted" }, show.context));
+  if (typeof show.image_svg === "string" && show.image_svg) {
+    const img = document.createElement("img");
+    img.alt = "Figure for this item";
+    img.src = svgDataUrl(show.image_svg);
+    card.append(img);
+  }
+  card.append(controlsFor(item));
+  stage.append(card);
+  updateProgress();
+}
+
+function nextOpenIndex(from) {
+  for (let step = 1; step <= ITEMS.length; step++) {
+    const index = (from + step) % ITEMS.length;
+    if (!isRuled(ITEMS[index])) return index;
+  }
+  return from;
+}
+
+function go(delta) {
+  if (!ITEMS.length) return;
+  state.index = Math.min(Math.max(state.index + delta, 0), ITEMS.length - 1);
+  renderItem();
+}
+
+function skip() {
+  if (state.index < ITEMS.length - 1) go(1);
+}
+
+function recordFor(item, answer, rewrite) {
+  return {
+    item_id: item.item_id,
+    packet_id: PACKET.packet_id,
+    answer: answer,
+    rewrite: rewrite || null,
+    viewer_id: state.viewerId,
+    ruled_at: new Date().toISOString(),
+  };
+}
+
+async function submit(item, answer) {
+  if (!state.canRule || state.busy) return;
+  const draft = drafts[item.item_id];
+  const rewrite = draft && draft.rewrite ? draft.rewrite.trim() : "";
+  const record = recordFor(item, answer, rewrite);
+  state.busy = true;
+  state.rulings[item.item_id] = record;
+  try {
+    await persistRuling(record);
+    setAccess("");
+    state.index = nextOpenIndex(state.index);
+  } catch (err) {
+    delete state.rulings[item.item_id];
+    setAccess("This answer was not saved (" + (err && err.message ? err.message : "unknown error") + "). Try again.");
+  } finally {
+    state.busy = false;
+    renderItem();
+  }
+}
+
+function answerBinary(item, label) {
+  submit(item, { value: label });
+}
+
+function answerTags(item, tags) {
+  submit(item, { tags: tags });
+}
+
+document.getElementById("back").addEventListener("click", () => go(-1));
+document.getElementById("skip").addEventListener("click", () => skip());
+
+document.addEventListener("keydown", (event) => {
+  const tag = event.target && event.target.tagName;
+  if (tag === "TEXTAREA" || tag === "INPUT") return;
+  if (event.key === "ArrowRight") { skip(); return; }
+  if (event.key === "ArrowLeft") { go(-1); return; }
+  const item = ITEMS[state.index];
+  if (!item || !state.canRule || !item.answer || item.answer.kind !== "binary") return;
+  if (event.key === "1") answerBinary(item, item.answer.positive);
+  if (event.key === "2") answerBinary(item, item.answer.negative);
+});
+
+function renderSheetOnly() {
+  if (!SHEET_ONLY.length) return;
+  document.getElementById("sheet-only").classList.remove("hidden");
+  const list = document.getElementById("sheet-only-ids");
+  for (const id of SHEET_ONLY) list.append(el("li", {}, id));
+}
+
+function startInitialIndex() {
+  const first = ITEMS.findIndex(item => !isRuled(item));
+  state.index = first === -1 ? 0 : first;
+}
+
+function init() {
+  document.getElementById("sheet-tools").classList.toggle("hidden", MODE !== "sheet");
+  renderSheetOnly();
+  if (MODE === "sheet") {
+    state.canRule = true;
+  } else {
+    state.accessNote = "Checking access…";
+    setAccess("Checking access…");
+  }
+  startInitialIndex();
+  renderItem();
+  if (MODE === "page") startPage();
+}
+
+/*@page*/
+let db = null;
+let user = null;
+
+async function docIdFor(itemId) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(itemId));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 32);
+}
+
+async function persistRuling(record) {
+  if (!db) throw new Error("this view cannot save");
+  const id = await docIdFor(record.item_id);
+  await db.doc(COLLECTION + "/" + id).set(record);
+}
+
+async function startPage() {
+  try {
+    db = await claude.use("db");
+    user = await claude.use("user");
+  } catch (err) {
+    db = null;
+    user = null;
+  }
+  if (!db || !user) {
+    state.accessNote = "Read-only: this view cannot save rulings. Open the page on claude.ai to rule.";
+    setAccess(state.accessNote);
+    renderItem();
+    return;
+  }
+  const owner = await user.isOwner();
+  const viewer = await user.id();
+  state.viewerId = viewer;
+  state.canRule = owner === true && !!viewer;
+  state.accessNote = state.canRule ? "" : "Read-only: only the owner of this page can rule on it.";
+  setAccess(state.accessNote);
+  renderItem();
+  db.collection(COLLECTION).onSnapshot((snap) => {
+    const next = {};
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      if (data && data.packet_id === PACKET.packet_id && typeof data.item_id === "string") next[data.item_id] = data;
+    }
+    state.rulings = next;
+    renderItem();
+  }, (err) => {
+    state.canRule = false;
+    state.accessNote = "Rulings are no longer available in this view (" + (err && err.code ? err.code : "unavailable") + ").";
+    setAccess(state.accessNote);
+    renderItem();
+  });
+}
+/*@/page*/
+
+/*@sheet*/
+async function persistRuling() {
+  return undefined;
+}
+
+document.getElementById("download").addEventListener("click", () => {
+  const rulings = Object.values(state.rulings).map((r) => ({
+    item_id: r.item_id,
+    answer: r.answer,
+    rewrite: r.rewrite,
+    viewer_id: null,
+    ruled_at: r.ruled_at,
+    doc_version: null,
+    source_path: "sheet",
+  }));
+  const body = JSON.stringify({ packet_id: PACKET.packet_id, rulings: rulings }, null, 2) + "\n";
+  const url = URL.createObjectURL(new Blob([body], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "labels.json";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+/*@/sheet*/
+
+init();
+</script>

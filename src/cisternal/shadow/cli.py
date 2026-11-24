@@ -3,6 +3,7 @@
 Provides:
 - shadow score <feature>: Join and score verdicts against labels with Wilson CI.
 - shadow packet: Write a ruling packet of open items from one shadow store.
+- shadow page / shadow sheet: Render a ruling packet as an Artifact page or offline HTML sheet.
 """
 
 from __future__ import annotations
@@ -11,14 +12,21 @@ import json
 import socket
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import cyclopts
 
 from cisternal.shadow.mode_state import GateCheckError, check_mode_state
 from cisternal.shadow.resolution import ResolutionError, resolve_log_dir
 from cisternal.shadow.ruling.adapters import load_adapter
-from cisternal.shadow.ruling.packet import DEFAULT_CAP, Origin, build_packet
+from cisternal.shadow.ruling.packet import (
+    DEFAULT_CAP,
+    Origin,
+    PacketError,
+    build_packet,
+    load_packet,
+)
+from cisternal.shadow.ruling.render import render
 from cisternal.shadow.scoring import ScoringRefusalError, score_feature
 
 shadow_app = cyclopts.App(
@@ -320,3 +328,53 @@ def shadow_packet(
         "sheet_only": len(packet.sheet_only),
     }
     print(json.dumps(summary, indent=2))
+
+
+def _write_ruling_html(packet_path: Path, out: Path, mode: Literal["page", "sheet"]) -> None:
+    try:
+        packet = load_packet(packet_path)
+    except PacketError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    out_path = out.resolve()
+    out_path.write_text(render(packet, mode), encoding="utf-8")
+    summary = {
+        "mode": mode,
+        "html": str(out_path),
+        "items": len(packet.items),
+        "sheet_only": len(packet.sheet_only),
+    }
+    print(json.dumps(summary, indent=2))
+
+
+@shadow_app.command(name="page")
+def shadow_page(
+    *,
+    packet: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--packet"], help="Ruling packet JSON written by `shadow packet`."),
+    ],
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--out"], help="Path to write the ruling page HTML (default: ruling_page.html)."),
+    ] = Path("ruling_page.html"),
+) -> None:
+    """Write the owner ruling page (Path A) for a packet, to publish as an Artifact."""
+    _write_ruling_html(packet, out, "page")
+
+
+@shadow_app.command(name="sheet")
+def shadow_sheet(
+    *,
+    packet: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--packet"], help="Ruling packet JSON written by `shadow packet`."),
+    ],
+    out: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--out"], help="Path to write the offline sheet HTML (default: ruling_sheet.html)."),
+    ] = Path("ruling_sheet.html"),
+) -> None:
+    """Write the offline ruling sheet (Path B) for a packet; no capabilities."""
+    _write_ruling_html(packet, out, "sheet")
