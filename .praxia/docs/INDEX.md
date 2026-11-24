@@ -1,4 +1,6 @@
-# 261117-xs-config Internal Docs
+# spec-shadow-ruling-ui Internal Docs
+
+Superseded and archived docs: [HISTORY.md](HISTORY.md).
 
 ## Daily
 
@@ -9,6 +11,7 @@
 ## Plans
 
 ## Specs
+- [261124_shadow-ruling-ui](specs/261124_shadow-ruling-ui.md) — Design for owner rulings on cisternal shadow records via a claude.ai page handed out at session close-out, with an offline HTML sheet fallback; remote-robust.
 - [261116_cross-surface-plugin-config](specs/261116_cross-surface-plugin-config.md) — Which surfaces can carry a plugin's telemetry setting (spans, shadow), what cisternal renders (nothing beyond Claude Code), and what it says and does everywhere else.
 - [261109_shadow-development](specs/261109_shadow-development.md) — Shared shadow-development pattern providing telemetry events, scoring, stage-gated promotion checks, actor isolation verification, and adoption skill in cisternal.
 - [261106_tool-surface-triage](specs/261106_tool-surface-triage.md) — Specification for cisternal tooling that measures MCP/skill use and coverage, prunes dead surface, checks short-description accuracy, and nudges CLI-to-MCP at the moment of the wrong action.
@@ -128,6 +131,8 @@
 ## Roadmaps
 
 ## Archive
+
+## Residue cards
 
 ## Misc
 
