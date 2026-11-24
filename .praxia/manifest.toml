@@ -31,6 +31,10 @@ path = ".praxia/skills/triage-tool/SKILL.md"
 name = "developing-in-shadow"
 path = ".praxia/skills/developing-in-shadow/SKILL.md"
 
+[[plugin.skills]]
+name = "closing-session"
+path = ".praxia/skills/closing-session/SKILL.md"
+
 [[plugin.agents]]
 name = "validate-helper"
 path = ".praxia/agents/validate-helper.md"
