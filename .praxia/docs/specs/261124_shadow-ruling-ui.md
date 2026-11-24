@@ -207,6 +207,17 @@ imported.
 - S3. Owner test: from the phone via Remote Control, type a harmless `! echo` and confirm it runs in
   the session (decides whether B is phone-usable).
 
+Outcomes (261124):
+- **S1 PASSED.** Interactive Claude Code session started with `--settings` carrying a PreToolUse hook
+  (matcher `ArtifactData`): `set` to `cisternal_rulings/x` denied, `batch` with a
+  `cisternal_rulings` entry denied, `set` to `other/x` committed, `list cisternal_rulings` empty. The
+  hook received the full `tool_input` (including `writes[]`) for all four calls
+  (`~/scratch/s1_261124/hook_seen.jsonl`). Deny shape: `hookSpecificOutput.permissionDecision = "deny"`.
+- **Headless sessions have no page tools.** `claude -p` reported "ArtifactData is disabled for this
+  session", so ruling-page publish and import need an interactive session; batch jobs only produce
+  records (and can build a packet), never publish or import.
+- S2 (remote hosts) and S3 (phone `!`): pending, non-blocking.
+
 S1 is a gate: if it fails, building stops and the guard is redesigned with the owner (owner decision
 261124). S2 failing limits path A to sessions where the tools exist (the packet can still be carried
 to such a session); S3 failing makes B laptop-only.
