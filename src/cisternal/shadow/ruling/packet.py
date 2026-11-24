@@ -126,8 +126,6 @@ def build_packet(
                 clean = sanitize_svg(svg)
             except SvgRejected:
                 moved.add(item.item_id)
-                item = replace(item, show={**item.show, "image_svg": None})
-                kept.append(item)
                 continue
             if len(clean.encode("utf-8")) > SVG_ITEM_CAP_BYTES:
                 moved.add(item.item_id)

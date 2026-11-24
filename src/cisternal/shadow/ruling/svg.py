@@ -8,6 +8,7 @@ are removed, and anything that cannot be parsed is rejected outright.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -106,9 +107,24 @@ def _local(tag: str) -> tuple[str, str]:
     return "", tag
 
 
+_URL_RE = re.compile(r"url\(([^)]*)\)", re.IGNORECASE)
+
+
+def _has_external_url(value: str) -> bool:
+    """True if any url(...) in an attribute value points outside this document."""
+    for match in _URL_RE.finditer(value):
+        target = match.group(1).strip().strip("'\"").strip()
+        if not target.startswith("#"):
+            return True
+    return False
+
+
 def _attr_allowed(name: str, value: str) -> bool:
     ns, local = _local(name)
     if local.lower().startswith("on"):
+        return False
+    # Any url(...) in any value must be a same-document fragment, including in style.
+    if _has_external_url(value):
         return False
     if local in ("href", "src") or (ns == XLINK_NS and local == "href"):
         # Only same-document fragment references survive.
@@ -117,7 +133,7 @@ def _attr_allowed(name: str, value: str) -> bool:
         return False
     if local == "style":
         lowered = value.lower()
-        return "url(" not in lowered or "url(#" in lowered.replace(" ", "")
+        return "@import" not in lowered and "expression(" not in lowered
     return local in _ALLOWED_ATTRIBUTES
 
 

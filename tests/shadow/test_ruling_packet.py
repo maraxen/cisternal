@@ -90,6 +90,39 @@ def test_svg_sanitize_rejects_unparseable() -> None:
         sanitize_svg("<svg><not-closed")
 
 
+def test_svg_sanitize_strips_external_url_in_style_keeps_local() -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect width="5" height="5" style="fill:url(#a);background:url(http://evil/x)"/>'
+        "</svg>"
+    )
+    out = sanitize_svg(svg)
+    assert "evil" not in out
+    assert "<rect" in out
+
+
+def test_svg_sanitize_strips_external_url_in_fill_keeps_local() -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect width="5" height="5" fill="url(http://evil/x.svg#p)"/>'
+        '<rect width="3" height="3" fill="url(#p)"/>'
+        "</svg>"
+    )
+    out = sanitize_svg(svg)
+    assert "evil" not in out
+    assert 'fill="url(#p)"' in out
+    assert out.count("<rect") == 2
+
+
+def test_build_packet_rejected_svg_moves_item_to_sheet_only() -> None:
+    bad = _item(0, show={"text": "bad", "image_svg": "<svg><not-closed"})
+    good = _item(1, show={"text": "good", "image_svg": _svg_of_bytes(1024)})
+    packet = build_packet([bad, good], ORIGIN)
+    assert bad.item_id not in [it.item_id for it in packet.items]
+    assert bad.item_id in packet.sheet_only
+    assert good.item_id in [it.item_id for it in packet.items]
+
+
 def test_svg_budget_moves_oversize_to_sheet_only() -> None:
     oversize = _item(0, show={"text": "big", "image_svg": _svg_of_bytes(301 * 1024)})
     small = _item(1, show={"text": "small", "image_svg": _svg_of_bytes(1024)})
