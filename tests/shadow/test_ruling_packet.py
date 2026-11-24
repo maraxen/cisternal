@@ -114,6 +114,41 @@ def test_svg_sanitize_strips_external_url_in_fill_keeps_local() -> None:
     assert out.count("<rect") == 2
 
 
+EVIL_CSS_VALUES = [
+    r"u\rl(http://evil/x)",
+    r"\75 rl(http://evil/x)",
+    r"url\28 http://evil/x\29",
+    'image-set("http://evil/x" 1x)',
+]
+
+
+@pytest.mark.parametrize("attr", ["fill", "style"])
+@pytest.mark.parametrize("value", EVIL_CSS_VALUES)
+def test_svg_strips_escaped_or_image_set_references(attr: str, value: str) -> None:
+    xml_value = value.replace("&", "&amp;").replace('"', "&quot;")
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        f'<rect width="5" height="5" {attr}="{xml_value}"/>'
+        "</svg>"
+    )
+    out = sanitize_svg(svg)
+    assert "evil" not in out
+    assert f" {attr}=" not in out
+    assert "<rect" in out
+
+
+def test_svg_keeps_local_url_in_fill_and_style() -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect width="5" height="5" fill="url(#a)"/>'
+        '<rect width="3" height="3" style="fill:url(#a)"/>'
+        "</svg>"
+    )
+    out = sanitize_svg(svg)
+    assert 'fill="url(#a)"' in out
+    assert 'style="fill:url(#a)"' in out
+
+
 def test_build_packet_rejected_svg_moves_item_to_sheet_only() -> None:
     bad = _item(0, show={"text": "bad", "image_svg": "<svg><not-closed"})
     good = _item(1, show={"text": "good", "image_svg": _svg_of_bytes(1024)})

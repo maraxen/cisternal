@@ -108,6 +108,7 @@ def _local(tag: str) -> tuple[str, str]:
 
 
 _URL_RE = re.compile(r"url\(([^)]*)\)", re.IGNORECASE)
+_BAD_CSS_TOKENS = ("image-set(", "src(", "@import", "expression(")
 
 
 def _has_external_url(value: str) -> bool:
@@ -125,6 +126,11 @@ def _attr_allowed(name: str, value: str) -> bool:
         return False
     # Any url(...) in any value must be a same-document fragment, including in style.
     if _has_external_url(value):
+        return False
+    # CSS escapes can hide a url token (e.g. u\rl( or \75 rl(), and image-set() or
+    # src() take a URL with no url( at all. Strip any value that uses them.
+    lowered_value = value.lower()
+    if "\\" in value or any(token in lowered_value for token in _BAD_CSS_TOKENS):
         return False
     if local in ("href", "src") or (ns == XLINK_NS and local == "href"):
         # Only same-document fragment references survive.
