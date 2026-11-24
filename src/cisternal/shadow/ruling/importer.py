@@ -23,6 +23,7 @@ from cisternal.shadow.ruling.records_adapter import (
     RecordsAdapter,
     binary_label,
     item_index,
+    packet_refusal,
 )
 
 PAGE_COLLECTION = "cisternal_rulings"
@@ -40,7 +41,11 @@ def _version_of(raw: dict[str, Any], data: dict[str, Any]) -> int | None:
 
 
 def _ruling_from_fields(
-    data: dict[str, Any], *, doc_version: int | None, source_path: str
+    data: dict[str, Any],
+    *,
+    doc_version: int | None,
+    source_path: str,
+    packet_id: str | None,
 ) -> OwnerRuling:
     if not isinstance(data.get("item_id"), str) or not isinstance(data.get("answer"), dict):
         raise ImportUsageError(f"malformed ruling document {source_path}: needs item_id and answer")
@@ -52,6 +57,7 @@ def _ruling_from_fields(
         ruled_at=str(data.get("ruled_at", "")),
         doc_version=doc_version,
         source_path=source_path,
+        packet_id=packet_id,
     )
 
 
@@ -69,11 +75,15 @@ def _read_page(source: Path) -> list[tuple[str | None, OwnerRuling]]:
             raise ImportUsageError(f"malformed ruling document {path}: not an object")
         # ArtifactData may nest the fields under "data"; accept both shapes.
         data = raw["data"] if isinstance(raw.get("data"), dict) else raw
-        ruling = _ruling_from_fields(
-            data, doc_version=_version_of(raw, data), source_path=str(path)
-        )
         packet_id = data.get("packet_id")
-        entries.append((packet_id if isinstance(packet_id, str) else None, ruling))
+        packet_id = packet_id if isinstance(packet_id, str) else None
+        ruling = _ruling_from_fields(
+            data,
+            doc_version=_version_of(raw, data),
+            source_path=str(path),
+            packet_id=packet_id,
+        )
+        entries.append((packet_id, ruling))
     return entries
 
 
@@ -85,6 +95,8 @@ def _read_sheet(source: Path) -> list[tuple[str | None, OwnerRuling]]:
     if not isinstance(payload, dict) or not isinstance(payload.get("rulings"), list):
         raise ImportUsageError(f"labels file {source} needs a 'rulings' list")
     packet_id = payload.get("packet_id")
+    if not isinstance(packet_id, str) or not packet_id:
+        raise ImportUsageError(f"labels file {source} needs a top-level string packet_id")
     entries: list[tuple[str | None, OwnerRuling]] = []
     for raw in payload["rulings"]:
         if not isinstance(raw, dict):
@@ -94,8 +106,9 @@ def _read_sheet(source: Path) -> list[tuple[str | None, OwnerRuling]]:
             raw,
             doc_version=doc_version if isinstance(doc_version, int) else None,
             source_path=str(raw.get("source_path") or "sheet"),
+            packet_id=packet_id,
         )
-        entries.append((packet_id if isinstance(packet_id, str) else None, ruling))
+        entries.append((packet_id, ruling))
     return entries
 
 
@@ -152,7 +165,7 @@ def _write_labels_file(
             "ruling_page": page_url or ruling.source_path,
             "source_path": ruling.source_path,
             "ruling_doc_version": ruling.doc_version,
-            "packet_id": packet.packet_id,
+            "packet_id": ruling.packet_id,
             "inputs_sha256": item.inputs_sha256,
             "ruled_at": ruling.ruled_at,
             "owner_rewrite": ruling.rewrite,
@@ -209,9 +222,10 @@ def import_labels(
 
     report = ImportReport()
     rulings: list[OwnerRuling] = []
-    for packet_id, ruling in entries:
-        if packet_id is not None and packet_id != packet.packet_id:
-            report.refused[ruling.item_id] = "packet_mismatch"
+    for _packet_id, ruling in entries:
+        reason = packet_refusal(ruling, packet)
+        if reason is not None:
+            report.refused[ruling.item_id] = reason
         else:
             rulings.append(ruling)
 

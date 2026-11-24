@@ -88,12 +88,13 @@ def _write_page_doc(
     target.mkdir(parents=True, exist_ok=True)
     doc: dict[str, Any] = {
         "item_id": item_id,
-        "packet_id": packet_id,
         "answer": {"value": value},
         "rewrite": None,
         "viewer_id": "viewer-1",
         "ruled_at": "2026-11-24T10:00:00+00:00",
     }
+    if packet_id is not None:
+        doc["packet_id"] = packet_id
     if nested:
         payload: dict[str, Any] = {"data": doc}
         if version is not None:
@@ -364,6 +365,40 @@ def test_page_import_without_page_url_exits_2(tmp_path: Path) -> None:
     )
     assert code == 2
     assert _labels(records) == []
+
+
+def test_page_doc_without_packet_id_refused(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet = _packet(records)
+    source = tmp_path / "page"
+    _write_page_doc(source, "doc1", version=1, packet_id=None)
+
+    report = import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=records,
+        page_url=PAGE_URL,
+    )
+
+    assert report.refused == {"feat|k1": "missing_packet_id"}
+    assert report.imported == []
+    assert _labels(records) == []
+
+
+def test_sheet_without_packet_id_exits_2(tmp_path: Path) -> None:
+    records = tmp_path / "logs"
+    _write_verdict(records, "k1", ZERO)
+    packet_path = tmp_path / "ruling_packet.json"
+    packet_path.write_text(_packet(records).to_json(), encoding="utf-8")
+    sheet = tmp_path / "labels.json"
+    sheet.write_text(json.dumps({"rulings": []}), encoding="utf-8")
+
+    code = _run_cli(
+        [
+            "--packet", str(packet_path), str(sheet), "--records-dir", str(records),
+            "--confirm-owner",
+        ]
+    )
+    assert code == 2
 
 
 def test_sheet_import_with_page_url_exits_2(tmp_path: Path) -> None:

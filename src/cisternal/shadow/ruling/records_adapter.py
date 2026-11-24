@@ -35,6 +35,19 @@ def item_index(packet: RulingPacket) -> dict[str, RulingItem]:
     return index
 
 
+def packet_refusal(ruling: OwnerRuling, packet: RulingPacket) -> str | None:
+    """Refuse a ruling whose document does not observe this packet's id.
+
+    The label's `packet_id` is taken from the ruling document, so a document
+    without one (or with another) cannot be stamped with this packet.
+    """
+    if ruling.packet_id is None:
+        return "missing_packet_id"
+    if ruling.packet_id != packet.packet_id:
+        return "packet_mismatch"
+    return None
+
+
 def binary_label(ruling: OwnerRuling, item: RulingItem) -> tuple[bool | None, str | None]:
     """Map a ruling onto a binary label.
 
@@ -160,6 +173,10 @@ class RecordsAdapter:
         pending: list[tuple[str, Key, str]] = []
         ruled: set[str] = set()
         for ruling in rulings:
+            reason = packet_refusal(ruling, packet)
+            if reason is not None:
+                report.refused[ruling.item_id] = reason
+                continue
             item = items.get(ruling.item_id)
             if item is None:
                 report.refused[ruling.item_id] = "unknown_item"
@@ -189,7 +206,7 @@ class RecordsAdapter:
                 ruling_page=page_url or ruling.source_path,
                 source_path=ruling.source_path,
                 ruling_doc_version=ruling.doc_version,
-                packet_id=packet.packet_id,
+                packet_id=ruling.packet_id,
                 inputs_sha256=item.inputs_sha256,
                 ruled_at=ruling.ruled_at,
                 owner_rewrite=ruling.rewrite,

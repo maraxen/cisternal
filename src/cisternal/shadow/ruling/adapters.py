@@ -32,6 +32,8 @@ class OwnerRuling:
     ruled_at: str
     doc_version: int | None
     source_path: str
+    # The packet id the ruling document itself carries (None when absent).
+    packet_id: str | None = None
 
 
 @dataclass
