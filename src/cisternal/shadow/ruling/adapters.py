@@ -50,6 +50,9 @@ class RulingAdapter(Protocol):
     """Contract every ruling adapter implements."""
 
     name: str
+    # The kind of store this adapter reads, e.g. "cisternal_records" or
+    # "maraxiom_rubric". Recorded as the packet origin's store_kind.
+    store_kind: str
 
     def open_items(self, store: Path, limit: int) -> list[RulingItem]:
         """Return up to `limit` items still awaiting a ruling in `store`."""

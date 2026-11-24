@@ -304,7 +304,7 @@ def shadow_packet(
 
     origin = Origin(
         host=socket.gethostname(),
-        store_kind="dir" if store_path.is_dir() else "file",
+        store_kind=ruling_adapter.store_kind,
         store_path=str(store_path),
         session_id=session_id,
         task_id=task_id,

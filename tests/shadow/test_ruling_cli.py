@@ -32,6 +32,7 @@ def _item(i: int, *, probe: bool = False) -> RulingItem:
 
 class _FakeAdapter:
     name = "fake"
+    store_kind = "cisternal_records"
 
     def __init__(self, items: list[RulingItem]) -> None:
         self._items = items
@@ -94,6 +95,7 @@ def test_packet_cli_writes_packet(
 
     packet = load_packet(out)
     assert packet.origin.host == socket.gethostname()
+    assert packet.origin.store_kind == "cisternal_records"
     assert Path(packet.origin.store_path).is_absolute()
     assert packet.origin.store_path == str(store.resolve())
     assert packet.origin.session_id == "sess-1"
