@@ -254,6 +254,19 @@ def test_sheet_only_svg_is_in_sheet_not_page():
     assert marker in packet.sheet_items[0].show["image_svg"]
 
 
+def test_probe_items_show_no_marker_and_no_feature_label(packet):
+    # _tags(2) is a probe item with feature "tone"; the owner must not see that.
+    for mode in ("page", "sheet"):
+        html = render(packet, mode)
+        visible = re.sub(
+            r'<script type="application/json" id="packet">.*?</script>', "", html, flags=re.S
+        )
+        assert "Known-answer" not in html
+        assert "is_probe" not in visible
+        assert "probe" not in visible.lower()
+        assert "item.feature" not in visible
+
+
 def test_unknown_mode_is_refused(packet):
     with pytest.raises(ValueError):
         render(packet, "pdf")  # type: ignore[arg-type]

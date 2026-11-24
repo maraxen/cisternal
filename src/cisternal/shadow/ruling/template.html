@@ -248,8 +248,7 @@ function renderItem() {
   }
   const show = item.show || {};
   const card = el("section", { class: "card" });
-  const label = (item.is_probe ? "Known-answer check · " : "") + (show.surface || item.feature || "");
-  card.append(el("p", { class: "muted" }, label));
+  if (show.surface) card.append(el("p", { class: "muted" }, show.surface));
   card.append(el("p", { class: "item-text" }, show.text || ""));
   if (show.context) card.append(el("p", { class: "muted" }, show.context));
   if (typeof show.image_svg === "string" && show.image_svg) {
