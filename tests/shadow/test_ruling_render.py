@@ -225,6 +225,35 @@ def test_page_is_title_then_style_without_doctype(packet):
     assert "<meta name=\"viewport\"" not in html
 
 
+def test_sheet_only_svg_is_in_sheet_not_page():
+    marker = "SVGMARK7Q"
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        f"<desc>{marker}{'x' * (301 * 1024)}</desc></svg>"
+    )
+    big = RulingItem(
+        item_id="feat|big",
+        feature="feat",
+        subject_key="big",
+        is_probe=False,
+        inputs_sha256="3" * 64,
+        answer={"kind": "binary", "positive": "yes", "negative": "no"},
+        show={"text": "big one", "context": None, "surface": None, "image_svg": svg},
+        adapter="fake",
+    )
+    packet = build_packet([big, _binary(5)], ORIGIN)
+    assert [it.item_id for it in packet.sheet_items] == ["feat|big"]
+    assert marker in packet.sheet_items[0].show["image_svg"]
+
+    page = render(packet, "page")
+    sheet = render(packet, "sheet")
+    assert "big one" in page  # still listed as text on the page
+    assert marker not in page
+    assert marker in sheet
+    # The packet object itself is not mutated by the page copy.
+    assert marker in packet.sheet_items[0].show["image_svg"]
+
+
 def test_unknown_mode_is_refused(packet):
     with pytest.raises(ValueError):
         render(packet, "pdf")  # type: ignore[arg-type]

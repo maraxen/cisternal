@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.resources
 import re
+from dataclasses import replace
 from typing import Literal
 
 from cisternal.shadow.ruling.packet import RulingPacket
@@ -34,7 +35,17 @@ def _template_text() -> str:
     return resource.read_text(encoding="utf-8")
 
 
-def _embed_json(packet: RulingPacket) -> str:
+def _embed_json(packet: RulingPacket, mode: Mode) -> str:
+    if mode == "page":
+        # Sheet-only items are text on the page; their SVG ships only in the sheet.
+        # Copy, do not mutate: the caller's packet keeps its SVG.
+        packet = replace(
+            packet,
+            sheet_items=[
+                replace(item, show={**item.show, "image_svg": None})
+                for item in packet.sheet_items
+            ],
+        )
     text = packet.to_json()
     for char, escape in _ESCAPES.items():
         text = text.replace(char, escape)
@@ -65,7 +76,7 @@ def render(packet: RulingPacket, mode: Mode) -> str:
 
     # Packet last, so any placeholder text inside packet content is never expanded.
     text = text.replace("__MODE__", mode)
-    text = text.replace("__PACKET__", _embed_json(packet))
+    text = text.replace("__PACKET__", _embed_json(packet, mode))
     if mode == "page":
         return text
 
