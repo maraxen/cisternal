@@ -69,6 +69,13 @@ exclude = ["submit", "cancel"]
 
 [[plugin.hook_specs]]
 event = "PreToolUse"
+matcher = "ArtifactData"
+script = "cisternal-hook pre-tool-use"
+tier = "essential"
+surfaces = ["claude"]
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
 matcher = "Bash"
 script = "cisternal-hook pre-tool-use"
 tier = "essential"

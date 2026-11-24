@@ -41,6 +41,16 @@
       {
         "content": "",
         "event": "PreToolUse",
+        "matcher": "ArtifactData",
+        "script": "cisternal-hook pre-tool-use",
+        "surfaces": [
+          "claude"
+        ],
+        "tier": "essential"
+      },
+      {
+        "content": "",
+        "event": "PreToolUse",
         "matcher": "Bash",
         "script": "cisternal-hook pre-tool-use",
         "surfaces": [
