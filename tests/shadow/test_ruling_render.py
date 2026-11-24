@@ -174,6 +174,57 @@ def test_mode_is_embedded_and_sheet_offers_download(packet):
     assert "Download labels.json" in sheet
 
 
+def _sheet_only_packet():
+    bad = RulingItem(
+        item_id="feat|bad",
+        feature="feat",
+        subject_key="bad",
+        is_probe=False,
+        inputs_sha256="2" * 64,
+        answer={"kind": "binary", "positive": "yes", "negative": "no"},
+        show={"text": "SHEET-ONLY-TEXT", "context": None, "surface": None,
+              "image_svg": "<svg><not-closed"},
+        adapter="fake",
+    )
+    return build_packet([bad, _binary(4)], ORIGIN)
+
+
+def test_sheet_renders_controls_for_sheet_items():
+    packet = _sheet_only_packet()
+    sheet = render(packet, "sheet")
+
+    assert [it.item_id for it in packet.sheet_items] == ["feat|bad"]
+    # Sheet mode ranks its answer-bearing items as page items plus sheet items.
+    assert 'concat(MODE === "sheet" ? SHEET_ITEMS : [])' in sheet
+
+
+def test_page_renders_no_controls_for_sheet_items():
+    packet = _sheet_only_packet()
+    page = render(packet, "page")
+
+    assert "SHEET-ONLY-TEXT" in page  # listed as text in the embedded packet
+    # The ITEMS expression is runtime-gated on MODE, so the page evaluates to
+    # the page items only; the sheet item is listed as text, never ruled here.
+    assert 'const MODE = "page"' in page
+    assert "rule this one in the offline sheet" in page
+
+
+def test_sheet_is_complete_document_with_viewport(packet):
+    html = render(packet, "sheet")
+
+    assert html.startswith("<!doctype html>")
+    assert '<meta name="viewport" content="width=device-width,initial-scale=1">' in html
+    assert "<title>Shadow rulings</title>" in html
+    assert "</head>" in html
+
+
+def test_page_is_title_then_style_without_doctype(packet):
+    html = render(packet, "page")
+
+    assert "<!doctype" not in html.lower()
+    assert "<meta name=\"viewport\"" not in html
+
+
 def test_unknown_mode_is_refused(packet):
     with pytest.raises(ValueError):
         render(packet, "pdf")  # type: ignore[arg-type]

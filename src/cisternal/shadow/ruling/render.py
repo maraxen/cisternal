@@ -22,6 +22,11 @@ _SHEET_BLOCK = re.compile(r"/\*@sheet\*/.*?/\*@/sheet\*/", re.S)
 _KEEP_PAGE = re.compile(r"/\*@page\*/(.*?)/\*@/page\*/", re.S)
 _KEEP_SHEET = re.compile(r"/\*@sheet\*/(.*?)/\*@/sheet\*/", re.S)
 _ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026"}
+_SHEET_HEAD = (
+    '<!doctype html>\n<html lang="en">\n<head>\n'
+    '<meta charset="utf-8">\n'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+)
 
 
 def _template_text() -> str:
@@ -60,7 +65,13 @@ def render(packet: RulingPacket, mode: Mode) -> str:
 
     # Packet last, so any placeholder text inside packet content is never expanded.
     text = text.replace("__MODE__", mode)
-    return text.replace("__PACKET__", _embed_json(packet))
+    text = text.replace("__PACKET__", _embed_json(packet))
+    if mode == "page":
+        return text
+
+    # The sheet opens as a local file, so it is a complete document (R11).
+    text = text.replace('<div class="wrap">', '</head>\n<body>\n<div class="wrap">', 1)
+    return _SHEET_HEAD + text + "\n</body>\n</html>\n"
 
 
 __all__ = ["Mode", "render"]

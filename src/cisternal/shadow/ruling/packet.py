@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -63,6 +63,9 @@ class RulingPacket:
     items: list[RulingItem]
     sheet_only: list[str]
     packet_v: int = PACKET_VERSION
+    # Full items moved off the page (R10): listed as text on the page,
+    # answerable on the offline sheet. Their ids are also in `sheet_only`.
+    sheet_items: list[RulingItem] = field(default_factory=list)
 
     def to_json(self) -> str:
         """Serialize to a stable JSON document with `packet_v` first."""
@@ -73,6 +76,7 @@ class RulingPacket:
             "origin": asdict(self.origin),
             "items": [asdict(item) for item in self.items],
             "sheet_only": list(self.sheet_only),
+            "sheet_items": [asdict(item) for item in self.sheet_items],
         }
         return json.dumps(payload, indent=2, sort_keys=True)
 
@@ -117,7 +121,7 @@ def build_packet(
     ]
     ordered = ordered[:cap]
 
-    moved: set[str] = set()
+    moved: dict[str, RulingItem] = {}
     kept: list[RulingItem] = []
     for item in ordered:
         svg = item.show.get("image_svg")
@@ -125,12 +129,14 @@ def build_packet(
             try:
                 clean = sanitize_svg(svg)
             except SvgRejected:
-                moved.add(item.item_id)
-                continue
-            if len(clean.encode("utf-8")) > SVG_ITEM_CAP_BYTES:
-                moved.add(item.item_id)
+                moved[item.item_id] = replace(
+                    item, show={**item.show, "image_svg": None}
+                )
                 continue
             item = replace(item, show={**item.show, "image_svg": clean})
+            if len(clean.encode("utf-8")) > SVG_ITEM_CAP_BYTES:
+                moved[item.item_id] = item
+                continue
         kept.append(item)
 
     total = sum(_svg_bytes(it) for it in kept)
@@ -139,16 +145,18 @@ def build_packet(
         if _svg_bytes(kept[idx]) > 0:
             dropped = kept.pop(idx)
             total -= _svg_bytes(dropped)
-            moved.add(dropped.item_id)
+            moved[dropped.item_id] = dropped
         idx -= 1
 
     sheet_only = [it.item_id for it in ordered if it.item_id in moved]
+    sheet_items = [moved[item_id] for item_id in sheet_only]
     return RulingPacket(
         packet_id=f"pkt_{uuid.uuid4().hex[:16]}",
         created_at=datetime.now(UTC).isoformat(timespec="seconds"),
         origin=origin,
         items=kept,
         sheet_only=sheet_only,
+        sheet_items=sheet_items,
     )
 
 
@@ -176,6 +184,7 @@ def load_packet(path: Path) -> RulingPacket:
             items=[RulingItem(**raw) for raw in data["items"]],
             sheet_only=list(data["sheet_only"]),
             packet_v=version,
+            sheet_items=[RulingItem(**raw) for raw in data.get("sheet_items", [])],
         )
     except (KeyError, TypeError) as exc:
         raise PacketError(f"malformed packet {path}: {exc}") from exc

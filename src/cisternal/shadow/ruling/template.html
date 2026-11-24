@@ -93,7 +93,7 @@ textarea {
 }
 .tag-name { font-weight: 600; overflow-wrap: anywhere; }
 .nav { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin-top: 8px; }
-.ids { font-family: ui-monospace, monospace; font-size: 16px; overflow-wrap: anywhere; padding-left: 20px; }
+.sheet-list { font-size: 16px; overflow-wrap: anywhere; padding-left: 20px; }
 .hidden { display: none !important; }
 </style>
 <div class="wrap">
@@ -106,9 +106,9 @@ textarea {
     <button type="button" id="skip">Skip</button>
   </nav>
   <section id="sheet-only" class="hidden">
-    <h2>Not on this page</h2>
-    <p class="muted">These items have no answer control here. Their ids are listed so none is lost.</p>
-    <ul class="ids" id="sheet-only-ids"></ul>
+    <h2>Too large for this page</h2>
+    <p class="muted">These items are shown as text only. Answer them in the offline sheet.</p>
+    <ul class="sheet-list" id="sheet-only-ids"></ul>
   </section>
   <section id="sheet-tools" class="hidden">
     <h2>Save your answers</h2>
@@ -122,8 +122,9 @@ textarea {
 <script>
 const MODE = "__MODE__";
 const PACKET = JSON.parse(document.getElementById("packet").textContent);
-const ITEMS = Array.isArray(PACKET.items) ? PACKET.items : [];
-const SHEET_ONLY = Array.isArray(PACKET.sheet_only) ? PACKET.sheet_only : [];
+const PAGE_ITEMS = Array.isArray(PACKET.items) ? PACKET.items : [];
+const SHEET_ITEMS = Array.isArray(PACKET.sheet_items) ? PACKET.sheet_items : [];
+const ITEMS = PAGE_ITEMS.concat(MODE === "sheet" ? SHEET_ITEMS : []);
 const COLLECTION = "cisternal_rulings";
 const state = { index: 0, rulings: {}, canRule: false, viewerId: null, busy: false };
 const drafts = {};
@@ -164,7 +165,7 @@ function isRuled(item) {
 function updateProgress() {
   const ruled = ITEMS.filter(isRuled).length;
   let text = ruled + " of " + ITEMS.length + " ruled";
-  if (SHEET_ONLY.length) text += " · " + SHEET_ONLY.length + " not on this page";
+  if (MODE === "page" && SHEET_ITEMS.length) text += " · " + SHEET_ITEMS.length + " to rule in the offline sheet";
   document.getElementById("progress").textContent = text;
   document.getElementById("back").disabled = state.index <= 0;
   document.getElementById("skip").disabled = state.index >= ITEMS.length - 1;
@@ -334,10 +335,15 @@ document.addEventListener("keydown", (event) => {
 });
 
 function renderSheetOnly() {
-  if (!SHEET_ONLY.length) return;
+  if (MODE !== "page" || !SHEET_ITEMS.length) return;
   document.getElementById("sheet-only").classList.remove("hidden");
   const list = document.getElementById("sheet-only-ids");
-  for (const id of SHEET_ONLY) list.append(el("li", {}, id));
+  for (const item of SHEET_ITEMS) {
+    const show = item.show || {};
+    const entry = el("li", {}, show.text || item.item_id);
+    entry.append(el("span", { class: "muted" }, " rule this one in the offline sheet"));
+    list.append(entry);
+  }
 }
 
 function startInitialIndex() {

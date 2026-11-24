@@ -7,6 +7,7 @@ budgets with sheet-only overflow, and packet JSON round-trip with version gate.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -192,3 +193,57 @@ def test_packet_roundtrip_and_unknown_version(tmp_path: Path) -> None:
     path.write_text(bumped, encoding="utf-8")
     with pytest.raises(PacketError):
         load_packet(path)
+
+
+def test_oversize_item_goes_to_sheet_items_with_its_svg() -> None:
+    oversize = _item(0, show={"text": "big", "image_svg": _svg_of_bytes(301 * 1024)})
+    small = _item(1, show={"text": "small", "image_svg": _svg_of_bytes(1024)})
+    packet = build_packet([oversize, small], ORIGIN)
+    by_id = {it.item_id: it for it in packet.sheet_items}
+    assert list(by_id) == [oversize.item_id]
+    assert by_id[oversize.item_id].show["text"] == "big"
+    assert isinstance(by_id[oversize.item_id].show["image_svg"], str)
+    assert "<svg" in by_id[oversize.item_id].show["image_svg"]
+    assert packet.sheet_only == [oversize.item_id]
+
+
+def test_rejected_item_goes_to_sheet_items_without_svg() -> None:
+    bad = _item(0, show={"text": "bad", "image_svg": "<svg><not-closed"})
+    good = _item(1, show={"text": "good", "image_svg": _svg_of_bytes(1024)})
+    packet = build_packet([bad, good], ORIGIN)
+    assert [it.item_id for it in packet.sheet_items] == [bad.item_id]
+    assert packet.sheet_items[0].show["text"] == "bad"
+    assert packet.sheet_items[0].show["image_svg"] is None
+    assert packet.sheet_only == [bad.item_id]
+
+
+def test_packet_budget_trim_keeps_svg_in_sheet_items() -> None:
+    items = [
+        _item(i, show={"text": "t", "image_svg": _svg_of_bytes(290 * 1024)})
+        for i in range(30)
+    ]
+    packet = build_packet(items, ORIGIN)
+    assert [it.item_id for it in packet.sheet_items] == packet.sheet_only
+    assert packet.sheet_items
+    for it in packet.sheet_items:
+        assert isinstance(it.show["image_svg"], str)
+    assert len(packet.items) + len(packet.sheet_items) == 30
+
+
+def test_roundtrip_keeps_sheet_items(tmp_path: Path) -> None:
+    bad = _item(0, show={"text": "bad", "image_svg": "<svg><not-closed"})
+    packet = build_packet([bad, _item(1)], ORIGIN)
+    path = tmp_path / "packet.json"
+    path.write_text(packet.to_json(), encoding="utf-8")
+    loaded = load_packet(path)
+    assert loaded == packet
+    assert [it.item_id for it in loaded.sheet_items] == [bad.item_id]
+
+
+def test_packet_without_sheet_items_key_loads_empty(tmp_path: Path) -> None:
+    packet = build_packet([_item(0)], ORIGIN)
+    data = json.loads(packet.to_json())
+    del data["sheet_items"]
+    path = tmp_path / "packet.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert load_packet(path).sheet_items == []
