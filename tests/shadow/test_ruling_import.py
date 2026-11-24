@@ -16,8 +16,11 @@ from typing import Any
 import pytest
 
 import cisternal.shadow.ruling.adapters as adapters_mod
+import cisternal.shadow.cli as cli_mod
+import cisternal.shadow.ruling.importer as importer_mod
 import cisternal.shadow.ruling.records_adapter as records_mod
 from cisternal.cli import app
+from cisternal.shadow.resolution import ResolutionError
 from cisternal.shadow.ruling.importer import import_labels, read_rulings
 from cisternal.shadow.ruling.packet import Origin, RulingItem, RulingPacket
 from cisternal.shadow.ruling.records_adapter import RecordsAdapter
@@ -580,6 +583,104 @@ def test_item_with_unregistered_adapter_refused_unknown_adapter(
     assert report.refused == {"tagfeat|t1": "unknown_adapter"}
     assert report.imported == ["feat|k1"]
     assert report.still_open == ["tagfeat|t1"]
+
+
+def _prose_packet(store: Path, items: list[RulingItem]) -> RulingPacket:
+    """A packet whose origin is a maraxiom rubric store, not a records dir."""
+    return RulingPacket(
+        packet_id=PACKET_ID,
+        created_at="2026-11-24T00:00:00+00:00",
+        origin=Origin(
+            host=socket.gethostname(),
+            store_kind="maraxiom_rubric",
+            store_path=str(store.resolve()),
+            session_id="sess-1",
+            task_id="261124_shadow-ruling-ui",
+        ),
+        items=items,
+        sheet_only=[],
+        sheet_items=[],
+    )
+
+
+def _no_log_dir(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Make any log_dir resolution fail; the returned flag records a call."""
+    called: list[bool] = []
+
+    def _boom(*_a: Any, **_k: Any) -> None:
+        called.append(True)
+        raise ResolutionError("log_dir is not configured")
+
+    monkeypatch.setattr(importer_mod, "resolve_log_dir", _boom)
+    monkeypatch.setattr(cli_mod, "resolve_log_dir", _boom)
+    return called
+
+
+def test_prose_packet_imports_without_records_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "rubric"
+    store.mkdir()
+    packet = _prose_packet(store, [_tag_item("t1")])
+    source = tmp_path / "page"
+    _write_tag_doc(source, "doc1", "tagfeat|t1")
+    calls: list = []
+    _register_fake_tags(monkeypatch, calls)
+    resolved = _no_log_dir(monkeypatch)
+
+    report = import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=None,
+        page_url=PAGE_URL,
+    )
+
+    assert resolved == []
+    assert report.refused == {}
+    assert report.imported == ["tagfeat|t1"]
+    assert len(calls) == 1
+    assert calls[0][2] == PAGE_URL
+
+
+def test_prose_packet_missing_store_refused_store_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "rubric-gone"
+    packet = _prose_packet(store, [_tag_item("t1")])
+    source = tmp_path / "page"
+    _write_tag_doc(source, "doc1", "tagfeat|t1")
+    calls: list = []
+    _register_fake_tags(monkeypatch, calls)
+    resolved = _no_log_dir(monkeypatch)
+
+    report = import_labels(
+        source, packet, confirm_owner=False, labels_out=None, records_dir=None,
+        page_url=PAGE_URL,
+    )
+
+    assert resolved == []
+    assert report.refused == {"tagfeat|t1": "store_missing"}
+    assert report.imported == []
+    assert report.still_open == ["tagfeat|t1"]
+    assert calls == []
+
+
+def test_prose_packet_cli_import_does_not_need_log_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "rubric"
+    store.mkdir()
+    packet_path = tmp_path / "ruling_packet.json"
+    packet_path.write_text(_prose_packet(store, [_tag_item("t1")]).to_json(), encoding="utf-8")
+    source = tmp_path / "page"
+    _write_tag_doc(source, "doc1", "tagfeat|t1")
+    calls: list = []
+    _register_fake_tags(monkeypatch, calls)
+    resolved = _no_log_dir(monkeypatch)
+
+    code = _run_cli(["--packet", str(packet_path), str(source), "--page-url", PAGE_URL])
+
+    assert resolved == []
+    assert code == 0
+    assert len(calls) == 1
 
 
 def test_merged_report_counts_across_adapters(

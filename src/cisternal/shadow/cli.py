@@ -423,7 +423,9 @@ def shadow_import_labels(
         raise SystemExit(2) from exc
 
     effective_records_dir = records_dir
-    if labels_out is None:
+    # Only a records-kind packet writes into the records directory (R23); other
+    # stores are read from the packet's own origin path, so no log_dir is needed.
+    if labels_out is None and packet_obj.origin.store_kind == "cisternal_records":
         try:
             if records_dir is None:
                 res_log = resolve_log_dir(cli_arg=None)
