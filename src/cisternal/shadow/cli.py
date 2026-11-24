@@ -19,6 +19,7 @@ import cyclopts
 from cisternal.shadow.mode_state import GateCheckError, check_mode_state
 from cisternal.shadow.resolution import ResolutionError, resolve_log_dir
 from cisternal.shadow.ruling.adapters import load_adapter
+from cisternal.shadow.ruling.importer import ImportUsageError, import_labels, report_dict
 from cisternal.shadow.ruling.packet import (
     DEFAULT_CAP,
     Origin,
@@ -378,3 +379,77 @@ def shadow_sheet(
 ) -> None:
     """Write the offline ruling sheet (Path B) for a packet; no capabilities."""
     _write_ruling_html(packet, out, "sheet")
+
+
+@shadow_app.command(name="import-labels")
+def shadow_import_labels(
+    source: Path,
+    *,
+    packet: Annotated[
+        Path,
+        cyclopts.Parameter(name=["--packet"], help="Ruling packet JSON the rulings answer."),
+    ],
+    confirm_owner: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--confirm-owner"],
+            help="Required for a sheet (labels.json) source: the owner confirms the import.",
+        ),
+    ] = False,
+    labels_out: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--labels-out"],
+            help="Write a standalone labels JSONL instead of writing into the store.",
+        ),
+    ] = None,
+    records_dir: Annotated[
+        Path | None,
+        cyclopts.Parameter(name=["--records-dir"], help="Records directory to write into."),
+    ] = None,
+    page_url: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--page-url"],
+            help="Published ruling page URL. Required for a page directory; refused for a sheet.",
+        ),
+    ] = None,
+) -> None:
+    """Import owner rulings from a page export directory or a sheet labels file."""
+    try:
+        packet_obj = load_packet(packet)
+    except PacketError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    effective_records_dir = records_dir
+    if labels_out is None:
+        try:
+            if records_dir is None:
+                res_log = resolve_log_dir(cli_arg=None)
+                effective_records_dir = res_log.path
+                print(res_log.provenance, file=sys.stderr)
+            else:
+                print(f"resolved log_dir from CLI argument ({records_dir})", file=sys.stderr)
+        except ResolutionError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(exc.exit_code) from exc
+
+    try:
+        report = import_labels(
+            source,
+            packet_obj,
+            confirm_owner=confirm_owner,
+            labels_out=labels_out,
+            records_dir=effective_records_dir,
+            page_url=page_url,
+        )
+    except ImportUsageError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+    except ResolutionError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(exc.exit_code) from exc
+
+    print(json.dumps(report_dict(report), indent=2))
+    raise SystemExit(1 if report.refused or report.not_written else 0)

@@ -65,6 +65,9 @@ jcode = "cisternal.export.registry:jcode_factory"
 opencode = "cisternal.export.registry:opencode_factory"
 pi = "cisternal.export.registry:pi_factory"
 
+[project.entry-points."cisternal.ruling_adapters"]
+"cisternal.records" = "cisternal.shadow.ruling.records_adapter:RecordsAdapter"
+
 
 [tool.setuptools]
 package-dir = { "" = "src" }
