@@ -525,6 +525,138 @@ def test_manifest_unsafe_resource_name_is_skipped(tmp_path: Path) -> None:
     assert any("my helper.sh" in w for w in report.warnings)
 
 
+def test_manifest_script_with_parent_segment_is_not_bundled(tmp_path: Path) -> None:
+    """#6859 review: a script with a '..' segment is refused even though its file name is safe."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("../../x.sh", path="hooks/pre.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == ""
+    assert any("../../x.sh" in w and ".." in w for w in report.warnings)
+
+
+def test_manifest_nul_in_hook_path_warns_and_does_not_raise(tmp_path: Path) -> None:
+    """#6859 review: a NUL byte in a hook path raises ValueError inside resolve(); load must not raise."""
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("x.sh", path="a\\u0000b.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == ""
+    assert any("x.sh" in w for w in report.warnings)
+
+
+def test_manifest_nul_in_resource_dir_warns_and_does_not_raise(tmp_path: Path) -> None:
+    """#6859 review: a NUL in a resource's directory part must not raise out of load()."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["li\\u0000b/x.sh"]'),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == "#!/bin/bash\n"
+    assert spec.resources == ()
+    assert any("x.sh" in w for w in report.warnings)
+
+
+def test_manifest_nul_in_resource_name_warns_and_does_not_raise(tmp_path: Path) -> None:
+    """Guard: a NUL in a resource's file name is refused by the name rule without raising."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["a\\u0000b.sh"]'),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.resources == ()
+    assert any("a\x00b.sh" in w or "characters outside" in w for w in report.warnings)
+
+
+def test_manifest_empty_resource_warns_and_is_not_claimed(tmp_path: Path) -> None:
+    """#6859 review: an empty resource file warns and is skipped, so it never claims its name."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (plugin_root / "lib").mkdir()
+    (plugin_root / "lib" / "util.sh").write_text("", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["lib/util.sh"]'),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == "#!/bin/bash\n"
+    assert spec.resources == ()
+    assert any("util.sh" in w and "empty" in w for w in report.warnings)
+
+
+def test_manifest_unsafe_script_basename_without_whitespace_is_not_bundled(
+    tmp_path: Path,
+) -> None:
+    """#6859 review (guard): a '$' in the script's file name is refused by the name rule."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("agent_assets/a$b.sh", path="hooks/pre.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert report.bundle.hook_specs[0].content == ""
+    assert any("a$b.sh" in w for w in report.warnings)
+
+
+def test_manifest_symlink_inside_root_pointing_outside_is_not_bundled(tmp_path: Path) -> None:
+    """#6859 review (guard): a symlink under the root whose target is outside is refused."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    outside = tmp_path / "outside_target.sh"
+    outside.write_text("#!/bin/bash\necho leak\n", encoding="utf-8")
+    (plugin_root / "hooks" / "link.sh").symlink_to(outside)
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("link.sh", path="hooks/link.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert report.bundle.hook_specs[0].content == ""
+    assert any("outside the manifest root" in w for w in report.warnings)
+
+
+def test_manifest_script_with_space_in_directory_refused_by_whitespace_rule(
+    tmp_path: Path,
+) -> None:
+    """#6859 review: only the whitespace rule catches a space in a directory part (file name is clean)."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("dir with space/x.sh", path="hooks/pre.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert report.bundle.hook_specs[0].content == ""
+    assert any("whitespace" in w for w in report.warnings)
+
+
 def test_manifest_hook_script_collision_later_spec_not_bundled(tmp_path: Path) -> None:
     """#6859 review: a later spec whose script name clashes with different content is not bundled."""
     from cisternal.export.claude import ClaudeEmitter
@@ -595,17 +727,16 @@ def test_manifest_resource_escaping_root_and_absolute_path_are_refused(
         plugin_root,
         _hook_manifest_text(
             _hook_entry("abs.sh", path=str(outside)),
-            _hook_entry("esc.sh", path="../outside.sh", extra='resources = ["../outside.sh"]').replace(
-                '"Bash"', '"Write"'
-            ),
+            _hook_entry("esc.sh", path="../outside.sh").replace('"Bash"', '"Write"'),
         ),
     )
     report = ManifestAssetSource(manifest).load()
     absolute, escaped = report.bundle.hook_specs
     assert absolute.content == ""
     assert escaped.content == ""
-    assert escaped.resources == ()
     assert sum("outside" in w for w in report.warnings) >= 2
+    # The resource rule is exercised by test_manifest_escaping_resource_is_skipped_with_script_kept;
+    # here the script is refused first, so no resource assertion would test anything.
 
 
 def test_manifest_escaping_resource_is_skipped_with_script_kept(tmp_path: Path) -> None:

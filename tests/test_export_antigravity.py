@@ -234,3 +234,36 @@ def test_antigravity_resource_named_like_script_does_not_overwrite_it() -> None:
     files = AntigravityEmitter().emit(bundle)
 
     assert files["scripts/guard.sh"] == "#!/bin/bash\necho script\n"
+
+
+def test_antigravity_parent_segment_script_writes_no_dotdot_bundle_key(tmp_path: Path) -> None:
+    """#6859 review: a script with a '..' segment is not bundled, so no scripts/ key contains '..'."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / ".praxia").mkdir(parents=True)
+    (plugin_root / "hooks").mkdir()
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\necho pre\n", encoding="utf-8")
+    manifest = plugin_root / ".praxia" / "manifest.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[plugin]",
+                'name = "p"',
+                'version = "1.0.0"',
+                'description = ""',
+                'requires_praxia = "0.0.0"',
+                "",
+                "[[plugin.hook_specs]]",
+                'event = "PreToolUse"',
+                'matcher = "Bash"',
+                'script = "../../x.sh"',
+                'path = "hooks/pre.sh"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert any(".." in w for w in report.warnings)
+
+    files = AntigravityEmitter().emit(report.bundle)
+    assert not any(key.startswith("scripts/") for key in files)

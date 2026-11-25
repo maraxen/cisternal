@@ -146,6 +146,10 @@ def _read_text(path: Path, warnings: list[str], label: str) -> str | None:
         # #6859 review: a non-UTF-8 file warns instead of raising out of load().
         warnings.append(f"{label}: not valid UTF-8: {path}: {exc}")
         return None
+    except ValueError as exc:
+        # #6859 review: a NUL byte in a path raises ValueError, not OSError.
+        warnings.append(f"{label}: not a usable path: {path!r}: {exc}")
+        return None
 
 
 _SKILL_RESOURCE_DIRS = ("references", "scripts", "assets")
@@ -298,9 +302,16 @@ def _safe_hook_file_name(name: str) -> bool:
 
 
 def _inside_root(root: Path, rel: str) -> Path | None:
-    """Return ``root / rel`` resolved, or None when it escapes *root* (#6859 review)."""
-    candidate = (root / rel).resolve()
-    return candidate if candidate.is_relative_to(root.resolve()) else None
+    """Return ``root / rel`` resolved, or None when it escapes *root* (#6859 review).
+
+    Never raises: a NUL byte or another unusable path yields None, so the caller
+    warns and skips instead of letting ``load()`` raise.
+    """
+    try:
+        candidate = (root / rel).resolve()
+        return candidate if candidate.is_relative_to(root.resolve()) else None
+    except (OSError, ValueError, RuntimeError):
+        return None
 
 
 def _load_hook_script(
@@ -318,6 +329,11 @@ def _load_hook_script(
             "bundled file; not bundled"
         )
         return ""
+    # #6859 review: the Antigravity exporter writes scripts/<script> from the whole
+    # string, so a '..' segment would give a bundle key that the sink refuses.
+    if ".." in script.split("/"):
+        warnings.append(f"{label}: script has a '..' segment; not bundled")
+        return ""
     name = Path(script).name
     if not _safe_hook_file_name(name):
         warnings.append(
@@ -327,7 +343,10 @@ def _load_hook_script(
         return ""
     target = _inside_root(root, rel)
     if target is None:
-        warnings.append(f"{label}: path {rel!r} resolves outside the manifest root; not bundled")
+        warnings.append(
+            f"{label}: path {rel!r} resolves outside the manifest root or is not a "
+            "usable path; not bundled"
+        )
         return ""
     text = _read_text(target, warnings, label)
     if text is None:
@@ -400,11 +419,15 @@ def _load_hook_specs(
                     target = _inside_root(root, res_rel)
                     if target is None:
                         warnings.append(
-                            f"{label}: resolves outside the manifest root; skipped"
+                            f"{label}: resolves outside the manifest root or is not a "
+                            "usable path; skipped"
                         )
                         continue
                     text = _read_text(target, warnings, label)
                     if text is None:
+                        continue
+                    if not text:
+                        warnings.append(f"{label}: file is empty; skipped")
                         continue
                     previous = claimed.setdefault(res_name, text)
                     if previous != text:
