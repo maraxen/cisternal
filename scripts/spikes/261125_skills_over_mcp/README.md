@@ -13,7 +13,25 @@ Throwaway, task `261125_skills-over-mcp-spike`. Not wired into cisternal.
 
 `probe_raw.py` passes against `export-trust` and `spike-demo`: PROBE PASS.
 
-## Not yet checked: Claude Code (needs an interactive session)
+## Claude Code result (2026-11-25, v2.1.332, Claude Team login)
+
+Observed in `wire.log` from an interactive session (`claude -n <name>`; a bare
+`claude` opens the agent view, which connects to no MCP server):
+
+- Claude Code sends `server/discover` at 2026-07-28 and receives the
+  `io.modelcontextprotocol/skills` capability.
+- Its client capabilities list only `io.modelcontextprotocol/tasks`.
+- It calls `prompts/list`, `resources/list` and `tools/list`, and never
+  `skills/list`. So no MCP skill appears in `/skills`.
+
+Most likely cause: the account is on a Team plan, where the docs say MCP skills
+are off until the organization enables them (and, for servers that are not
+connectors, sets `disableDirectMcpSkills` to `false` in managed settings). Not
+ruled out: the session was a sandboxed child session.
+
+The server side needs no change to retest once the feature is on.
+
+## Manual check, for when MCP skills are enabled
 
 `claude -p` does not load MCP skills, so run this by hand (Claude Code
 >= 2.1.331, on a plan where MCP skills are on):
