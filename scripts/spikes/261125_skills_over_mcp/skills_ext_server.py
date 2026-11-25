@@ -131,8 +131,52 @@ def build(skill_dirs: list[Path]) -> FastMCP:
     return mcp
 
 
+def _tee_proxy() -> int:
+    """Relay stdio to a child copy of this server, logging every wire line."""
+    import os
+    import subprocess
+    import threading
+    import time
+
+    log = Path(__file__).with_name("wire.log").open("a", encoding="utf-8")
+    child = subprocess.Popen(
+        [sys.executable, __file__, *sys.argv[1:]],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env={**os.environ, "SKILLSPIKE_INNER": "1"},
+    )
+    assert child.stdin and child.stdout
+    lock = threading.Lock()
+
+    def note(tag: str, line: bytes) -> None:
+        with lock:
+            log.write(f"{time.strftime('%H:%M:%S')} {os.getpid()} {tag} ")
+            log.write(line.decode("utf-8", "replace").rstrip("\n") + "\n")
+            log.flush()
+
+    def pump_in() -> None:
+        for line in sys.stdin.buffer:
+            note("C>S", line)
+            child.stdin.write(line)
+            child.stdin.flush()
+        child.stdin.close()
+
+    threading.Thread(target=pump_in, daemon=True).start()
+    note("---", b"start " + " ".join(sys.argv[1:]).encode())
+    for line in child.stdout:
+        note("S>C", line)
+        sys.stdout.buffer.write(line)
+        sys.stdout.buffer.flush()
+    return child.wait()
+
+
 if __name__ == "__main__":
+    import os
+
     dirs = [Path(a).resolve() for a in sys.argv[1:]]
     if not dirs:
         sys.exit("usage: skills_ext_server.py <skill-dir> [<skill-dir> ...]")
-    build(dirs).run()
+    if os.environ.get("SKILLSPIKE_INNER") == "1" or os.environ.get("SKILLSPIKE_NOLOG"):
+        build(dirs).run()
+    else:
+        sys.exit(_tee_proxy())
