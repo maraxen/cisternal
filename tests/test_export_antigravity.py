@@ -176,3 +176,39 @@ def test_antigravity_hook_without_content_no_script_file() -> None:
     hooks = json.loads(files["hooks.json"])
     entry = hooks["p"]["PreToolUse"][0]
     assert entry["hooks"] == [{"type": "command", "command": "pre.sh"}]
+
+
+def test_antigravity_hook_resource_written_beside_script() -> None:
+    """#6859: a resource lands in the script's own directory under scripts/."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(
+            HookSpecAsset(
+                event="PreToolUse",
+                matcher="Bash",
+                script="agent_assets/hooks/guard.sh",
+                content="#!/bin/bash\n",
+                resources=(("lib.sh", "helper\n"),),
+            ),
+            HookSpecAsset(
+                event="PostToolUse",
+                matcher="Bash",
+                script="post.sh",
+                content="#!/bin/bash\n",
+                resources=(("util.sh", "util\n"),),
+            ),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+
+    assert files["scripts/agent_assets/hooks/guard.sh"] == "#!/bin/bash\n"
+    assert files["scripts/agent_assets/hooks/lib.sh"] == "helper\n"
+    assert files["scripts/post.sh"] == "#!/bin/bash\n"
+    assert files["scripts/util.sh"] == "util\n"
+    hooks = json.loads(files["hooks.json"])
+    assert hooks["p"]["PreToolUse"][0]["hooks"][0]["command"] == (
+        "./scripts/agent_assets/hooks/guard.sh"
+    )

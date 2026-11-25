@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,6 +113,9 @@ class FileWriterSink(WriterSink):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 content_str = str(contents) if not isinstance(contents, str) else contents
                 target.write_text(content_str, encoding="utf-8", errors="surrogatepass")
+                if content_str.startswith("#!"):
+                    # #6859: hook scripts must be executable once bundled.
+                    os.chmod(target, 0o755)
             except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 _log.warning(
                     "cisternal.export: write_bundle failed to write %s: %s",

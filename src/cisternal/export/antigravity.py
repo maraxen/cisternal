@@ -77,6 +77,7 @@ commits its own rewrite and regenerates conformance goldens.
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 
 from cisternal.assets.bundle import AssetBundle
 from cisternal.export._markdown import format_skill_markdown
@@ -136,6 +137,15 @@ class AntigravityEmitter(Emitter):
                 for spec in hook_specs:
                     if spec.content and spec.event in ("PreToolUse", "PostToolUse"):
                         files[f"scripts/{spec.script}"] = spec.content
+                        # #6859: resources sit beside the script they serve.
+                        script_dir = PurePosixPath(spec.script).parent
+                        for res_name, res_content in spec.resources:
+                            res_path = (
+                                res_name
+                                if script_dir == PurePosixPath(".")
+                                else f"{script_dir.as_posix()}/{res_name}"
+                            )
+                            files[f"scripts/{res_path}"] = res_content
 
 
         if bundle.mcp_servers:

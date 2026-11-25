@@ -314,6 +314,22 @@ def _load_hook_specs(
             text = _read_text(root / rel, warnings, f"hook script {script!r}")
             content = text if text is not None else ""
 
+        resources: list[tuple[str, str]] = []
+        resources_raw = entry.get("resources")
+        if isinstance(resources_raw, list) and resources_raw:
+            if not rel:
+                warnings.append(
+                    f"hook script {script!r}: 'resources' ignored because it has no 'path'"
+                )
+            else:
+                for res_rel_raw in resources_raw:
+                    res_rel = str(res_rel_raw)
+                    text = _read_text(
+                        root / res_rel, warnings, f"hook resource {res_rel!r}"
+                    )
+                    if text is not None:
+                        resources.append((Path(res_rel).name, text))
+
         specs.append(
             HookSpecAsset(
                 event=event,
@@ -322,9 +338,34 @@ def _load_hook_specs(
                 tier=tier,
                 surfaces=surfaces,
                 content=content,
+                resources=tuple(resources) if content else (),
             )
         )
+    _warn_hook_file_collisions(specs, warnings)
     return tuple(specs)
+
+
+def _warn_hook_file_collisions(
+    specs: list[HookSpecAsset], warnings: list[str]
+) -> None:
+    """Warn when two bundled hook files share a basename but not content (#6859).
+
+    The Claude exporter writes every bundled script and resource into one
+    ``hooks/scripts/`` directory, so a clash silently keeps only the first.
+    """
+    seen: dict[str, str] = {}
+    for spec in specs:
+        if not spec.content:
+            continue
+        files = [(Path(spec.script).name, spec.content), *spec.resources]
+        for name, body in files:
+            previous = seen.setdefault(name, body)
+            if previous != body:
+                warnings.append(
+                    f"hook file {name!r} collides with another hook file of the "
+                    "same name but different content; the first one wins in the "
+                    "Claude bundle"
+                )
 
 
 def _load_mcp(

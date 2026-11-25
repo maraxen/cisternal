@@ -269,3 +269,188 @@ def test_manifest_without_marketplace_table_leaves_it_none() -> None:
     """No [plugin.marketplace] table → bundle.marketplace stays None."""
     report = ManifestAssetSource(MANIFEST).load()
     assert report.bundle.marketplace is None
+
+
+def test_manifest_hook_spec_resources_loaded_by_basename(tmp_path: Path) -> None:
+    """#6859: hook_specs resources are read and stored under their basename."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "lib").mkdir()
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (plugin_root / "lib" / "helpers.sh").write_text("helper\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "pre.sh"
+path = "hooks/pre.sh"
+resources = ["lib/helpers.sh"]
+""",
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.resources == (("helpers.sh", "helper\n"),)
+    assert report.warnings == ()
+
+
+def test_manifest_hook_spec_missing_resource_warns_and_loads(tmp_path: Path) -> None:
+    """#6859: an unreadable resource adds a warning and is skipped; load succeeds."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "pre.sh"
+path = "hooks/pre.sh"
+resources = ["lib/gone.sh"]
+""",
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == "#!/bin/bash\n"
+    assert spec.resources == ()
+    assert any("gone.sh" in w for w in report.warnings)
+
+
+def test_manifest_hook_spec_resources_without_path_warn_and_are_ignored(
+    tmp_path: Path,
+) -> None:
+    """#6859: resources with no path key warn and are dropped."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "lib").mkdir(parents=True)
+    (plugin_root / "lib" / "helpers.sh").write_text("helper\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "pre.sh"
+resources = ["lib/helpers.sh"]
+""",
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == ""
+    assert spec.resources == ()
+    assert any("resources" in w and "path" in w for w in report.warnings)
+
+
+def test_manifest_hook_spec_basename_collision_with_different_content_warns(
+    tmp_path: Path,
+) -> None:
+    """#6859: two bundled files sharing a basename but not content warn at load."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "a").mkdir(parents=True)
+    (plugin_root / "b").mkdir(parents=True)
+    (plugin_root / "a" / "run.sh").write_text("#!/bin/bash\necho a\n", encoding="utf-8")
+    (plugin_root / "b" / "run.sh").write_text("#!/bin/bash\necho b\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "a/run.sh"
+path = "a/run.sh"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Write"
+script = "b/run.sh"
+path = "b/run.sh"
+""",
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert len(report.bundle.hook_specs) == 2
+    assert any("run.sh" in w and "collid" in w for w in report.warnings)
+
+
+def test_manifest_hook_spec_identical_basename_same_content_no_warning(
+    tmp_path: Path,
+) -> None:
+    """#6859: the same basename with identical content is not a collision."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "a").mkdir(parents=True)
+    (plugin_root / "b").mkdir(parents=True)
+    (plugin_root / "a" / "run.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (plugin_root / "b" / "run.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Bash"
+script = "a/run.sh"
+path = "a/run.sh"
+
+[[plugin.hook_specs]]
+event = "PreToolUse"
+matcher = "Write"
+script = "b/run.sh"
+path = "b/run.sh"
+""",
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert report.warnings == ()
+
+
+def test_snapshot_round_trip_keeps_hook_resources() -> None:
+    """#6859: resources survive dumps/loads; empty resources keep old snapshot bytes."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+    from cisternal.assets.snapshot import dumps_snapshot, loads_snapshot
+
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="guard.sh",
+        content="#!/bin/bash\n",
+        resources=(("lib.sh", "helper\n"),),
+    )
+    bundle = AssetBundle(metadata=BundleMetadata(name="p", version="1.0.0"), hook_specs=(spec,))
+    text = dumps_snapshot(bundle)
+    (back,) = loads_snapshot(text).hook_specs
+    assert back.resources == (("lib.sh", "helper\n"),)
+    assert back == spec
+
+    plain = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(HookSpecAsset(event="PreToolUse", matcher="Bash", script="x.sh"),),
+    )
+    assert '"resources"' not in dumps_snapshot(plain)

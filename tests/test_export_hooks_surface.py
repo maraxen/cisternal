@@ -94,3 +94,23 @@ def test_cursor_only_hook_not_in_copilot_export() -> None:
 
     assert "hooks" in cursor_plugin
     assert "hooks" not in copilot_plugin
+
+
+def test_cursor_and_copilot_keep_literal_command_for_spec_with_content() -> None:
+    """#6859: only the Claude bundle rewrites hook commands; cursor/copilot are unchanged."""
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="guard.sh",
+        surfaces=(),
+        content="#!/bin/bash\necho guard\n",
+        resources=(("lib.sh", "helper\n"),),
+    )
+    bundle = AssetBundle(metadata=BundleMetadata(name="p", version="1.0.0"), hook_specs=(spec,))
+
+    for emitter in (CursorEmitter(), CopilotEmitter()):
+        files = emitter.emit(bundle)
+        text = "".join(files.values())
+        assert '"command": "guard.sh"' in text
+        assert "CLAUDE_PLUGIN_ROOT" not in text
+        assert not any(path.startswith("hooks/scripts/") for path in files)
