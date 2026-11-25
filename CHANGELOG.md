@@ -5,6 +5,26 @@ All notable changes to cisternal are recorded here. The project is beta: the pub
 but may still change before `1.0`. Entries are written per change and grouped under the release
 that ships them; unreleased work sits under "Unreleased".
 
+## 0.1.13 (2026-11-25)
+
+### Added
+
+- **Claude bundles ship hook scripts.** A `[[plugin.hook_specs]]` entry with a `path` key now has its script written
+  into the Claude plugin bundle at `hooks/scripts/<file name>`, and its command becomes
+  `"${CLAUDE_PLUGIN_ROOT}"/hooks/scripts/<file name>`, so the hook runs on a machine that does not have the tool's
+  repository. A new optional `resources` list on the entry ships helper files beside the script (Antigravity bundles
+  write them beside their script too). Entries without `path` are unchanged, as is Cursor and Copilot output.
+- **Bundle files that start with `#!` are written executable** (mode 0755).
+
+### Changed
+
+- **A hook entry that cannot be bundled safely is left unbundled, with a load warning.** This covers a `script` with
+  whitespace, a backslash or a `..` segment, a file name outside `[A-Za-z0-9._-]`, a `path` or resource that resolves
+  outside the manifest root, an empty file, and a file name already used by an earlier hook file with different
+  content. Such an entry keeps its literal `script` as the command.
+- **A file that is not valid UTF-8 now produces a load warning instead of raising.** This applies to skill and agent
+  bodies as well as hook files.
+
 ## 0.1.12 (2026-11-24)
 
 ### Added
