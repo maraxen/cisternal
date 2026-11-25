@@ -494,7 +494,10 @@ def test_claude_hook_resource_written_beside_script() -> None:
     assert _claude_command(files) == _CLAUDE_HOOK_CMD + "guard.sh"
 
 
-def test_claude_hook_script_basename_collision_first_wins_no_raise() -> None:
+def test_claude_hook_script_basename_collision_logs_and_keeps_first_no_raise(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#6859 review: a programmatic clash must not raise; the emitter keeps the first and logs."""
     first = HookSpecAsset(
         event="PreToolUse",
         matcher="Bash",
@@ -510,9 +513,27 @@ def test_claude_hook_script_basename_collision_first_wins_no_raise() -> None:
         content="#!/bin/bash\necho second\n",
     )
     # Bundle sorts hook_specs by (event, matcher, script): Bash entry comes first.
-    files = ClaudeEmitter().emit(_hook_bundle(second, first))
+    with caplog.at_level("WARNING", logger="cisternal.export"):
+        files = ClaudeEmitter().emit(_hook_bundle(second, first))
 
     assert files["hooks/scripts/run.sh"] == "#!/bin/bash\necho first\n"
+    assert any("run.sh" in r.getMessage() for r in caplog.records)
+
+
+def test_claude_hook_with_content_on_other_surface_writes_nothing() -> None:
+    """#6859 review: a cursor-only spec with content writes no Claude hook file."""
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="cursor-guard.sh",
+        surfaces=("cursor",),
+        content="#!/bin/bash\n",
+        resources=(("lib.sh", "helper\n"),),
+    )
+    files = ClaudeEmitter().emit(_hook_bundle(spec))
+
+    assert not any(path.startswith("hooks/") for path in files)
+    assert "hooks/hooks.json" not in files
 
 
 def test_claude_hook_scripts_are_covered_by_provenance() -> None:

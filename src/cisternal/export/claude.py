@@ -75,6 +75,7 @@ DETERMINISTIC: identical bundle → byte-identical output (AC-M3-6).
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import PurePosixPath
 
 from cisternal.assets.bundle import AssetBundle, ConfigOptionAsset, HookSpecAsset, McpAsset
@@ -84,6 +85,7 @@ from cisternal.export.base import Emitter
 from cisternal.export.claude_rust import emit_claude_rust_parity
 from cisternal.export.hooks import build_claude_style_hooks, hooks_for_surface
 
+_log = logging.getLogger("cisternal.export")
 _PLUGIN_JSON_PATH = ".claude-plugin/plugin.json"
 _PROVENANCE_PATH = ".claude-plugin/cisternal-provenance.json"
 _COMMAND_BODY_DIR = "commands"
@@ -215,7 +217,15 @@ def _bundled_hook_files(hook_specs: tuple[HookSpecAsset, ...]) -> dict[str, str]
             continue
         candidates = [(PurePosixPath(spec.script).name, spec.content), *spec.resources]
         for name, body in candidates:
-            files.setdefault(name, body)
+            previous = files.setdefault(name, body)
+            if previous != body:
+                # The loader refuses such clashes; a programmatic bundle can still
+                # reach here, so keep the first file and say so.
+                _log.warning(
+                    "cisternal.export: hook file %s clashes with another hook file of "
+                    "different content; keeping the first",
+                    name,
+                )
     return files
 
 

@@ -212,3 +212,25 @@ def test_antigravity_hook_resource_written_beside_script() -> None:
     assert hooks["p"]["PreToolUse"][0]["hooks"][0]["command"] == (
         "./scripts/agent_assets/hooks/guard.sh"
     )
+
+
+def test_antigravity_resource_named_like_script_does_not_overwrite_it() -> None:
+    """#6859 review: a resource whose name equals the script's file keeps the script body."""
+    from cisternal.assets.bundle import AssetBundle, BundleMetadata, HookSpecAsset
+
+    bundle = AssetBundle(
+        metadata=BundleMetadata(name="p", version="1.0.0"),
+        hook_specs=(
+            HookSpecAsset(
+                event="PreToolUse",
+                matcher="Bash",
+                script="guard.sh",
+                content="#!/bin/bash\necho script\n",
+                resources=(("guard.sh", "echo resource\n"),),
+            ),
+        ),
+    )
+
+    files = AntigravityEmitter().emit(bundle)
+
+    assert files["scripts/guard.sh"] == "#!/bin/bash\necho script\n"

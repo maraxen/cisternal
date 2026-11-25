@@ -145,7 +145,8 @@ class AntigravityEmitter(Emitter):
                                 if script_dir == PurePosixPath(".")
                                 else f"{script_dir.as_posix()}/{res_name}"
                             )
-                            files[f"scripts/{res_path}"] = res_content
+                            # setdefault: a resource never overwrites a script (#6859 review).
+                            files.setdefault(f"scripts/{res_path}", res_content)
 
 
         if bundle.mcp_servers:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import cisternal
@@ -454,3 +455,208 @@ def test_snapshot_round_trip_keeps_hook_resources() -> None:
         hook_specs=(HookSpecAsset(event="PreToolUse", matcher="Bash", script="x.sh"),),
     )
     assert '"resources"' not in dumps_snapshot(plain)
+
+
+def _hook_manifest_text(*entries: str) -> str:
+    header = """
+[plugin]
+name = "p"
+version = "1.0.0"
+description = ""
+requires_praxia = "0.0.0"
+"""
+    return header + "".join(entries)
+
+
+def _hook_entry(script: str, path: str = "", extra: str = "") -> str:
+    lines = [
+        "",
+        "[[plugin.hook_specs]]",
+        'event = "PreToolUse"',
+        'matcher = "Bash"',
+        f'script = "{script}"',
+    ]
+    if path:
+        lines.append(f'path = "{path}"')
+    if extra:
+        lines.append(extra)
+    return "\n".join(lines) + "\n"
+
+
+def test_manifest_script_with_args_and_path_is_not_bundled(tmp_path: Path) -> None:
+    """#6859 review: a script with whitespace cannot name a bundled file; warn, do not bundle."""
+    from cisternal.export.claude import ClaudeEmitter
+
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("guard.sh --strict", path="hooks/pre.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == ""
+    assert any("guard.sh --strict" in w for w in report.warnings)
+
+    files = ClaudeEmitter().emit(report.bundle)
+    hooks = json.loads(files["hooks/hooks.json"])["hooks"]
+    assert hooks["PreToolUse"][0]["hooks"][0]["command"] == "guard.sh --strict"
+    assert not any(path.startswith("hooks/scripts/") for path in files)
+
+
+def test_manifest_unsafe_resource_name_is_skipped(tmp_path: Path) -> None:
+    """#6859 review: a resource whose basename has a space is skipped with a warning."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (plugin_root / "lib").mkdir()
+    (plugin_root / "lib" / "my helper.sh").write_text("helper\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["lib/my helper.sh"]')
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == "#!/bin/bash\n"
+    assert spec.resources == ()
+    assert any("my helper.sh" in w for w in report.warnings)
+
+
+def test_manifest_hook_script_collision_later_spec_not_bundled(tmp_path: Path) -> None:
+    """#6859 review: a later spec whose script name clashes with different content is not bundled."""
+    from cisternal.export.claude import ClaudeEmitter
+
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "a").mkdir(parents=True)
+    (plugin_root / "b").mkdir(parents=True)
+    (plugin_root / "a" / "run.sh").write_text("#!/bin/bash\necho a\n", encoding="utf-8")
+    (plugin_root / "b" / "run.sh").write_text("#!/bin/bash\necho b\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("a/run.sh", path="a/run.sh"),
+            _hook_entry("b/run.sh", path="b/run.sh").replace('"Bash"', '"Write"'),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    first, second = report.bundle.hook_specs
+    assert first.content == "#!/bin/bash\necho a\n"
+    assert second.content == ""
+    assert any("run.sh" in w and "collides" in w for w in report.warnings)
+
+    files = ClaudeEmitter().emit(report.bundle)
+    assert files["hooks/scripts/run.sh"] == "#!/bin/bash\necho a\n"
+    commands = sorted(
+        h["command"]
+        for entry in json.loads(files["hooks/hooks.json"])["hooks"]["PreToolUse"]
+        for h in entry["hooks"]
+    )
+    assert commands == ['"${CLAUDE_PLUGIN_ROOT}"/hooks/scripts/run.sh', "b/run.sh"]
+
+
+def test_manifest_resource_collision_drops_only_the_resource(tmp_path: Path) -> None:
+    """#6859 review: a later resource clashing with different content is dropped, script kept."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (plugin_root / "lib").mkdir()
+    (plugin_root / "lib" / "util.sh").write_text("one\n", encoding="utf-8")
+    (plugin_root / "other").mkdir()
+    (plugin_root / "other" / "util.sh").write_text("two\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["lib/util.sh"]'),
+            _hook_entry("pre2.sh", path="hooks/pre.sh", extra='resources = ["other/util.sh"]').replace(
+                '"Bash"', '"Write"'
+            ),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    first, second = report.bundle.hook_specs
+    assert first.resources == (("util.sh", "one\n"),)
+    assert second.content == "#!/bin/bash\n"
+    assert second.resources == ()
+    assert any("util.sh" in w and "collides" in w for w in report.warnings)
+
+
+def test_manifest_resource_escaping_root_and_absolute_path_are_refused(
+    tmp_path: Path,
+) -> None:
+    """#6859 review: resources and paths must resolve inside the manifest root."""
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    outside = tmp_path / "outside.sh"
+    outside.write_text("#!/bin/bash\necho outside\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("abs.sh", path=str(outside)),
+            _hook_entry("esc.sh", path="../outside.sh", extra='resources = ["../outside.sh"]').replace(
+                '"Bash"', '"Write"'
+            ),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    absolute, escaped = report.bundle.hook_specs
+    assert absolute.content == ""
+    assert escaped.content == ""
+    assert escaped.resources == ()
+    assert sum("outside" in w for w in report.warnings) >= 2
+
+
+def test_manifest_escaping_resource_is_skipped_with_script_kept(tmp_path: Path) -> None:
+    """#6859 review: an escaping resource is skipped; the in-root script still bundles."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    outside = tmp_path / "secret.sh"
+    outside.write_text("leak\n", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["../secret.sh"]'),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == "#!/bin/bash\n"
+    assert spec.resources == ()
+    assert any("secret.sh" in w for w in report.warnings)
+
+
+def test_manifest_non_utf8_resource_warns_and_loads(tmp_path: Path) -> None:
+    """#6859 review: a non-UTF-8 resource warns instead of raising out of load()."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "pre.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (plugin_root / "lib").mkdir()
+    (plugin_root / "lib" / "blob.sh").write_bytes(b"\xff\xfe\x00bad")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(
+            _hook_entry("pre.sh", path="hooks/pre.sh", extra='resources = ["lib/blob.sh"]'),
+        ),
+    )
+    report = ManifestAssetSource(manifest).load()
+    spec = report.bundle.hook_specs[0]
+    assert spec.content == "#!/bin/bash\n"
+    assert spec.resources == ()
+    assert any("blob.sh" in w for w in report.warnings)
+
+
+def test_manifest_empty_hook_script_warns_and_is_not_bundled(tmp_path: Path) -> None:
+    """#6859 review: a path to an empty file warns; the spec is not bundled."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "hooks").mkdir(parents=True)
+    (plugin_root / "hooks" / "empty.sh").write_text("", encoding="utf-8")
+    manifest = _praxia_manifest(
+        plugin_root,
+        _hook_manifest_text(_hook_entry("empty.sh", path="hooks/empty.sh")),
+    )
+    report = ManifestAssetSource(manifest).load()
+    assert report.bundle.hook_specs[0].content == ""
+    assert any("empty" in w and "empty.sh" in w for w in report.warnings)
