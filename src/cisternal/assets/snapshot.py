@@ -64,6 +64,10 @@ def dumps_snapshot(bundle: AssetBundle) -> str:
         for key, default in _SKILL_LATE_DEFAULTS.items():
             if skill.get(key) in (default, [], ()):
                 skill.pop(key)
+    # #6859: hook resources are written only when present (snapshots without them stay byte-identical).
+    for hook in data.get("hook_specs", ()):
+        if not hook.get("resources"):
+            hook.pop("resources", None)
     for key, default in _BUNDLE_LATE_DEFAULTS.items():
         if data.get(key) in (default, {}, ()):
             data.pop(key)
@@ -154,6 +158,7 @@ def bundle_from_dict(data: dict[str, Any]) -> AssetBundle:
                     tier=h.get("tier", ""),
                     surfaces=tuple(h.get("surfaces", ())),
                     content=h.get("content", ""),
+                    resources=tuple((p, c) for p, c in h.get("resources", ())),
                 )
                 for h in data.get("hook_specs", ())
             ),

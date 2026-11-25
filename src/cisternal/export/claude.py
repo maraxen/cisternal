@@ -33,6 +33,11 @@ Output files (non-rust-parity mode):
         ``cisternal.export.hooks.build_claude_style_hooks``, wrapped as
         ``{"hooks": <result>}``.
 
+    ``hooks/scripts/<name>`` (#6859)
+        One per hook spec with ``content`` (its script body, basename of
+        ``script``) and per resource of those specs. A spec with content
+        gets the command ``"${CLAUDE_PLUGIN_ROOT}"/hooks/scripts/<name>``.
+
     ``.mcp.json`` (root, NOT under ``.claude-plugin/``)
         Present only when ``bundle.mcp_servers`` is non-empty:
         ``{"mcpServers": {name: {"command": "...", "args": [...], "env": {...}}}}``.
@@ -70,18 +75,22 @@ DETERMINISTIC: identical bundle → byte-identical output (AC-M3-6).
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import PurePosixPath
 
-from cisternal.assets.bundle import AssetBundle, ConfigOptionAsset, McpAsset
+from cisternal.assets.bundle import AssetBundle, ConfigOptionAsset, HookSpecAsset, McpAsset
 from cisternal.export._hash import bundle_sha256
 from cisternal.export._markdown import format_agent_markdown, format_skill_markdown
 from cisternal.export.base import Emitter
 from cisternal.export.claude_rust import emit_claude_rust_parity
 from cisternal.export.hooks import build_claude_style_hooks, hooks_for_surface
 
+_log = logging.getLogger("cisternal.export")
 _PLUGIN_JSON_PATH = ".claude-plugin/plugin.json"
 _PROVENANCE_PATH = ".claude-plugin/cisternal-provenance.json"
 _COMMAND_BODY_DIR = "commands"
 _HOOKS_JSON_PATH = "hooks/hooks.json"
+_HOOK_SCRIPTS_DIR = "hooks/scripts"
 _MCP_JSON_PATH = ".mcp.json"
 _MARKETPLACE_JSON_PATH = ".claude-plugin/marketplace.json"
 
@@ -135,12 +144,16 @@ class ClaudeEmitter(Emitter):
                 files[f"skills/{skill.name}/{resource_path}"] = content
 
         if hook_specs:
-            hooks_root = build_claude_style_hooks(hook_specs)
+            hooks_root = build_claude_style_hooks(
+                hook_specs, plugin_script_dir=_HOOK_SCRIPTS_DIR
+            )
             files[_HOOKS_JSON_PATH] = json.dumps(
                 {"hooks": hooks_root},
                 sort_keys=True,
                 indent=2,
             )
+            for name, body in _bundled_hook_files(hook_specs).items():
+                files[f"{_HOOK_SCRIPTS_DIR}/{name}"] = body
 
         if bundle.mcp_servers:
             mcp_obj = {
@@ -189,6 +202,31 @@ class ClaudeEmitter(Emitter):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _bundled_hook_files(hook_specs: tuple[HookSpecAsset, ...]) -> dict[str, str]:
+    """Map ``hooks/scripts/<name>`` basename to body for every bundled hook file (#6859).
+
+    A spec contributes its script (basename of ``spec.script``) and each of its
+    resources, only when it carries ``content``. Specs arrive in the bundle's
+    sorted order, so on a basename clash the first file wins and nothing raises.
+    """
+    files: dict[str, str] = {}
+    for spec in hook_specs:
+        if not spec.content:
+            continue
+        candidates = [(PurePosixPath(spec.script).name, spec.content), *spec.resources]
+        for name, body in candidates:
+            previous = files.setdefault(name, body)
+            if previous != body:
+                # The loader refuses such clashes; a programmatic bundle can still
+                # reach here, so keep the first file and say so.
+                _log.warning(
+                    "cisternal.export: hook file %s clashes with another hook file of "
+                    "different content; keeping the first",
+                    name,
+                )
+    return files
 
 
 def _mcp_server_obj(srv: McpAsset) -> dict[str, object]:

@@ -196,6 +196,11 @@ class HookSpecAsset:
     prior behavior exactly. Antigravity is the one surface that uses
     ``content`` when present, to bundle a self-contained ``scripts/<script>``
     file rather than referencing an external path.
+
+    ``resources`` (#6859) are ``(file name, content)`` pairs for files a hook
+    script needs beside it (e.g. a sourced helper). They are bundled only
+    together with a non-empty ``content``. Claude (legacy path) writes them to
+    ``hooks/scripts/<name>``; Antigravity writes them next to the script.
     """
 
     event: str
@@ -204,6 +209,7 @@ class HookSpecAsset:
     tier: str = ""
     surfaces: tuple[str, ...] = ()
     content: str = ""
+    resources: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

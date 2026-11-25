@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from cisternal.export.sink import MemoryWriterSink
+from cisternal.export.sink import FileWriterSink, MemoryWriterSink
 
 
 def _sha256(text: str) -> str:
@@ -54,3 +54,20 @@ def test_memory_writer_sink_ignores_out_path() -> None:
 
     assert sink.captured == files
     assert result.dry_run is False
+
+
+def test_file_sink_sets_owner_exec_bit_on_shebang_files(tmp_path: Path) -> None:
+    """#6859: a file starting with #! is written executable; other files are not."""
+    import os
+    import stat
+
+    files = {
+        "hooks/scripts/guard.sh": "#!/bin/bash\necho guard\n",
+        "hooks/hooks.json": '{"hooks": {}}\n',
+    }
+    FileWriterSink().write(files, tmp_path)
+
+    script_mode = os.stat(tmp_path / "hooks/scripts/guard.sh").st_mode
+    json_mode = os.stat(tmp_path / "hooks/hooks.json").st_mode
+    assert (script_mode & 0o777) == 0o755
+    assert not json_mode & stat.S_IXUSR

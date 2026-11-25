@@ -142,6 +142,14 @@ def _read_text(path: Path, warnings: list[str], label: str) -> str | None:
     except OSError as exc:
         warnings.append(f"{label}: missing or unreadable: {path}: {exc}")
         return None
+    except UnicodeDecodeError as exc:
+        # #6859 review: a non-UTF-8 file warns instead of raising out of load().
+        warnings.append(f"{label}: not valid UTF-8: {path}: {exc}")
+        return None
+    except ValueError as exc:
+        # #6859 review: a NUL byte in a path raises ValueError, not OSError.
+        warnings.append(f"{label}: not a usable path: {path!r}: {exc}")
+        return None
 
 
 _SKILL_RESOURCE_DIRS = ("references", "scripts", "assets")
@@ -285,6 +293,70 @@ def _load_agents(
     return tuple(agents)
 
 
+_HOOK_FILE_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _safe_hook_file_name(name: str) -> bool:
+    """True when *name* is a plain file name that may be bundled (#6859 review)."""
+    return name not in ("", ".", "..") and _HOOK_FILE_NAME_RE.fullmatch(name) is not None
+
+
+def _inside_root(root: Path, rel: str) -> Path | None:
+    """Return ``root / rel`` resolved, or None when it escapes *root* (#6859 review).
+
+    Never raises: a NUL byte or another unusable path yields None, so the caller
+    warns and skips instead of letting ``load()`` raise.
+    """
+    try:
+        candidate = (root / rel).resolve()
+        return candidate if candidate.is_relative_to(root.resolve()) else None
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _load_hook_script(
+    script: str, rel: str, root: Path, warnings: list[str]
+) -> str:
+    """Return the bundled body for a hook entry's ``path``, or ``""`` (#6859 review).
+
+    A refused entry keeps ``content == ""``, so its command stays the literal
+    ``script`` and nothing is written into the bundle.
+    """
+    label = f"hook script {script!r}"
+    if any(ch.isspace() for ch in script) or "\\" in script:
+        warnings.append(
+            f"{label}: script has whitespace or a backslash, so it cannot name a "
+            "bundled file; not bundled"
+        )
+        return ""
+    # #6859 review: the Antigravity exporter writes scripts/<script> from the whole
+    # string, so a '..' segment would give a bundle key that the sink refuses.
+    if ".." in script.split("/"):
+        warnings.append(f"{label}: script has a '..' segment; not bundled")
+        return ""
+    name = Path(script).name
+    if not _safe_hook_file_name(name):
+        warnings.append(
+            f"{label}: file name {name!r} has characters outside [A-Za-z0-9._-]; "
+            "not bundled"
+        )
+        return ""
+    target = _inside_root(root, rel)
+    if target is None:
+        warnings.append(
+            f"{label}: path {rel!r} resolves outside the manifest root or is not a "
+            "usable path; not bundled"
+        )
+        return ""
+    text = _read_text(target, warnings, label)
+    if text is None:
+        return ""
+    if not text:
+        warnings.append(f"{label}: file {rel!r} is empty; not bundled")
+        return ""
+    return text
+
+
 def _load_hook_specs(
     plugin: dict[str, object],
     root: Path,
@@ -294,6 +366,10 @@ def _load_hook_specs(
     if not isinstance(entries, list):
         return ()
     specs: list[HookSpecAsset] = []
+    # Bundle file name -> body, claimed in manifest order (#6859 review). The
+    # Claude exporter writes every bundled script and resource into one
+    # hooks/scripts/ directory, so a name may be claimed once with one body.
+    claimed: dict[str, str] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -311,8 +387,56 @@ def _load_hook_specs(
         content = ""
         rel = str(entry.get("path") or "")
         if rel:
-            text = _read_text(root / rel, warnings, f"hook script {script!r}")
-            content = text if text is not None else ""
+            content = _load_hook_script(script, rel, root, warnings)
+        if content:
+            name = Path(script).name
+            previous = claimed.setdefault(name, content)
+            if previous != content:
+                warnings.append(
+                    f"hook script {script!r}: file name {name!r} collides with an "
+                    "earlier hook file of different content; not bundled"
+                )
+                content = ""
+
+        resources: list[tuple[str, str]] = []
+        resources_raw = entry.get("resources")
+        if isinstance(resources_raw, list) and resources_raw:
+            if not rel:
+                warnings.append(
+                    f"hook script {script!r}: 'resources' ignored because it has no 'path'"
+                )
+            elif content:
+                for res_rel_raw in resources_raw:
+                    res_rel = str(res_rel_raw)
+                    res_name = Path(res_rel).name
+                    label = f"hook resource {res_rel!r}"
+                    if not _safe_hook_file_name(res_name):
+                        warnings.append(
+                            f"{label}: file name {res_name!r} has characters outside "
+                            "[A-Za-z0-9._-]; skipped"
+                        )
+                        continue
+                    target = _inside_root(root, res_rel)
+                    if target is None:
+                        warnings.append(
+                            f"{label}: resolves outside the manifest root or is not a "
+                            "usable path; skipped"
+                        )
+                        continue
+                    text = _read_text(target, warnings, label)
+                    if text is None:
+                        continue
+                    if not text:
+                        warnings.append(f"{label}: file is empty; skipped")
+                        continue
+                    previous = claimed.setdefault(res_name, text)
+                    if previous != text:
+                        warnings.append(
+                            f"{label}: file name {res_name!r} collides with another hook "
+                            "file of different content; skipped"
+                        )
+                        continue
+                    resources.append((res_name, text))
 
         specs.append(
             HookSpecAsset(
@@ -322,6 +446,7 @@ def _load_hook_specs(
                 tier=tier,
                 surfaces=surfaces,
                 content=content,
+                resources=tuple(resources),
             )
         )
     return tuple(specs)

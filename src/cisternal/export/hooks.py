@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import PurePosixPath
 from typing import cast
 
 from cisternal.assets.bundle import HookSpecAsset
@@ -25,11 +26,24 @@ def hooks_for_surface(
 
 def build_claude_style_hooks(
     hook_specs: tuple[HookSpecAsset, ...],
+    *,
+    plugin_script_dir: str | None = None,
 ) -> dict[str, list[dict[str, object]]]:
-    """Claude-shaped nested hooks (praxia build_claude_hooks bundle adapter)."""
+    """Claude-shaped nested hooks (praxia build_claude_hooks bundle adapter).
+
+    With the default ``plugin_script_dir=None`` every command is ``spec.script``
+    verbatim (cursor/copilot shape). When a directory is given (#6859, the
+    Claude bundle passes ``"hooks/scripts"``), a spec carrying ``content`` is
+    bundled there, so its command becomes ``"${CLAUDE_PLUGIN_ROOT}"/<dir>/<basename>``.
+    Specs without content keep ``spec.script`` verbatim.
+    """
     events: dict[str, list[dict[str, object]]] = defaultdict(list)
     for spec in hook_specs:
-        hook_cmd: dict[str, str] = {"type": "command", "command": spec.script}
+        command = spec.script
+        if plugin_script_dir is not None and spec.content:
+            basename = PurePosixPath(spec.script).name
+            command = f'"${{CLAUDE_PLUGIN_ROOT}}"/{plugin_script_dir}/{basename}'
+        hook_cmd: dict[str, str] = {"type": "command", "command": command}
         entry: dict[str, object] = {
             "matcher": spec.matcher,
             "hooks": [hook_cmd],

@@ -20,6 +20,7 @@ from cisternal.assets.bundle import (
     AssetBundle,
     BundleMetadata,
     CommandAsset,
+    HookSpecAsset,
     MarketplaceAsset,
     McpAsset,
 )
@@ -409,3 +410,148 @@ def test_marketplace_json_covered_by_provenance_digest() -> None:
     files_b = ClaudeEmitter().emit(bundle)
     assert files_a == files_b
     assert files_a[_PROVENANCE_PATH] == files_b[_PROVENANCE_PATH]
+
+
+# ---------------------------------------------------------------------------
+# #6859 — hook scripts shipped inside the Claude bundle
+# ---------------------------------------------------------------------------
+
+_CLAUDE_HOOK_CMD = '"${CLAUDE_PLUGIN_ROOT}"/hooks/scripts/'
+
+
+def _hook_bundle(*specs: HookSpecAsset) -> AssetBundle:
+    return AssetBundle(metadata=_meta(name="p"), hook_specs=specs)
+
+
+def _hooks_json(files: dict[str, str]) -> dict[str, object]:
+    return json.loads(files["hooks/hooks.json"])
+
+
+def _claude_command(files: dict[str, str]) -> str:
+    hooks = _hooks_json(files)["hooks"]
+    assert isinstance(hooks, dict)
+    (entry,) = hooks["PreToolUse"]
+    (hook,) = entry["hooks"]
+    return str(hook["command"])
+
+
+def test_claude_hook_with_content_ships_script_and_plugin_root_command() -> None:
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="agent_assets/hooks/guard.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\necho guard\n",
+    )
+    files = ClaudeEmitter().emit(_hook_bundle(spec))
+
+    assert files["hooks/scripts/guard.sh"] == "#!/bin/bash\necho guard\n"
+    assert _claude_command(files) == _CLAUDE_HOOK_CMD + "guard.sh"
+    assert _claude_command(files) == '"${CLAUDE_PLUGIN_ROOT}"/hooks/scripts/guard.sh'
+
+
+def test_claude_hook_script_absolute_path_uses_basename() -> None:
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="/home/someone/repo/hooks/x.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\n",
+    )
+    files = ClaudeEmitter().emit(_hook_bundle(spec))
+
+    assert files["hooks/scripts/x.sh"] == "#!/bin/bash\n"
+    assert _claude_command(files) == _CLAUDE_HOOK_CMD + "x.sh"
+    assert not any("home" in path for path in files)
+
+
+def test_claude_hook_without_content_keeps_literal_command() -> None:
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="praxia hook pre-tool",
+        surfaces=("claude",),
+    )
+    files = ClaudeEmitter().emit(_hook_bundle(spec))
+
+    assert _claude_command(files) == "praxia hook pre-tool"
+    assert not any(path.startswith("hooks/scripts/") for path in files)
+
+
+def test_claude_hook_resource_written_beside_script() -> None:
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="hooks/guard.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\nsource \"$(dirname \"$0\")/lib.sh\"\n",
+        resources=(("lib.sh", "helper() { :; }\n"),),
+    )
+    files = ClaudeEmitter().emit(_hook_bundle(spec))
+
+    assert files["hooks/scripts/guard.sh"].startswith("#!/bin/bash")
+    assert files["hooks/scripts/lib.sh"] == "helper() { :; }\n"
+    assert _claude_command(files) == _CLAUDE_HOOK_CMD + "guard.sh"
+
+
+def test_claude_hook_script_basename_collision_logs_and_keeps_first_no_raise(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#6859 review: a programmatic clash must not raise; the emitter keeps the first and logs."""
+    first = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="a/run.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\necho first\n",
+    )
+    second = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Write",
+        script="b/run.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\necho second\n",
+    )
+    # Bundle sorts hook_specs by (event, matcher, script): Bash entry comes first.
+    with caplog.at_level("WARNING", logger="cisternal.export"):
+        files = ClaudeEmitter().emit(_hook_bundle(second, first))
+
+    assert files["hooks/scripts/run.sh"] == "#!/bin/bash\necho first\n"
+    assert any("run.sh" in r.getMessage() for r in caplog.records)
+
+
+def test_claude_hook_with_content_on_other_surface_writes_nothing() -> None:
+    """#6859 review: a cursor-only spec with content writes no Claude hook file."""
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="cursor-guard.sh",
+        surfaces=("cursor",),
+        content="#!/bin/bash\n",
+        resources=(("lib.sh", "helper\n"),),
+    )
+    files = ClaudeEmitter().emit(_hook_bundle(spec))
+
+    assert not any(path.startswith("hooks/") for path in files)
+    assert "hooks/hooks.json" not in files
+
+
+def test_claude_hook_scripts_are_covered_by_provenance() -> None:
+    spec = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="guard.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\n",
+    )
+    files_a = ClaudeEmitter().emit(_hook_bundle(spec))
+    changed = HookSpecAsset(
+        event="PreToolUse",
+        matcher="Bash",
+        script="guard.sh",
+        surfaces=("claude",),
+        content="#!/bin/bash\necho changed\n",
+    )
+    files_b = ClaudeEmitter().emit(_hook_bundle(changed))
+
+    assert files_a[_PROVENANCE_PATH] != files_b[_PROVENANCE_PATH]
